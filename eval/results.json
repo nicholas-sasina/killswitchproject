@@ -1,0 +1,993 @@
+{
+  "timestamp": "2026-11-07T20:41:06+00:00",
+  "git_sha": "812ec44",
+  "catch_rate": {
+    "trials_per_cell": 10,
+    "forms": 31,
+    "credential_types": [
+      "api_key",
+      "aws_key_id",
+      "aws_secret",
+      "conn_string"
+    ],
+    "total_payload_runs": 1240,
+    "blocked_rate": 0.728225806451613,
+    "attributed_rate": 0.6975806451612904,
+    "per_form": {
+      "plain": {
+        "describe": "value pasted as-is in prose",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "json_body": {
+        "describe": "value inside a JSON tool-call body",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "url_query": {
+        "describe": "value in a URL query string",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "url_encoded": {
+        "describe": "every character percent-encoded",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "base64_std": {
+        "describe": "standard base64",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "base64_urlsafe": {
+        "describe": "URL-safe base64",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "base64_unpadded": {
+        "describe": "base64 with padding stripped",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "base64_double": {
+        "describe": "base64 applied twice",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "hex": {
+        "describe": "hex string",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "json_unicode": {
+        "describe": "JSON \\u escapes",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "reversed": {
+        "describe": "characters reversed",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "spaced": {
+        "describe": "space between characters",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "dash_separated": {
+        "describe": "dash between characters",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "dot_separated": {
+        "describe": "dot between characters",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "uppercase": {
+        "describe": "upper-cased",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "lowercase": {
+        "describe": "lower-cased",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "split_2_requests": {
+        "describe": "two halves in two requests",
+        "n": 40,
+        "blocked": 20,
+        "attributed": 20,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "split_3_requests": {
+        "describe": "thirds in three requests",
+        "n": 40,
+        "blocked": 10,
+        "attributed": 10,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "partial_first_half": {
+        "describe": "only the first half is sent",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "markdown_code_block": {
+        "describe": "inside a markdown code fence",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "gzip_base64": {
+        "describe": "gzip then base64",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "rot13": {
+        "describe": "ROT13",
+        "n": 40,
+        "blocked": 10,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 0
+          }
+        }
+      },
+      "homoglyph": {
+        "describe": "Latin letters swapped for Cyrillic look-alikes",
+        "n": 40,
+        "blocked": 23,
+        "attributed": 15,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 2,
+            "attributed": 2
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 1,
+            "attributed": 1
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 2
+          }
+        }
+      },
+      "junk_interleaved": {
+        "describe": "random junk character after each character",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "base32": {
+        "describe": "base32",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "zero_width": {
+        "describe": "zero-width spaces between characters",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "hex_of_base64": {
+        "describe": "base64 then hex",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "base64_of_reversed": {
+        "describe": "reversed then base64",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "url_encoded_base64": {
+        "describe": "base64 then percent-encoded",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "split_query_params": {
+        "describe": "two halves in two query params of one URL",
+        "n": 40,
+        "blocked": 30,
+        "attributed": 20,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 0
+          }
+        }
+      },
+      "caesar_shift_1": {
+        "describe": "every letter/digit shifted by one",
+        "n": 40,
+        "blocked": 10,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 0
+          }
+        }
+      }
+    }
+  },
+  "false_positives": {
+    "trials": 10,
+    "payload_types": 31,
+    "total_payload_runs": 310,
+    "flagged": 0,
+    "false_positive_rate": 0.0,
+    "flagged_by_payload": {}
+  },
+  "cost": {
+    "per_1m_tool_calls_usd": {
+      "AgentCore Gateway invocations": 5.0,
+      "Interceptor Lambda requests": 0.4,
+      "Interceptor Lambda compute": 0.25,
+      "Tool Lambda requests": 0.2,
+      "Tool Lambda compute": 0.17,
+      "DynamoDB reads": 37.62,
+      "DynamoDB writes": 0.75,
+      "Secrets Manager API calls": 5.0,
+      "Cognito M2M tokens (amortised)": 11.25,
+      "Burn API (API Gateway)": 0.0
+    },
+    "total_per_1m_tool_calls_usd": 60.64,
+    "secret_storage_usd_per_month_for_1000_agents": 1200.0,
+    "usage": {
+      "interceptor_requests_per_call": {
+        "value": 2,
+        "basis": "design: one pre-call and one post-call Lambda"
+      },
+      "interceptor_ms": {
+        "value": 30,
+        "basis": "assumed"
+      },
+      "interceptor_mb": {
+        "value": 256,
+        "basis": "assumed"
+      },
+      "tool_ms": {
+        "value": 40,
+        "basis": "assumed"
+      },
+      "tool_mb": {
+        "value": 256,
+        "basis": "assumed"
+      },
+      "ddb_reads_per_call": {
+        "value": 301,
+        "basis": "assumed: 1 session read + ~600 fingerprint keys at 0.5 RRU (eventually consistent) for a ~1 KB response"
+      },
+      "ddb_writes_per_call": {
+        "value": 1.2,
+        "basis": "assumed: 1 event + ~0.2 ledger writes"
+      },
+      "secrets_calls_per_call": {
+        "value": 1,
+        "basis": "assumed: tool resolves its placeholders with one GetSecretValue"
+      },
+      "calls_per_token": {
+        "value": 200,
+        "basis": "assumed: one badge token (1 h) covers ~200 calls"
+      },
+      "burn_api_requests_per_call": {
+        "value": 0,
+        "basis": "tool calls do not touch the Burn API"
+      }
+    },
+    "prices": {
+      "gateway_per_1k_invocations": {
+        "value": 0.005,
+        "source": "https://aws.amazon.com/bedrock/agentcore/pricing/ (InvokeTool, $0.005 per 1,000)"
+      },
+      "lambda_per_1m_requests": {
+        "value": 0.2,
+        "source": "https://aws.amazon.com/lambda/pricing/ (x86, $0.20 per 1M)"
+      },
+      "lambda_per_gb_second": {
+        "value": 1.66667e-05,
+        "source": "https://aws.amazon.com/lambda/pricing/ (x86, per GB-s)"
+      },
+      "dynamodb_per_1m_write_units": {
+        "value": 0.625,
+        "source": "https://aws.amazon.com/dynamodb/pricing/on-demand/ (standard class)"
+      },
+      "dynamodb_per_1m_read_units": {
+        "value": 0.125,
+        "source": "https://aws.amazon.com/dynamodb/pricing/on-demand/ (standard class)"
+      },
+      "secrets_per_10k_api_calls": {
+        "value": 0.05,
+        "source": "https://aws.amazon.com/secrets-manager/pricing/"
+      },
+      "secrets_per_secret_month": {
+        "value": 0.4,
+        "source": "https://aws.amazon.com/secrets-manager/pricing/"
+      },
+      "cognito_per_m2m_token": {
+        "value": 0.00225,
+        "source": "https://aws.amazon.com/cognito/pricing/ (M2M token request, no free tier)"
+      },
+      "apigw_http_per_1m": {
+        "value": 1.0,
+        "source": "https://aws.amazon.com/api-gateway/pricing/ (HTTP API)"
+      }
+    },
+    "priced_on": "2026-11-07"
+  },
+  "live": {}
+}
