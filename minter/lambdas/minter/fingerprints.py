@@ -21,7 +21,7 @@ def register(secret_ref: str, owner: str, secret_type: str, version: int, parts,
 
     parts: (part_name, text, exact, shingles). Only the secret bits are
     fingerprinted: e.g. for an api key the random body, not the public prefix.
-    extra: more safe attributes for every row (canaries add canary/session_id/instance_id).
+    extra: more safe attributes for every row (canaries add canary and session_id).
     """
     hmac_key = key()
     rows = {}

@@ -40,7 +40,6 @@ _EVIDENCE_FIELDS = {
     "event_id": re.compile(r"^evt_[0-9A-HJKMNP-TV-Z]{26}$"),
     "agent_id": re.compile(r"^(agent-[a-z0-9-]{1,40}|system)$"),
     "session_id": SESSION_ID_RE,
-    "instance_id": SESSION_ID_RE,
     "tool": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"),
     "ts": re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$"),
     "fingerprint": re.compile(r"^[0-9a-f]{64}$"),

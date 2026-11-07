@@ -7,7 +7,7 @@ Trusted-signal policy (contracts/README.md). Contain automatically only if ALL h
   1. the ref is a registered canary that maps to exactly one agent + session;
   2. that agent's exposure ledger has the canary, and no other agent's does
      (it was really delivered to that session, and only there);
-  3. the session row exists, belongs to the same agent (and instance), and is active.
+  3. the session row (the instance) exists, belongs to the same agent, and is active.
 Otherwise the incident is recorded and flagged for a human. Nothing broader than
 the one session is ever revoked, so a copied canary replayed on purpose can at
 worst contain the single session that canary was planted in.
@@ -17,7 +17,8 @@ Containment:
      caller can win it, so concurrent or repeated incidents contain once.
   b. Delete its badge client (the gateway already refuses it after step a).
   c. Rotate the agent's own credentials, but only if no other active session
-     uses them. Otherwise rotation is deferred and reported; never widened.
+     uses them (since #38 every instance has its own agent id, so normally none does).
+     Otherwise rotation is deferred and reported; never widened.
   d. Flag the shared credentials it saw (`seen`, or higher from blocked attempts).
 A failed rotation leaves the session revoked and reports containment incomplete.
 """
@@ -78,21 +79,21 @@ def _revoke_if_active(session_id: str, event_id: str | None) -> bool:
         return False
 
 
-def _not_contained(ref: str, agent_id: str, session_id, instance_id, reason: str) -> dict:
+def _not_contained(ref: str, agent_id: str, session_id, reason: str) -> dict:
     db.write_event(
         agent_id=agent_id if names.is_agent_id(agent_id or "") else "system", source="burn", action="flagged",
-        session_id=session_id, instance_id=instance_id, secret_ref=ref, secret_type="other",
+        session_id=session_id, secret_ref=ref, secret_type="other",
         detail=f"canary incident not contained: {reason}; review",
     )
     return {"outcome": "not_actionable", "reason": reason, "agent_id": agent_id, "session_id": session_id,
-            "instance_id": instance_id, "rotated": [], "flagged": []}
+            "rotated": [], "flagged": []}
 
 
 def _check_attribution(ref: str, row: dict | None):
-    """Return (agent_id, session, instance_id, ledger_row) or a reason string."""
+    """Return (agent_id, session, ledger_row) or a reason string."""
     if row is None:
         return "not a registered canary"
-    agent_id, session_id, instance_id = row.get("owner_agent_id"), row.get("session_id"), row.get("instance_id")
+    agent_id, session_id = row.get("owner_agent_id"), row.get("session_id")
     try:
         if names.canary_secret_ref(agent_id, session_id) != ref:
             return "canary row does not match its session"
@@ -110,9 +111,7 @@ def _check_attribution(ref: str, row: dict | None):
         return "session unknown"
     if session.get("agent_id") != agent_id:
         return "session belongs to a different agent"
-    if instance_id and session.get("instance_id") not in (None, instance_id):
-        return "session belongs to a different instance"
-    return agent_id, session, instance_id, exposure
+    return agent_id, session, exposure
 
 
 def handle_incident(incident: dict) -> dict:
@@ -125,27 +124,24 @@ def handle_incident(incident: dict) -> dict:
     checked = _check_attribution(ref, row)
     if isinstance(checked, str):
         row = row or {}
-        return _not_contained(ref, row.get("owner_agent_id"), row.get("session_id"), row.get("instance_id"),
-                              checked)
-    agent_id, session, instance_id, exposure = checked
+        return _not_contained(ref, row.get("owner_agent_id"), row.get("session_id"), checked)
+    agent_id, session, exposure = checked
     session_id = session["session_id"]
 
     if not _revoke_if_active(session_id, event_id):
         return {"outcome": "already_contained", "reason": "session is no longer active", "agent_id": agent_id,
-                "session_id": session_id, "instance_id": instance_id, "rotated": [], "flagged": []}
+                "session_id": session_id, "rotated": [], "flagged": []}
     revoked_ms = _ms(start)
     try:
         badges.delete_badge(session["client_id"])
     except Exception as exc:  # already revoked in DynamoDB; a leftover client is harmless
         print(f"delete_badge failed for {session_id}: {type(exc).__name__}")
     db.write_event(
-        agent_id=agent_id, source="burn", action="revoked", session_id=session_id, instance_id=instance_id,
-        secret_ref=ref, detail=(f"canary incident {event_id}: session revoked; canary first read via "
+        agent_id=agent_id, source="burn", action="revoked", session_id=session_id, secret_ref=ref, detail=(f"canary incident {event_id}: session revoked; canary first read via "
                                 f"{exposure.get('via') or 'unknown tool'} at {exposure.get('first_seen') or '?'}")[:500],
     )
 
-    evidence = {k: v for k, v in {"event_id": event_id, "session_id": session_id,
-                                  "instance_id": instance_id}.items() if v}
+    evidence = {k: v for k, v in {"event_id": event_id, "session_id": session_id}.items() if v}
     exposed = burn.exposed_refs(agent_id)
     sharing = [s["session_id"] for s in db.sessions_for_agent(agent_id)
                if s.get("status") == "active" and s["session_id"] != session_id]
@@ -155,24 +151,21 @@ def handle_incident(incident: dict) -> dict:
         # break those. Revoke only, report the gap, flag what it saw.
         outcome = "contained_rotation_deferred"
         db.write_event(agent_id=agent_id, source="burn", action="flagged", session_id=session_id,
-                       instance_id=instance_id,
                        detail=f"rotation deferred: {len(sharing)} other active session(s) use the same "
-                              f"credentials of {agent_id}; needs instance-scoped credentials")
-        flagged = burn.flag_seen(agent_id, exposed, evidence, session_id=session_id, instance_id=instance_id)
+                              f"credentials of {agent_id}; each instance needs its own agent id")
+        flagged = burn.flag_seen(agent_id, exposed, evidence, session_id=session_id)
     else:
         try:
             result = minter_client.call("POST", f"/agents/{agent_id}/rotate",
                                         {"exposed_refs": exposed, "evidence": evidence})
-            rotated, flagged = burn.record_outcomes(agent_id, result, session_id=session_id,
-                                                    instance_id=instance_id)
+            rotated, flagged = burn.record_outcomes(agent_id, result, session_id=session_id)
         except minter_client.MinterError:
             outcome = "contained_rotation_failed"
             db.write_event(agent_id=agent_id, source="burn", action="flagged", session_id=session_id,
-                           instance_id=instance_id,
                            detail="rotation failed: session stays revoked, credentials NOT rotated; "
                                   "containment incomplete, burn the agent manually")
     rotated_ms = _ms(start)
     burn.flag_blocked_attempts(agent_id)
-    return {"outcome": outcome, "agent_id": agent_id, "session_id": session_id, "instance_id": instance_id,
+    return {"outcome": outcome, "agent_id": agent_id, "session_id": session_id,
             "rotated": rotated, "flagged": flagged, "rotation_deferred_for": sharing,
             "timings_ms": {"revoked": revoked_ms, "rotation_done": rotated_ms}}

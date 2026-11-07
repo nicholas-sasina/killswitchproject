@@ -30,7 +30,7 @@ def rotate(agent_id: str, exposed_refs: list[str], evidence: dict | None = None)
 
     Canaries the agent owns are skipped: they never authenticate, so there is nothing to rotate,
     and they must keep their value so a later presentation is still attributed.
-    evidence: optional safe ids (event_id, session_id, instance_id) of what caused the burn.
+    evidence: optional safe ids (event_id, session_id) of what caused the burn.
     """
     evidence = flags.clean_evidence({**(evidence or {}), "source": "burn", "agent_id": agent_id})
     rotated = []

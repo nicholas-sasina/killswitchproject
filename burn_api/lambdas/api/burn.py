@@ -37,7 +37,7 @@ def _flag_event(agent_id: str, ref: str, level: str | None, **ids) -> None:
 
 
 def record_outcomes(agent_id: str, result: dict, **ids) -> tuple[list[str], list[str]]:
-    """Write rotated/flagged events for a minter rotate result. ids: session_id / instance_id."""
+    """Write rotated/flagged events for a minter rotate result. ids: e.g. session_id."""
     rotated, flagged = result.get("rotated", []), result.get("flagged", [])
     levels = result.get("flag_levels") or {}
     for ref in rotated:

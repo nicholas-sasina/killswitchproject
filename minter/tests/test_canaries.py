@@ -10,9 +10,9 @@ import canaries
 import minter_app
 import randomness
 from burn_contracts import fingerprint as fp
-from burn_contracts.names import canary_secret_ref
+from burn_contracts.names import canary_secret_ref, instance_agent_id
 
-AGENT = "agent-worker"
+AGENT = instance_agent_id("worker", "3fa91c")  # one instance of role worker
 
 
 def call(method, path, body=None, query=None):
@@ -20,9 +20,8 @@ def call(method, path, body=None, query=None):
     return resp["statusCode"], resp["body"]
 
 
-def issue(session_id, agent=AGENT, instance_id=None):
-    body = {"agent_id": agent, **({"instance_id": instance_id} if instance_id else {})}
-    status, out = call("POST", f"/sessions/{session_id}/canary", body)
+def issue(session_id, agent=AGENT):
+    status, out = call("POST", f"/sessions/{session_id}/canary", {"agent_id": agent})
     assert status == 200, out
     return out
 
@@ -36,23 +35,23 @@ def hmac_key():
 
 
 def test_session_gets_one_canary_stored_only_as_secret_and_fingerprints(tables):  # 1
-    meta = issue("sess_aaaa1111", instance_id="inst-01")
+    meta = issue("sess_aaaa1111")
     ref = canary_secret_ref(AGENT, "sess_aaaa1111")
     assert meta["canary_ref"] == ref and meta["session_id"] == "sess_aaaa1111"
-    assert (meta["agent_id"], meta["instance_id"], meta["version"], meta["status"]) == (AGENT, "inst-01", 1, "active")
+    assert (meta["agent_id"], meta["version"], meta["status"]) == (AGENT, 1, "active")
+    assert "instance_id" not in meta  # the session id is the instance's identity
     assert meta["issued_at"].endswith("Z")
     value = value_of(ref)
     assert re.fullmatch(r"mpk_live_[A-Za-z0-9]{32}", value)  # indistinguishable from a real api_key
     assert value not in json.dumps(meta)  # the API never returns the value
 
     row = tables["credentials"].get_item(Key={"secret_ref": ref})["Item"]
-    assert (row["secret_type"], row["owner_agent_id"], row["session_id"], row["instance_id"]) == (
-        "canary", AGENT, "sess_aaaa1111", "inst-01")
+    assert (row["secret_type"], row["owner_agent_id"], row["session_id"]) == ("canary", AGENT, "sess_aaaa1111")
     assert value not in json.dumps(row, default=str)
 
     exact = tables["fingerprints"].get_item(Key={"fingerprint": fp.fingerprint(value, hmac_key())})["Item"]
     assert exact["canary"] is True and exact["secret_type"] == "other" and exact["kind"] == "exact"
-    assert (exact["session_id"], exact["instance_id"], exact["owner_agent_id"]) == ("sess_aaaa1111", "inst-01", AGENT)
+    assert (exact["session_id"], exact["owner_agent_id"]) == ("sess_aaaa1111", AGENT)
     rows = [r for r in tables["fingerprints"].scan()["Items"] if r["secret_ref"] == ref]
     assert {r["kind"] for r in rows} == {"exact", "shingle"} and all(r["canary"] for r in rows)
     assert not any(value in json.dumps(r, default=str) for r in rows)
@@ -60,7 +59,7 @@ def test_session_gets_one_canary_stored_only_as_secret_and_fingerprints(tables):
 
 def test_two_sessions_of_the_same_role_get_different_canaries():  # 2
     a, b = issue("sess_one"), issue("sess_two")
-    c = issue("sess_three", agent="agent-worker-2")  # another worker of the same role
+    c = issue("sess_three", agent=instance_agent_id("worker", "0b7c2e"))  # another worker instance
     refs = {a["canary_ref"], b["canary_ref"], c["canary_ref"]}
     assert len(refs) == 3 and len({value_of(r) for r in refs}) == 3
 
@@ -146,10 +145,13 @@ def test_canary_seen_by_another_agent_is_not_flagged():
     assert result["flagged"] == []
 
 
-def test_same_ref_is_never_handed_to_a_different_holder():
-    issue("sess_owned", instance_id="inst-01")
-    status, body = call("POST", "/sessions/sess_owned/canary", {"agent_id": AGENT, "instance_id": "inst-02"})
-    assert status == 400 and "instance" in body["error"]
+def test_same_ref_is_never_handed_to_a_different_holder(tables):
+    meta = issue("sess_owned")
+    tables["credentials"].update_item(  # a (hypothetical) hash collision with another session's row
+        Key={"secret_ref": meta["canary_ref"]}, UpdateExpression="SET session_id = :s",
+        ExpressionAttributeValues={":s": "sess_other"})
+    status, body = call("POST", "/sessions/sess_owned/canary", {"agent_id": AGENT})
+    assert status == 400 and "different session" in body["error"]
 
 
 def test_delete_for_agent_is_reset_only_and_complete(tables):
@@ -167,9 +169,7 @@ def test_delete_for_agent_is_reset_only_and_complete(tables):
     ("/sessions/sess_ok/canary", {"agent_id": "Bad_Agent"}),
     ("/sessions/sess_ok/canary", {}),
     ("/sessions/has space/canary", {"agent_id": AGENT}),
-    ("/sessions/sess_ok/canary", {"agent_id": AGENT, "instance_id": "bad/inst"}),
     ("/sessions/sess_ok/canary", {"agent_id": 7}),
-    ("/sessions/sess_ok/canary", {"agent_id": AGENT, "instance_id": 7}),
 ])
 def test_bad_canary_requests_are_400(path, body):
     assert call("POST", path, body)[0] == 400

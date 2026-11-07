@@ -11,8 +11,9 @@ import canary_trip
 import dispatch
 import minter_app
 import provider_app
+from burn_contracts.names import instance_agent_id
 
-AGENT, SESSION = "agent-worker", "sess_0123456789abcdef"
+AGENT, SESSION = instance_agent_id("worker", "3fa91c"), "sess_0123456789abcdef"
 
 
 def minter(method, path, body=None):
@@ -34,7 +35,7 @@ def dispatched(monkeypatch):
 
 @pytest.fixture
 def canary():
-    meta = minter("POST", f"/sessions/{SESSION}/canary", {"agent_id": AGENT, "instance_id": "inst-07"})
+    meta = minter("POST", f"/sessions/{SESSION}/canary", {"agent_id": AGENT})
     value = boto3.client("secretsmanager").get_secret_value(SecretId=meta["canary_ref"])["SecretString"]
     return meta, value
 
@@ -59,8 +60,8 @@ def test_presenting_creates_one_attributed_canary_used_event(canary, tables, dis
     events = tables["events"].scan()["Items"]
     assert len(events) == 1
     e = events[0]
-    assert (e["source"], e["action"], e["agent_id"], e["session_id"], e["instance_id"]) == (
-        "provider", "canary_used", AGENT, SESSION, "inst-07")
+    assert (e["source"], e["action"], e["agent_id"], e["session_id"]) == ("provider", "canary_used", AGENT, SESSION)
+    assert "instance_id" not in e
     assert e["secret_ref"] == meta["canary_ref"] and e["owner_agent_id"] == AGENT and len(e["fingerprint"]) == 64
     assert "198.51.100.7" in e["detail"]
     assert value not in json.dumps(events, default=str)

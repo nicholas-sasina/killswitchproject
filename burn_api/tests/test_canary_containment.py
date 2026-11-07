@@ -33,11 +33,12 @@ def stack(monkeypatch):
 
 @pytest.fixture
 def fleet(stack):
-    """20 workers of one role, one live session (instance) each, each with its own canary."""
-    return {a: stack.start_session(a, instance_id=f"inst-{a[-2:]}") for a in harness.worker_ids(WORKERS)}
+    """20 instances of role worker (own agent id and session each), each with its own canary."""
+    return {a: stack.start_session(a) for a in harness.worker_ids(WORKERS)}
 
 
-VICTIM = "agent-worker-07"
+WORKER_IDS = harness.worker_ids(WORKERS)  # agent-worker-000001 ...
+VICTIM = WORKER_IDS[6]
 
 
 def leak_and_present(stack, session):
@@ -70,7 +71,7 @@ def test_leaked_canary_contains_exactly_that_instance(stack, fleet):  # 6, 9, 10
     assert (status, body) == (401, {"error": "invalid key"})
 
     [used] = stack.events("canary_used")
-    assert (used["agent_id"], used["session_id"], used["instance_id"]) == (VICTIM, victim["session_id"], "inst-07")
+    assert (used["agent_id"], used["session_id"]) == (VICTIM, victim["session_id"])
     [result] = stack.incidents
     assert result["outcome"] == "contained" and result["session_id"] == victim["session_id"]
     assert result["rotated"] == [f"burn/{VICTIM}/api_key", f"burn/{VICTIM}/aws_key"]
@@ -166,9 +167,9 @@ def test_canary_never_delivered_is_recorded_not_contained(stack, fleet):  # 15
 def test_canary_that_reached_two_agents_is_ambiguous(stack, fleet):  # 15
     ref = fleet[VICTIM]["canary"]["canary_ref"]
     stolen = stack.read_canary(fleet[VICTIM])
-    stack.expose("agent-worker-08", ref)  # inherited via send_message
+    stack.expose(WORKER_IDS[7], ref)  # inherited via send_message
     stack.present(stolen)
-    assert stack.incidents[0]["outcome"] == "not_actionable" and "agent-worker-08" in stack.incidents[0]["reason"]
+    assert stack.incidents[0]["outcome"] == "not_actionable" and WORKER_IDS[7] in stack.incidents[0]["reason"]
     _no_one_revoked(stack, fleet)
 
 
@@ -176,7 +177,7 @@ def test_session_mismatch_never_contains(stack, fleet):  # 15
     stolen = stack.read_canary(fleet[VICTIM])
     stack.table("burn-sessions").update_item(
         Key={"session_id": fleet[VICTIM]["session_id"]}, UpdateExpression="SET agent_id = :a",
-        ExpressionAttributeValues={":a": "agent-worker-09"})
+        ExpressionAttributeValues={":a": WORKER_IDS[8]})
     stack.present(stolen)
     assert stack.incidents[0]["outcome"] == "not_actionable"
     assert stack.session_status(fleet[VICTIM]["session_id"]) == "active"
@@ -184,8 +185,8 @@ def test_session_mismatch_never_contains(stack, fleet):  # 15
 
 
 @pytest.mark.parametrize("payload", [
-    {"secret_ref": "burn/agent-worker-07/api_key"},  # a real key's ref is not a canary
-    {"secret_ref": "burn/agent-worker-07/canary_" + "0" * 24},  # well-formed, never issued
+    {"secret_ref": f"burn/{VICTIM}/api_key"},  # a real key's ref is not a canary
+    {"secret_ref": f"burn/{VICTIM}/canary_" + "0" * 24},  # well-formed, never issued
     {"secret_ref": None}, "junk",
 ])
 def test_forged_or_malformed_incidents_never_contain(stack, fleet, payload):  # 15
@@ -206,19 +207,21 @@ def test_incident_cannot_be_triggered_through_the_http_api(stack, fleet):
     _no_one_revoked(stack, fleet)
 
 
-def test_instances_sharing_an_agents_credentials_defer_rotation(stack):  # 9, 10, 15
-    """Multi-instance roles before instance-scoped credentials: never widen to the agent."""
-    first = stack.start_session("agent-worker-01", instance_id="inst-a")
-    second = stack.add_instance_session("agent-worker-01", "inst-b")
-    third = stack.add_instance_session("agent-worker-01", "inst-c")
-    old_key = stack.secret("burn/agent-worker-01/api_key")
+def test_sessions_sharing_an_agents_credentials_defer_rotation(stack):  # 9, 10, 15
+    """Guard: if live sessions ever share one agent id (#38 gives each instance its own), revoke only
+    the one whose canary leaked and never rotate credentials the others still use."""
+    agent = WORKER_IDS[0]
+    first = stack.start_session(agent)
+    second = stack.add_sibling_session(agent)
+    third = stack.add_sibling_session(agent)
+    old_key = stack.secret(f"burn/{agent}/api_key")
     leak_and_present(stack, second)
     [result] = stack.incidents
-    assert result["outcome"] == "contained_rotation_deferred" and result["instance_id"] == "inst-b"
+    assert result["outcome"] == "contained_rotation_deferred" and result["session_id"] == second["session_id"]
     assert sorted(result["rotation_deferred_for"]) == sorted([first["session_id"], third["session_id"]])
     assert stack.session_status(second["session_id"]) == "revoked"
     assert stack.session_status(first["session_id"]) == stack.session_status(third["session_id"]) == "active"
-    assert stack.secret("burn/agent-worker-01/api_key") == old_key and stack.present(old_key)[0] == 200
+    assert stack.secret(f"burn/{agent}/api_key") == old_key and stack.present(old_key)[0] == 200
     assert any("rotation deferred" in e["detail"] for e in stack.events("flagged"))
 
 

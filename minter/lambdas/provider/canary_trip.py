@@ -73,7 +73,7 @@ def _event(row: dict, digest: str, source_ip: str | None, detail: str) -> dict:
     owner = row.get("owner_agent_id")
     return make_event(
         agent_id=owner if is_agent_id(owner) else "system", source="provider", action="canary_used",
-        session_id=row.get("session_id"), instance_id=row.get("instance_id"),
+        session_id=row.get("session_id"),
         secret_ref=row["secret_ref"], fingerprint=digest, secret_type="other",
         owner="agent" if is_agent_id(owner) else "unknown", owner_agent_id=owner if is_agent_id(owner) else None,
         detail=detail + (f" (from {source_ip})" if source_ip else ""),

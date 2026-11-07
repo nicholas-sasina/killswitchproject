@@ -73,7 +73,9 @@ def create_tables() -> None:
 
 
 def worker_ids(count: int) -> list[str]:
-    return [f"agent-worker-{i:02d}" for i in range(1, count + 1)]
+    """Instances of role worker, each with its own agent id as since #38 (agent-worker-<6 hex>)."""
+    from burn_contracts.names import instance_agent_id
+    return [instance_agent_id("worker", f"{i:06x}") for i in range(1, count + 1)]
 
 
 class Stack:
@@ -126,23 +128,23 @@ class Stack:
         out = handler.handler(event)
         return out["statusCode"], json.loads(out["body"])
 
-    def start_session(self, agent_id: str, instance_id: str | None = None) -> dict:
+    def start_session(self, agent_id: str) -> dict:
         """POST /sessions, then the canary hook the session owner will call (SIMULATED)."""
         status, session = self.api("POST", "/sessions", {"agent_id": agent_id})
         assert status == 201, session
-        body = {"agent_id": agent_id, **({"instance_id": instance_id} if instance_id else {})}
-        session["canary"] = self.minter_call("POST", f"/sessions/{session['session_id']}/canary", body)
+        session["canary"] = self.minter_call("POST", f"/sessions/{session['session_id']}/canary",
+                                             {"agent_id": agent_id})
         return session
 
-    def add_instance_session(self, agent_id: str, instance_id: str) -> dict:
-        """A second live session of the same agent, as multi-instance roles will create (SIMULATED)."""
+    def add_sibling_session(self, agent_id: str) -> dict:
+        """Another live session on the SAME agent id. #38 gives every instance its own agent id, so
+        this should not happen; it exercises the guard that never widens a canary burn (SIMULATED)."""
         session_id = "sess_" + secrets.token_hex(8)
         self.table("burn-sessions").put_item(Item={
-            "session_id": session_id, "agent_id": agent_id, "instance_id": instance_id,
+            "session_id": session_id, "agent_id": agent_id,
             "client_id": "client-" + secrets.token_hex(4), "status": "active", "tools": [], "send_to": [],
             "created_at": "2026-11-07T00:00:00+00:00"})
-        canary = self.minter_call("POST", f"/sessions/{session_id}/canary",
-                                  {"agent_id": agent_id, "instance_id": instance_id})
+        canary = self.minter_call("POST", f"/sessions/{session_id}/canary", {"agent_id": agent_id})
         return {"session_id": session_id, "agent_id": agent_id, "canary": canary}
 
     def secret(self, ref: str, stage: str = "AWSCURRENT") -> str:
@@ -206,7 +208,7 @@ def run_demo(workers: int) -> dict:
     with mock_aws():
         stack = Stack(workers=workers)
         stack.wire(setattr)
-        sessions = {a: stack.start_session(a, instance_id=f"inst-{a[-2:]}") for a in stack.agents}
+        sessions = {a: stack.start_session(a) for a in stack.agents}
         victim = sorted(sessions)[len(sessions) // 3]
         old_key = stack.secret(f"burn/{victim}/api_key")
         stolen = attacker_decode(leak_gzip_base64(stack.read_canary(sessions[victim])))

@@ -51,7 +51,7 @@ def _route(method: str, path: str, body: dict, query: dict):
         return _agent_route(method, match["agent_id"], match["action"], body, query)
     match = SESSION_CANARY_PATH.match(path)
     if match and method == "POST":
-        return canaries.issue(body.get("agent_id", ""), match["session_id"], body.get("instance_id"))
+        return canaries.issue(body.get("agent_id", ""), match["session_id"])
     if match and method == "GET":
         return canaries.get(query.get("agent_id", ""), match["session_id"])
     if path == "/flags" and method == "POST":

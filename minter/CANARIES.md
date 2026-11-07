@@ -29,7 +29,7 @@ nothing is revoked:
 1. The ref is a registered canary bound to exactly one agent + session (re-read from `burn-credentials`).
 2. That agent's ledger has the canary, and no other agent's does (a canary inherited through
    `send_message` is ambiguous).
-3. The session exists, belongs to that agent (and instance, when both sides know it), and is `active`.
+3. The session (since #38, the instance's identity) exists, belongs to that agent, and is `active`.
 
 The worst a deliberately replayed canary can do is contain the one session it was planted in. That
 session is the only one that ever read it. Repeated presentations only increment a counter, so
@@ -38,22 +38,21 @@ they cannot cause repeated rotations or flood the event feed.
 ## Session / instance owner (onboarding, swarms, instances)
 
 - **Issue the canary** right after the session id exists (before the session row is written, same as
-  credentials). The call is idempotent, so retry freely:
+  credentials), for every path into `POST /sessions` (`agent_id`, `role` + `enroll_token`,
+  `role` + `parent_session`). The call is idempotent, so retry freely:
   ```python
-  minter_client.call("POST", f"/sessions/{session_id}/canary",
-                     {"agent_id": agent_id, "instance_id": instance_id})  # instance_id optional
+  minter_client.call("POST", f"/sessions/{session_id}/canary", {"agent_id": agent_id})
   ```
-  Response: `{canary_ref, agent_id, session_id, instance_id, version, status, issued_at}`, never the value.
-- **Session rows**: put `instance_id` on the `burn-sessions` row. The canary path checks that it matches.
+  `agent_id` is the instance's own id (`names.instance_agent_id(role, suffix)`). Response:
+  `{canary_ref, agent_id, session_id, version, status, issued_at}`, never the value.
 - **Containment primitive used**: a conditional `UpdateItem` on `burn-sessions`
   (`status: active -> revoked`, `revoked_by = "canary:<event_id>"`). If sessions/instances move to
   another table, please expose `revoke_session_if_active(session_id) -> bool` with the same
   guarantee (exactly one caller gets `True`).
-- **Instance-scoped credentials**: today credentials are per `agent_id`. If several live instances
-  share one `agent_id`, the canary path revokes only the compromised instance and **defers rotation**
-  (`contained_rotation_deferred`), because rotating would break the siblings. Full containment for
-  shared-agent instances needs per-instance credentials, either one `agent_id` per instance or
-  per-instance secret refs.
+- **Per-instance credentials**: since #38 every instance has its own agent id, so rotating that agent's
+  credentials touches only the compromised instance. As a guard, if two live sessions ever share one
+  agent id, the canary path revokes only the leaking session and **defers rotation**
+  (`contained_rotation_deferred`) rather than break the other session.
 - **Reset**: call `DELETE /agents/{agent_id}/canaries` from the reset script. Burns and session exits
   keep canaries so they stay attributable.
 
@@ -101,9 +100,10 @@ Optional env on the provider: `BURN_API_FUNCTION`, `MINTER_FUNCTION` (defaults `
 
 ## Dashboard owner
 
-- `canary_used` (`source=provider`): `agent_id`, `session_id`, `instance_id`, `secret_ref` (the canary),
+- `canary_used` is in `EventAction` and the EventFeed map (added in #40). Fields (`source=provider`):
+  `agent_id`, `session_id`, `secret_ref` (the canary),
   `fingerprint`, and the caller IP in `detail`.
-- Follow-ups from `source=burn`, all with the same `session_id`/`instance_id`: `revoked` (the detail
+- Follow-ups from `source=burn`, all with the same `session_id`: `revoked` (the detail
   names the incident event id and where the canary was read), `rotated`, and `flagged` with `flag_level`.
 - `flagged` with no `secret_ref` and a detail starting `rotation deferred` / `rotation failed` /
   `canary incident not contained` means containment is incomplete. Show it as such.
