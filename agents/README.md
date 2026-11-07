@@ -21,7 +21,7 @@ Scenarios (agents, tickets, files, customers) live in YAML, so a new scenario ne
 | `burn_agents/loop.py` | Ticket and inbox loops, stop-on-revoke |
 | `burn_agents/turn.py` | One Strands agent turn, refusal watcher, local tools |
 | `burn_agents/cloud.py` | `check_cloud_access`, `check_provider` (use the agent's own keys) |
-| `docker-compose.yml` | Proxy, sink and networks; agent services are generated per scenario into `.run/` |
+| `docker-compose.yml` | Proxy, sink and networks (built from `.run/detection-build`, proxy credentials from `.run/proxy.env`); agent services are generated per scenario into `.run/` |
 | `scripts/` | `load_scenario.py`, `reset.py`, `run_demo.py`, `mock_badge_issuer.py` (dev) |
 
 ## How to test it
@@ -32,7 +32,7 @@ uv run pytest -q                      # schema, token cache, loop/revoke logic, 
 uv run python scripts/run_demo.py --scenario scenarios/support-desk.yaml          # needs the stacks deployed
 uv run python scripts/run_demo.py --scenario scenarios/billing-ops.yaml --step    # presenter mode
 ```
-`run_demo.py` resets demo state, loads the scenario, starts one session per agent, writes
+`run_demo.py` prepares the proxy build context and the proxy's own credentials (no host AWS credentials enter any container), resets demo state, loads the scenario, starts one session per agent, writes
 `.run/<agent>.env` (mode 600, gitignored) and starts Docker Compose. In `--step` mode the reader waits;
 press Enter to let it take one ticket, `q` to stop. Against `mocks/mcp_tools_mock.py`, run `scripts/mock_badge_issuer.py` as the token URL (client id = agent id, bearer `mock-<agent_id>`) and set `BURN_API_URL`, `BURN_GATEWAY_URL`
 and `BURN_PROVIDER_URL` to the mock servers; nothing else changes.

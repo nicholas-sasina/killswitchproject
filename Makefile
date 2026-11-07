@@ -67,7 +67,7 @@ proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
 
 leak-test: ## Start the leak-test tool on http://localhost:8787 (a TEST TOOL)
-	cd detection && uv run --python 3.12 --extra leaktest uvicorn leaktest.app:app --host 127.0.0.1 --port 8787 --no-access-log
+	cd detection && BURN_PROXY_CA_CERT=$(CURDIR)/.run/proxy-certs/mitmproxy-ca-cert.pem uv run --python 3.12 --env-file ../.env --extra leaktest uvicorn leaktest.app:app --host 127.0.0.1 --port 8787 --no-access-log
 
 eval: ## Rerun the offline eval and rewrite eval/results.json and eval/RESULTS.md
 	cd eval && uv run python run_offline.py --trials 10
