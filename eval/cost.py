@@ -33,9 +33,26 @@ USAGE = {
 SECRETS_AT_REST = {"agents": 1000, "secrets_per_agent": 3}   # api_key, aws_key, badge
 
 
+def read_sensitivity(candidates: dict, base_read_units: float, measured_fp_units: float, price: float) -> list[dict]:
+    """Cost per 1M calls if the tool output were larger, from the scan's candidate count.
+
+    Only the fingerprint lookups scale with output size (0.5 RRU per requested key); the
+    other reads (session, scenario) are unchanged.
+    """
+    other = base_read_units - measured_fp_units
+    rows = []
+    for name, c in candidates.items():
+        units = c["read_units"] + other
+        rows.append({"output": name, "fingerprints_requested": c["fingerprints_requested"],
+                     "read_units_per_call": round(units, 1), "dynamodb_read_usd_per_1m_calls": round(units * price, 2)})
+    return rows
+
+
 def compute(prices=PRICES, usage=USAGE, measured: dict | None = None) -> dict:
+    measured = measured or {}
     u = {k: v[0] for k, v in usage.items()}
-    u.update(measured or {})
+    # measured values are (value, basis) pairs
+    u.update({k: v[0] for k, v in measured.items()})
     p = {k: v[0] for k, v in prices.items()}
     n = 1_000_000
     gb_s = lambda ms, mb: ms / 1000 * mb / 1024
@@ -56,7 +73,7 @@ def compute(prices=PRICES, usage=USAGE, measured: dict | None = None) -> dict:
         "per_1m_tool_calls_usd": {k: round(v, 2) for k, v in lines.items()},
         "total_per_1m_tool_calls_usd": round(sum(lines.values()), 2),
         "secret_storage_usd_per_month_for_1000_agents": round(at_rest, 2),
-        "usage": {k: {"value": u[k], "basis": usage[k][1] if k not in (measured or {}) else "measured"} for k in u},
+        "usage": {k: {"value": u[k], "basis": measured[k][1] if k in measured else usage[k][1]} for k in u},
         "prices": {k: {"value": v[0], "source": v[1]} for k, v in prices.items()},
         "priced_on": "2026-11-07",
     }

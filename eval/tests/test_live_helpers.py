@@ -22,7 +22,16 @@ def test_report_line_parsing():
 def test_measured_usage_overrides_cost_inputs():
     live = {"gateway_latency": {"burn-gateway-interceptor": {"mean_billed_ms": 30, "memory_mb": 512},
                                 "burn-gateway-tools": {"mean_billed_ms": 20, "memory_mb": 256}}}
-    assert measured_usage(live) == {"interceptor_ms": 30, "interceptor_mb": 512, "tool_ms": 20, "tool_mb": 256}
+    m = measured_usage(live)
+    assert {k: v[0] for k, v in m.items()} == {"interceptor_ms": 30, "interceptor_mb": 512, "tool_ms": 20, "tool_mb": 256}
+
+
+def test_read_sensitivity_scales_only_the_fingerprint_lookups():
+    from cost import read_sensitivity
+    rows = read_sensitivity({"big": {"fingerprints_requested": 1000, "read_units": 500.0}},
+                            base_read_units=16.0, measured_fp_units=13.0, price=0.125)
+    assert rows[0]["read_units_per_call"] == 503.0      # 500 + the 3 units of other reads
+    assert rows[0]["dynamodb_read_usd_per_1m_calls"] == round(503 * 0.125, 2)
 
 
 def test_loadtest_refuses_too_many_calls(monkeypatch):

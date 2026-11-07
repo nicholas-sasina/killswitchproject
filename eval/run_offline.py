@@ -27,6 +27,7 @@ def load_live() -> dict:
         "load_small": read("loadtest_50x5.json"),
         "load_revocation": read("loadtest_40x5.json"),
         "load_1000": read("loadtest_1000x5.json"),
+        "ddb_reads": read("ddb_reads.json"),
     }.items() if v}
     return live
 
@@ -35,11 +36,27 @@ def measured_usage(live: dict) -> dict:
     g = live.get("gateway_latency") or {}
     i, t = g.get("burn-gateway-interceptor"), g.get("burn-gateway-tools")
     m = {}
+    d = live.get("ddb_reads")
+    if d:
+        meas = d["measured"]
+        basis = (f"measured: CloudWatch over the load test (tool {meas['tool']}, ~{meas['output_bytes']} bytes output; "
+                 "account-wide metric, load test dominates)")
+        m["ddb_reads_per_call"] = (meas["read_units_per_call"], basis)
+        m["ddb_writes_per_call"] = (meas["write_units_per_call"], basis)
     if i:
-        m.update(interceptor_ms=i["mean_billed_ms"], interceptor_mb=i["memory_mb"])
+        m.update(interceptor_ms=(i["mean_billed_ms"], "measured: CloudWatch REPORT"), interceptor_mb=(i["memory_mb"], "measured"))
     if t:
-        m.update(tool_ms=t["mean_billed_ms"], tool_mb=t["memory_mb"])
+        m.update(tool_ms=(t["mean_billed_ms"], "measured: CloudWatch REPORT"), tool_mb=(t["memory_mb"], "measured"))
     return m
+
+
+def with_sensitivity(result: dict, live: dict) -> dict:
+    d = live.get("ddb_reads")
+    if d:
+        fp = d["measured"]["tables"]["burn-fingerprints"]["units_per_call"]
+        result["read_sensitivity"] = cost.read_sensitivity(
+            d["candidates"], d["measured"]["read_units_per_call"], fp, cost.PRICES["dynamodb_per_1m_read_units"][0])
+    return result
 
 
 def git_sha() -> str:
@@ -65,6 +82,20 @@ def revoke_note(l: dict) -> str:
         return ""
     return (f"; after revoke: {r['refused_of_those']}/{r['calls_after_revoke_from_revoked']} calls from revoked agents refused, "
             f"{r['succeeded_of_those']}/{r['calls_after_revoke_from_others']} from other agents succeeded")
+
+
+def sensitivity_lines(k: dict) -> list[str]:
+    rows = k.get("read_sensitivity")
+    if not rows:
+        return []
+    out = ["", "DynamoDB reads grow with tool output size, because the response step looks up every candidate "
+           "fingerprint (0.5 read unit per key, found or not). Measured: "
+           f"{k['usage']['ddb_reads_per_call']['value']} read units per call for a tiny output. Larger outputs, "
+           "from the scanner's candidate count:", "", "| Output | Fingerprints requested | Read units per call | DynamoDB reads per 1M calls |",
+           "|---|---|---|---|"]
+    out += [f"| {r['output']} | {r['fingerprints_requested']} | {r['read_units_per_call']} | ${r['dynamodb_read_usd_per_1m_calls']:,.2f} |"
+            for r in rows]
+    return out
 
 
 def live_rows(live: dict) -> list[str]:
@@ -121,6 +152,7 @@ def markdown(r: dict) -> str:
             "## Cost per 1M tool calls", "", "| Line | USD |", "|---|---|"]
     out += [f"| {n} | {v:,.2f} |" for n, v in k["per_1m_tool_calls_usd"].items()]
     out += [f"| **Total** | **{k['total_per_1m_tool_calls_usd']:,.2f}** |", "",
+            *sensitivity_lines(k), "",
             "Sensitivity: if every call were `read_config` with 3 credential placeholders, add $15.00 "
             "(3 GetSecretValue calls per call).", "",
             f"Secret storage for 1,000 agents x 3 secrets: ${k['secret_storage_usd_per_month_for_1000_agents']}/month.", "",
@@ -140,7 +172,7 @@ def main():
         "git_sha": git_sha(),
         "catch_rate": catch_rate.run(args.trials),
         "false_positives": false_positives.run(args.trials),
-        "cost": cost.compute(measured=measured_usage(live)),
+        "cost": with_sensitivity(cost.compute(measured=measured_usage(live)), live),
         "live": live,
     }
     (HERE / "results.json").write_text(json.dumps(results, indent=2) + "\n")

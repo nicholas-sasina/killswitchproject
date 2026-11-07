@@ -16,6 +16,7 @@ It measures `burn_detect` as it is; nothing here tunes a detector.
 
 ## Key files
 - `run_offline.py`: runs the offline checks, merges any live output from `out/`, writes `results.json` and `RESULTS.md`.
+- `ddb_reads.py`: DynamoDB read/write units per call from CloudWatch over a load-test window, plus offline counts of fingerprints requested for larger outputs.
 - `latency_gateway.py`, `latency_scan.py`, `loadtest.py`, `proxy_overhead.py`, `live/`: live and latency measurements.
 - `payloads/`: credential generators, smuggling forms, normal payloads.
 - `catch_rate.py`, `false_positives.py`, `cost.py`.
@@ -44,6 +45,9 @@ Details and the full tables are in `RESULTS.md` and `results.json`. Scale number
   4,593 succeeded, 262 were refused after the revoke, and 145 got HTTP 429 (the Gateway throttled at concurrency 50). No other errors.
   After the revoke, 262 of 281 calls from revoked agents were refused (the other 19 were throttled with 429, none succeeded) and 2,238 of 2,364 calls from the other agents succeeded (the rest were 429).
   All 100 badges, sessions and test events were deleted afterwards and checked.
+
+## DynamoDB reads scale with tool output size
+The Gateway's response step scans each tool output and looks up every candidate fingerprint (0.5 read unit per key, found or not). Measured over the 1,000-agent run with `read_ticket` (a ~36-byte output): 15.9 read units per call (13.3 fingerprints, 2.1 sessions, 0.5 scenario) and 0.07 write units. A 16 KiB config-like output asks for about 18,000 fingerprints, roughly $1,150 per 1M calls in reads alone; see `RESULTS.md`. The CloudWatch metrics are account-wide, so other traffic in the window is included.
 
 ## Cost warning
 Every badge is one Cognito app client and one token request, billed at $0.00225 each, and every call also costs Gateway, Lambda and DynamoDB usage. `loadtest.py` defaults to 50 agents x 5 calls and refuses more than 20,000 calls, but a large run still costs real money (1,000 badges is about $2.25 in token requests alone; the 1,000-agent run above used 100 badges). Run big tests only deliberately.
