@@ -3,6 +3,7 @@
 
 SCENARIO ?= scenarios/support-desk.yaml
 AGENT ?=
+ENCODING ?= random
 CDK := npx -y aws-cdk@2
 export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
@@ -11,7 +12,7 @@ export AWS_DEFAULT_REGION := us-east-1
 PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli
 
 .DEFAULT_GOAL := help
-.PHONY: burn help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks leak-test proxy-env eval teardown
+.PHONY: burn help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval teardown
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -69,8 +70,10 @@ proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)
 
-leak-test: ## Start the leak-test tool on http://localhost:8787 (a TEST TOOL)
-	cd detection && BURN_PROXY_CA_CERT=$(CURDIR)/.run/proxy-certs/mitmproxy-ca-cert.pem uv run --python 3.12 --env-file ../.env --extra leaktest uvicorn leaktest.app:app --host 127.0.0.1 --port 8787 --no-access-log
+exit-check-test: ## Verify the exit check once (AGENT=agent-... ENCODING=base64 optional)
+	@test -n "$(AGENT)" || (echo "usage: make exit-check-test AGENT=agent-... [ENCODING=base64]" && exit 1)
+	@result=$$(cd detection && BURN_PROXY_CA_CERT="$(CURDIR)/.run/proxy-certs/mitmproxy-ca-cert.pem" uv run --python 3.12 --env-file ../.env --extra leaktest python -m leaktest --agent "$(AGENT)" --encoding "$(ENCODING)") && \
+	  printf '%s\n' "$$result" | python3 -c 'import json, sys; result = json.load(sys.stdin); print(("blocked" if result["blocked"] else "allowed") + ": " + (result.get("reason") or "no block reason returned"))'
 
 eval: ## Rerun the offline eval and rewrite eval/results.json and eval/RESULTS.md
 	cd eval && uv run python run_offline.py --trials 10

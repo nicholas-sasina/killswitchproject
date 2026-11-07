@@ -2,24 +2,19 @@ import type {
   BlastRadius,
   BurnRequest,
   BurnResult,
-  EncodingsResponse,
   EventsResponse,
-  LeakTestRequest,
-  LeakTestResult,
   LedgerResponse,
 } from "./contracts";
 
 export interface ApiConfig {
   burnUrl: string;
   demoToken: string;
-  leakTestUrl: string;
 }
 
 export function readConfig(): ApiConfig {
   return {
     burnUrl: import.meta.env.VITE_BURN_API_URL?.trim() ?? "",
     demoToken: import.meta.env.VITE_BURN_DEMO_TOKEN?.trim() ?? "",
-    leakTestUrl: import.meta.env.VITE_LEAKTEST_URL?.trim() ?? "",
   };
 }
 
@@ -32,14 +27,13 @@ export function createApi(
     base: string,
     path: string,
     init: RequestInit = {},
-    authenticated = true,
   ): Promise<T> {
     if (!base)
       throw new Error(
         "API URL is missing. Set it in dashboard/.env.local and restart Vite.",
       );
     const headers = new Headers(init.headers);
-    if (authenticated) headers.set("x-burn-demo-token", config.demoToken);
+    headers.set("x-burn-demo-token", config.demoToken);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
 
@@ -100,23 +94,6 @@ export function createApi(
         config.burnUrl,
         `/burn/${encodeURIComponent(id)}/blast-radius`,
         { signal },
-      ),
-    encodings: (signal?: AbortSignal) =>
-      request<EncodingsResponse>(
-        config.leakTestUrl,
-        "/encodings",
-        { signal },
-        false,
-      ),
-    leakTest: (body: LeakTestRequest) =>
-      request<LeakTestResult>(
-        config.leakTestUrl,
-        "/leak-test",
-        {
-          method: "POST",
-          body: JSON.stringify(body),
-        },
-        false,
       ),
   };
 }

@@ -26,12 +26,11 @@ only.
 
 ## Run the demo
 
-Three terminals:
+Two terminals:
 
 ```bash
 make demo            # resets demo state, mints fresh credentials, starts proxy + agents in Docker
 make dashboard       # http://localhost:5173
-make leak-test       # the leak-test tool on http://localhost:8787 (a test tool, localhost only)
 ```
 
 `make demo-step` holds the reader so the presenter advances one ticket per Enter.
@@ -46,7 +45,7 @@ several minutes late, and the blast-radius view only shows what CloudTrail has r
 |---|---|---|
 | Burn an agent | **Burn** on the agent's card | `make burn ARGS="kill agent-analyst --yes"` |
 | Show the old key is dead | `rejected` event in the stream | `make replay-old-key AGENT=agent-analyst` |
-| Leak test | **Leak test** panel | `POST http://localhost:8787/leak-test` (see `contracts/leaktest.openapi.yaml`) |
+| Exit check | Blocked events from real traffic appear in the stream | Verify on demand with `make exit-check-test AGENT=agent-...` |
 | Blast radius | **Blast radius** panel | `make burn ARGS="blast-radius agent-analyst"` |
 
 Other commands: `make burn ARGS="agents"`, `"events --follow"`, `"ledger agent-analyst"`. The CLI reads `BURN_API_URL` and `BURN_DEMO_TOKEN` from `.env` (written by `make env`).
@@ -82,7 +81,7 @@ cost grows with the agent count; check the count before running one.
 
 | Symptom | Cause and fix |
 |---|---|
-| Dashboard says "API unreachable" | The API accepts browser requests only from `http://localhost:5173`. Open exactly that URL (not `127.0.0.1`). `make dashboard` refuses to start if port 5173 is taken; stop the other process using it (`lsof -iTCP:5173 -sTCP:LISTEN`). |
+| Dashboard says "API unreachable" | The API accepts browser requests only from `http://localhost:5173`. Open exactly that URL (not `127.0.0.1`). `make dashboard` refuses to start if port 5173 is taken; use the existing dashboard or stop only a dev server you started. |
 | Dashboard shows a MOCK DATA banner | `dashboard/.env.local` is missing or stale. Run `make env` and restart `make dashboard`. |
 | An agent exits at start with "no AWS key of its own" | Its session has no minted AWS key. Run `make reset && make demo`. Agents never fall back to the host's credentials. |
 | An agent's first model call fails with `InvalidClientTokenId` | A new IAM key takes a few seconds to become valid. The agent retries for about 20 seconds. |
