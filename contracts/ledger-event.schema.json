@@ -29,13 +29,13 @@
     },
     "source": {
       "type": "string",
-      "enum": ["tool_response", "egress", "handoff", "burn", "gateway", "session", "provider"],
-      "description": "Where Burn saw this. tool_response = post-call interceptor; egress = proxy; handoff = send_message check; burn = Burn API; gateway = pre-call interceptor; session = session start; provider = mock API provider."
+      "enum": ["tool_response", "egress", "handoff", "burn", "gateway", "session", "provider", "instance"],
+      "description": "Where Burn saw this. tool_response = post-call interceptor; egress = proxy; handoff = send_message check; burn = Burn API; gateway = pre-call interceptor; session = session start; provider = mock API provider; instance = instance lifecycle (role-based sessions)."
     },
     "action": {
       "type": "string",
-      "enum": ["recorded", "blocked", "revoked", "rotated", "flagged", "refused", "issued", "inherited", "rejected"],
-      "description": "recorded = credential seen in a tool response, added to ledger. blocked = outbound credential stopped. revoked = badge revoked. rotated = credential rotated. flagged = shared/other-owner credential flagged for review. refused = call with a revoked/unknown badge or disallowed tool refused. issued = session/credential issued. inherited = receiver of send_message inherited sender's ledger entry. rejected = provider refused a stale (rotated) key."
+      "enum": ["recorded", "blocked", "revoked", "rotated", "flagged", "refused", "issued", "inherited", "rejected", "started", "exited", "unregistered"],
+      "description": "recorded = credential seen in a tool response, added to ledger. blocked = outbound credential stopped. revoked = badge revoked. rotated = credential rotated. flagged = shared/other-owner credential flagged for review. refused = call with a revoked/unknown badge or disallowed tool refused. issued = session/credential issued. inherited = receiver of send_message inherited sender's ledger entry. rejected = provider refused a stale (rotated) key. started / exited = an instance began or ended (source instance). unregistered = a call with a badge Burn never issued was refused (agent_id system)."
     },
     "tool": {
       "type": ["string", "null"],
@@ -80,6 +80,15 @@
       "type": ["string", "null"],
       "maxLength": 500,
       "description": "Short human-readable explanation for the dashboard. Must never contain a credential value."
+    },
+    "role": {
+      "type": ["string", "null"],
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+      "description": "Role of the instance this event is about, when it has one."
+    },
+    "parent_session": {
+      "type": ["string", "null"],
+      "description": "Instance events: the session that spawned this instance, if any."
     }
   }
 }
