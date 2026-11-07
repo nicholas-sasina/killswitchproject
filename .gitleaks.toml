@@ -1,0 +1,23 @@
+# Gitleaks config for Burn.
+# Uses the full default ruleset, plus rules for the credential formats Burn
+# mints, so an accidentally committed test credential is still caught.
+title = "burn gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "burn-mock-provider-key"
+description = "Burn mock API provider key (minted per agent at runtime)"
+regex = '''mpk_live_[A-Za-z0-9]{32}'''
+keywords = ["mpk_live_"]
+
+[[rules]]
+id = "connection-string-with-password"
+description = "URL-style connection string with an inline password"
+regex = '''[a-z][a-z0-9+.-]{1,20}://[^:\s/@'"<>]+:[^@\s'"{}<>]{6,}@[^\s'"]+'''
+keywords = ["://"]
+
+[allowlist]
+description = "Template placeholders are not secrets"
+regexes = ['''\{\{[^}]+\}\}''']
