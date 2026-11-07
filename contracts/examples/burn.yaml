@@ -1,0 +1,18 @@
+# Example burn.yaml: a planner that spawns workers.
+# `burn apply` creates or updates these roles; join tokens and instances are created at run time.
+# A spawned child gets its role's tools, credentials and egress narrowed to what its parent has,
+# so the planner holds everything a worker needs.
+version: 1
+roles:
+  - name: planner
+    owner: support-platform
+    tools: [list_tickets, read_ticket, read_config, send_message, notify]
+    credentials: [api_key, aws_key]
+    may_message: [worker]
+    may_spawn: [worker]
+  - name: worker
+    owner: support-platform
+    tools: [read_ticket, read_config, send_message, notify]
+    credentials: [api_key, aws_key]
+    may_message: [planner]
+    egress: [bedrock-runtime.us-east-1.amazonaws.com]

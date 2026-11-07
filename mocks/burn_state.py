@@ -32,7 +32,8 @@ class BurnState:
         active = [s for s in sessions if s["status"] == "active"]
         latest = (active or sessions or [None])[-1]
         return {"agent_id": agent_id, "role": self.agents[agent_id]["role"],
-                "status": "active" if active else "revoked" if sessions else "idle",
+                "status": "active" if active else "revoked" if any(s["status"] == "revoked" for s in sessions)
+                else "idle",
                 "session_id": latest["session_id"] if latest else None,
                 "exposures": len(self.ledgers[agent_id])}
 

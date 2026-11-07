@@ -17,16 +17,35 @@ security:
 paths:
   /sessions:
     post:
-      summary: Start an agent session. Issues a badge and the agent's credentials.
+      summary: Start an agent session (one instance). Issues a badge and the instance's credentials.
+      description: |
+        Three forms:
+        - `{agent_id}`: a scenario agent (a role with one instance, fixed agent id). Unchanged.
+        - `{role, enroll_token}`: a new instance of a role, joining with a join token.
+        - `{role, parent_session}`: a child spawned by a running instance. The role must be in the
+          parent role's `may_spawn`; the child never gets more tools, credentials or egress than its parent.
+        A role-based instance gets its own agent id `agent-<role>-<6 hex>`, so its credentials,
+        ledger and burn are its own. The session_id is the instance's identity.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [agent_id]
-              properties:
-                agent_id: { $ref: '#/components/schemas/AgentId' }
+              oneOf:
+                - type: object
+                  required: [agent_id]
+                  properties:
+                    agent_id: { $ref: '#/components/schemas/AgentId' }
+                - type: object
+                  required: [role, enroll_token]
+                  properties:
+                    role: { $ref: '#/components/schemas/RoleName' }
+                    enroll_token: { type: string, description: 'bjt_<token_id>.<secret>' }
+                - type: object
+                  required: [role, parent_session]
+                  properties:
+                    role: { $ref: '#/components/schemas/RoleName' }
+                    parent_session: { type: string }
       responses:
         '201':
           description: Session started
@@ -45,7 +64,14 @@ paths:
                   credentials:
                     type: array
                     items: { $ref: '#/components/schemas/CredentialRef' }
-        '404': { description: agent_id is not in the loaded scenario }
+                  role: { $ref: '#/components/schemas/RoleName' }
+                  parent_session: { type: string, nullable: true }
+                  token_id: { type: string, nullable: true }
+                  tools: { type: array, items: { type: string } }
+                  egress: { type: array, items: { type: string }, nullable: true }
+        '403': { description: join token invalid, expired, used up or revoked; or role not in the parent's may_spawn }
+        '404': { description: agent_id is not in the loaded scenario, or the role or parent session does not exist }
+        '429': { description: rate limited while issuing credentials; retry with backoff }
   /burn:
     post:
       summary: Burn an agent. Revoke badge, rotate its own credentials, flag others it saw, start blast radius.
@@ -135,7 +161,7 @@ paths:
                 properties:
                   session_id: { type: string }
                   agent_id: { $ref: '#/components/schemas/AgentId' }
-                  status: { type: string, enum: [active, revoked] }
+                  status: { type: string, enum: [active, revoked, exited], description: exited = the instance ended cleanly or went inactive; refused like revoked }
         '404': { description: unknown session }
   /events:
     get:
@@ -187,6 +213,160 @@ paths:
                   entries:
                     type: array
                     items: { $ref: '#/components/schemas/LedgerEntry' }
+  /roles:
+    get:
+      summary: List roles (burn.yaml, dashboard and scenario agents).
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roles]
+                properties:
+                  roles: { type: array, items: { $ref: '#/components/schemas/Role' } }
+    post:
+      summary: Create a role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleSpec' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
+        '409': { description: a role with this name exists }
+  /roles/{name}:
+    get:
+      summary: One role.
+      parameters:
+        - { name: name, in: path, required: true, schema: { $ref: '#/components/schemas/RoleName' } }
+      responses:
+        '200': { description: Role, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
+        '404': { description: no such role }
+    put:
+      summary: Create or replace a role (used by `burn apply`).
+      description: A role managed_by `code` can only be changed through this route with managed_by `code`; the dashboard shows it read-only. Scenario roles cannot be changed here.
+      parameters:
+        - { name: name, in: path, required: true, schema: { $ref: '#/components/schemas/RoleName' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleSpec' }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
+        '409': { description: the role is managed elsewhere (managed_by differs) }
+  /roles/{name}/tokens:
+    post:
+      summary: Create a join token for a role. The token is returned once; only its hash is stored.
+      parameters:
+        - { name: name, in: path, required: true, schema: { $ref: '#/components/schemas/RoleName' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                uses: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+                ttl: { type: integer, minimum: 60, maximum: 2592000, default: 3600, description: seconds }
+      responses:
+        '201':
+          description: Token created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/EnrollToken'
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: { type: string, description: 'bjt_<token_id>.<secret>. Shown once.' }
+        '404': { description: no such role }
+  /tokens/{token_id}:
+    delete:
+      summary: Revoke a join token. Instances that already joined keep running (burn them with scope token).
+      parameters:
+        - { name: token_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Revoked, content: { application/json: { schema: { $ref: '#/components/schemas/EnrollToken' } } } }
+        '404': { description: no such token }
+  /instances:
+    get:
+      summary: List instances (one per session).
+      parameters:
+        - { name: role, in: query, required: false, schema: { $ref: '#/components/schemas/RoleName' } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [active, revoked, exited] } }
+      responses:
+        '200':
+          description: Instances, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instances]
+                properties:
+                  instances: { type: array, items: { $ref: '#/components/schemas/Instance' } }
+  /instances/{session_id}/heartbeat:
+    post:
+      summary: Mark an instance as alive (sent by `burn run` while the agent makes calls).
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
+        '404': { description: no such session }
+        '409': { description: the instance is not active (burned or exited) }
+  /instances/{session_id}/exit:
+    post:
+      summary: Clean exit. Revokes the instance's badge and deletes its own credentials.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Exited, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
+        '404': { description: no such session }
+  /burns:
+    post:
+      summary: Burn a set of instances at once.
+      description: |
+        Scopes: `instance` (one session), `role` (every active instance of a role), `lineage`
+        (an instance and all its descendants), `token` (every instance that joined with a token;
+        the token is revoked too). Every target session is revoked first, then each instance is
+        burned exactly like `POST /burn`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, id]
+              properties:
+                scope: { type: string, enum: [instance, role, lineage, token] }
+                id: { type: string, description: 'session_id, role name or token_id' }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Burned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scope, id, burned]
+                properties:
+                  scope: { type: string }
+                  id: { type: string }
+                  burned:
+                    type: array
+                    description: One entry per instance, same shape as the POST /burn response.
+                    items: { type: object }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agent_id: { type: string }
+                        error: { type: string }
+        '404': { description: nothing matches the scope and id }
 components:
   securitySchemes:
     demoToken:
@@ -229,3 +409,70 @@ components:
         via: { type: string, nullable: true, description: 'tool name, or sender agent_id for handoff' }
         first_seen: { type: string, format: date-time }
         status: { type: string, enum: [active, rotated, flagged], description: 'status of the credential itself' }
+    RoleName:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9-]{0,31}$'
+      example: worker
+    RoleFields:
+      type: object
+      required: [name, tools]
+      properties:
+        name: { $ref: '#/components/schemas/RoleName' }
+        tools: { type: array, items: { type: string }, description: MCP tools the instances may call }
+        credentials:
+          type: array
+          items: { type: string, enum: [api_key, aws_key] }
+          description: Own credentials minted for each instance.
+        may_message: { type: array, items: { $ref: '#/components/schemas/RoleName' }, default: [] }
+        may_spawn: { type: array, items: { $ref: '#/components/schemas/RoleName' }, default: [] }
+        egress:
+          type: array
+          items: { type: string }
+          nullable: true
+          description: Allowed outbound hosts for this role's instances. Null = the default allowlist.
+        owner: { type: string, nullable: true, description: team or person responsible }
+    RoleSpec:
+      description: Request body for creating or saving a role.
+      allOf:
+        - $ref: '#/components/schemas/RoleFields'
+        - type: object
+          properties:
+            managed_by: { type: string, enum: [code, ui], default: ui }
+    Role:
+      allOf:
+        - $ref: '#/components/schemas/RoleFields'
+        - type: object
+          required: [managed_by]
+          properties:
+            managed_by: { type: string, enum: [code, ui, scenario], description: 'code = burn.yaml (read-only in the dashboard), ui = dashboard, scenario = scenario file' }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+            active_instances: { type: integer }
+    EnrollToken:
+      type: object
+      required: [token_id, role, uses, uses_left, expires_at, status]
+      properties:
+        token_id: { type: string, example: 3f9a0c1d2e4b5a6c }
+        role: { $ref: '#/components/schemas/RoleName' }
+        uses: { type: integer }
+        uses_left: { type: integer }
+        expires_at: { type: string, format: date-time }
+        status: { type: string, enum: [active, used_up, expired, revoked] }
+        created_at: { type: string, format: date-time }
+    Instance:
+      type: object
+      required: [session_id, agent_id, role, status, created_at]
+      properties:
+        session_id: { type: string }
+        agent_id: { $ref: '#/components/schemas/AgentId' }
+        role: { $ref: '#/components/schemas/RoleName' }
+        status: { type: string, enum: [active, revoked, exited] }
+        parent_session: { type: string, nullable: true }
+        token_id: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        tools: { type: array, items: { type: string } }
+        egress: { type: array, items: { type: string }, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time, nullable: true }
+        exited_at: { type: string, format: date-time, nullable: true }
+        exposures: { type: integer, description: number of ledger entries }
