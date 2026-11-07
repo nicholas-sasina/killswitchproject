@@ -43,11 +43,21 @@ class Scanner:
         self.threshold = threshold
 
     def scan(self, text: str, window: SessionWindow | None = None) -> list[Finding]:
+        exact, shingles, formats = self._collect_candidates(text)
+        rows = self._lookup_fingerprints(exact, shingles, formats)
+        found = self._exact_matches(rows, exact)
+        evidence = self._add_shingle_matches(found, rows, shingles, window)
+        self._add_format_only_findings(found, rows, formats, evidence)
+        return sorted(found.values(), key=lambda f: (f.secret_ref or "", f.fingerprint, f.kind))
+
+    def _collect_candidates(self, text: str) -> tuple[dict, dict, dict]:
         exact, shingles, formats = {}, {}, {}
         token_cache = {}
         shingle_cache = {}
         window_cache = {}
+
         def parts(token):
+            # Repeated text should not repeat HMAC work; these caches live for one scan.
             if token not in shingle_cache:
                 fps = []
                 for part in set(shingle_windows(token)):
@@ -73,13 +83,24 @@ class Scanner:
                     exact.setdefault(fp, encoding)
                     token = match[0].lower()
                     formats.setdefault(fp, (secret_type, encoding, parts(token)))
+        return exact, shingles, formats
 
-        rows = self.lookup(set(exact) | set(shingles) | set(formats))
-        found, evidence = {}, {}
+    def _lookup_fingerprints(self, exact: dict, shingles: dict, formats: dict) -> dict:
+        # A lookup can cross the network, so collect every candidate into one batch.
+        return self.lookup(set(exact) | set(shingles) | set(formats))
+
+    def _exact_matches(self, rows: dict, exact: dict) -> dict:
+        found = {}
         for fp, row in rows.items():
             if row.get("kind") == "exact" and fp in exact:
                 found[(row.get("secret_ref"), row.get("part"), row.get("version"))] = _finding(row, fp, "exact", exact[fp], 1.0)
-            elif row.get("kind") == "shingle" and fp in shingles:
+        return found
+
+    def _add_shingle_matches(self, found: dict, rows: dict, shingles: dict, window: SessionWindow | None) -> dict:
+        evidence = {}
+        for fp, row in rows.items():
+            if row.get("kind") == "shingle" and fp in shingles:
+                # Parts and versions cannot contribute coverage to one another.
                 group = (row.get("secret_ref"), row.get("part"), row.get("version"))
                 if group not in evidence:
                     evidence[group] = (row, set(), shingles[fp])
@@ -89,8 +110,10 @@ class Scanner:
             evidence = window.accumulate(evidence)
         exact_secrets = {(group[0], group[2]) for group in found}
         for group, (row, indices, encoding) in evidence.items():
+            # Old evidence alone must not block an unrelated follow-up request.
             if group not in current:
                 continue
+            # Exact attribution already identifies the credential, even for a different part.
             if (group[0], group[2]) in exact_secrets:
                 continue
             total = int(row.get("n_shingles", 0))
@@ -101,6 +124,9 @@ class Scanner:
                 if len(current.get(group, ({}, set(), ""))[1]) / total < self.threshold:
                     encoding = "multi_request"
                 found[group] = _finding(row, row["fingerprint"], "shingle", encoding, coverage)
+        return evidence
+
+    def _add_format_only_findings(self, found: dict, rows: dict, formats: dict, evidence: dict) -> None:
         for fp, (secret_type, encoding, format_parts) in formats.items():
             if fp in rows or any(f.fingerprint == fp for f in found.values()):
                 continue
@@ -110,8 +136,8 @@ class Scanner:
                 group = (row.get("secret_ref"), row.get("part"), row.get("version"))
                 if row.get("kind") == "shingle" and group in found:
                     attributed.setdefault(group, set()).add(int(row["index"]))
+            # A recased known credential should retain its owner, not become an unknown format hit.
             if any(len(indices) / int(evidence[group][0]["n_shingles"]) >= self.threshold
                    for group, indices in attributed.items()):
                 continue
             found[(None, fp)] = Finding(None, fp, secret_type, "unknown", None, "format", encoding, 1.0)
-        return sorted(found.values(), key=lambda f: (f.secret_ref or "", f.fingerprint, f.kind))

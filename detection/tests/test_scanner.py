@@ -95,6 +95,18 @@ def test_old_evidence_does_not_block_unrelated_followup(registered):
     assert scanner.scan("The webhook received the completed report.", window) == []
 
 
+def test_window_attribution_and_unknown_format_share_one_lookup(registered):
+    scanner, _, body, _, calls = registered
+    window = SessionWindow()
+    unknown = "A" + "SIA" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16))
+    assert scanner.scan(body[:16], window) == []
+    findings = scanner.scan(body[16:] + " " + unknown, window)
+    assert len(findings) == 2
+    assert any(f.secret_ref and f.kind == "shingle" and f.encoding == "multi_request" for f in findings)
+    assert any(f.secret_ref is None and f.kind == "format" and f.owner == "unknown" for f in findings)
+    assert len(calls) == 2
+
+
 def test_unknown_credentials_are_fingerprinted_only():
     key = secrets.token_bytes(32)
     scanner = Scanner(key, lambda _: {})
