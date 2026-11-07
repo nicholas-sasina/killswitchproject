@@ -50,6 +50,8 @@ def _create_tables(ddb):
     make("burn-credentials", "secret_ref")
     make("burn-sessions", "session_id", gsis=[("by_agent", "agent_id"), ("by_client", "client_id")])
     make("burn-scenario", "pk")
+    make("burn-roles", "name")
+    make("burn-enroll-tokens", "token_id", gsis=[("by_role", "role")])
 
 
 @pytest.fixture

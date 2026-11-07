@@ -10,13 +10,18 @@ from burn_contracts import names
 import auth
 import burn
 import db
+import errors
+import instances
 import minter_client
 import reads
+import roles
 import sessions
+import tokens
 
 
-def _resp(status: int, body: dict):
-    return {"statusCode": status, "headers": {"content-type": "application/json"}, "body": db.dumps(body)}
+def _resp(status: int, body: dict, headers: dict | None = None):
+    return {"statusCode": status, "headers": {"content-type": "application/json", **(headers or {})},
+            "body": db.dumps(body)}
 
 
 def _json_body(event) -> dict:
@@ -33,6 +38,8 @@ def _agent_id(value) -> str | None:
 
 def route(method: str, path: str, query: dict, body: dict):
     """Return (status, body). Raises NotFound / MinterError for the caller to map."""
+    if method == "POST" and path == "/sessions" and "role" in body and "agent_id" not in body:
+        return 201, sessions.start_instance(body.get("role"), body.get("enroll_token"), body.get("parent_session"))
     if method == "POST" and path == "/sessions":
         agent_id = _agent_id(body.get("agent_id"))
         if not agent_id:
@@ -58,7 +65,35 @@ def route(method: str, path: str, query: dict, body: dict):
             return (200, reads.ledger(agent_id)) if agent_id else (400, {"error": "bad agent id"})
         if m := re.fullmatch(r"/badge/([^/]+)", path):
             return 200, reads.badge(m[1])
+    swarm = _swarm_route(method, path, query, body)
+    if swarm is not None:
+        return swarm
     return 404, {"error": "no such route"}
+
+
+def _swarm_route(method: str, path: str, query: dict, body: dict):
+    """Roles, join tokens, instances and scoped burns. None when the path is not one of theirs."""
+    parts = path.strip("/").split("/")
+    match (method, parts):
+        case ("GET", ["roles"]):
+            return 200, {"roles": roles.list_roles()}
+        case ("POST", ["roles"]):
+            return 201, roles.create_role(body)
+        case ("GET", ["roles", name]):
+            return 200, roles.get_role(name)
+        case ("PUT", ["roles", name]):
+            return 200, roles.put_role(name, body)
+        case ("POST", ["roles", name, "tokens"]):
+            return 201, tokens.create(name, body)
+        case ("DELETE", ["tokens", token_id]):
+            return 200, tokens.revoke(token_id)
+        case ("GET", ["instances"]):
+            return 200, {"instances": instances.list_instances(query.get("role"), query.get("status"))}
+        case ("POST", ["instances", session_id, "heartbeat"]):
+            return 200, instances.heartbeat(session_id)
+        case ("POST", ["instances", session_id, "exit"]):
+            return 200, instances.exit_instance(session_id)
+    return None
 
 
 # Must match the CORS settings of the HTTP API in infra/burn_infra/burn_api.py.
@@ -69,7 +104,7 @@ ALLOWED_HEADERS = f"content-type,{names.DEMO_TOKEN_HEADER}"
 def _preflight(headers: dict):
     """Answer a browser CORS preflight. Browsers never attach custom headers to it,
     so it cannot carry the demo token; it reveals nothing, and the real request is still checked."""
-    cors = {"access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": ALLOWED_HEADERS,
+    cors = {"access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": ALLOWED_HEADERS,
             "access-control-max-age": "600"}
     if headers.get("origin") == ALLOWED_ORIGIN:
         cors["access-control-allow-origin"] = ALLOWED_ORIGIN
@@ -88,6 +123,14 @@ def handler(event, context=None):
                              _json_body(event))
     except sessions.NotFound as exc:
         return _resp(404, {"error": f"not found: {exc}"})
-    except minter_client.MinterError as exc:
-        return _resp(502, {"error": str(exc)})
+    except errors.ApiError as exc:
+        return _resp(exc.status, {"error": exc.message})
+    except Exception as exc:
+        if errors.is_throttle(exc):  # IAM, Cognito or the minter said slow down; clients retry with backoff
+            return _resp(429, {"error": "rate limited; retry with backoff",
+                               "retry_after_seconds": errors.RETRY_AFTER_SECONDS},
+                         {"retry-after": str(errors.RETRY_AFTER_SECONDS)})
+        if isinstance(exc, minter_client.MinterError):
+            return _resp(502, {"error": str(exc)})
+        raise
     return _resp(status, body)
