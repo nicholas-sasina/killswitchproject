@@ -50,7 +50,8 @@ def run(agent: str) -> None:
     check(sorted(k["Status"] for k in keys) == ["Active", "Inactive"], "old AWS key is Inactive, new one Active")
 
     status, activity = live.minter("GET", f"/agents/{agent}/key-activity")
-    check(status == 200 and isinstance(activity["events"], list), f"key-activity returns a list ({len(activity['events'])} events)")
+    check(status == 200 and isinstance(activity["events"], list), f"key-activity returns events ({len(activity['events'])})")
+    check([k["status"] for k in activity["keys"]] == ["inactive", "active"], "key-activity lists old key inactive, new key active")
 
 
 def main() -> int:

@@ -10,7 +10,7 @@ accepts only the current version of each key.
 - Rotation puts a new secret version (the old one stays at `AWSPREVIOUS`), marks the old fingerprints `rotated`, and for AWS keys sets the old access key Inactive instead of deleting it.
 - Credentials an agent merely saw (`exposed_refs` not owned by it) are marked `flagged` in `burn-credentials`.
 - `burn-provider` (API Gateway HTTP API, URL in SSM `/burn/provider/url`) looks the bearer key up by exact fingerprint: current = 200, rotated = 401 plus a `rejected` event.
-- `GET /agents/{id}/key-activity` reads CloudTrail for the agent's current and previous access key ids.
+- `GET /agents/{id}/key-activity` returns the agent's current and previous AWS key with their IAM status (active or inactive), plus their CloudTrail events.
 
 ## Key files
 | File | What |

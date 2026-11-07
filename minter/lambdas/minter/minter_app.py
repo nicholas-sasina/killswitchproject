@@ -36,7 +36,7 @@ def _agent_route(method: str, agent_id: str, action: str, body: dict, query: dic
     if (method, action) == ("POST", "rotate"):
         return credentials.rotate(agent_id, body.get("exposed_refs", []))
     if (method, action) == ("GET", "key-activity"):
-        return {"events": key_activity.key_activity(agent_id, _parse_since(query.get("since")))}
+        return key_activity.key_activity(agent_id, _parse_since(query.get("since")))
     return None
 
 

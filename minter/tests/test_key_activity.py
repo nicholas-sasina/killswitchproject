@@ -49,6 +49,7 @@ def test_key_activity_covers_current_and_previous_key(monkeypatch):
 
     resp = minter("GET", f"/agents/{AGENT}/key-activity", query={"since": "2026-11-07T19:00:00Z"})
     events = resp["body"]["events"]
+    keys = resp["body"]["keys"]
     assert [e["event_name"] for e in events] == ["ListBuckets", "GetCallerIdentity"]  # oldest first
     assert events[0] == {
         "ts": "2026-11-07T20:00:05Z", "key_ref": f"burn/{AGENT}/aws_key#v2",
@@ -56,6 +57,9 @@ def test_key_activity_covers_current_and_previous_key(monkeypatch):
         "event_source": "s3.amazonaws.com", "resource": "some-bucket",
         "source_ip": "203.0.113.7", "error_code": None}
     assert events[1]["key_ref"] == f"burn/{AGENT}/aws_key#v1" and events[1]["error_code"] == "AccessDenied"
+    assert keys == [
+        {"key_ref": f"burn/{AGENT}/aws_key#v1", "key_hint": old["access_key_id"][-4:], "status": "inactive"},
+        {"key_ref": f"burn/{AGENT}/aws_key#v2", "key_hint": new["access_key_id"][-4:], "status": "active"}]
     assert all("StartTime" in call for call in fake.calls)
     # never leaks a full key id or secret
     dumped = json.dumps(resp)
@@ -63,4 +67,25 @@ def test_key_activity_covers_current_and_previous_key(monkeypatch):
 
 
 def test_key_activity_without_aws_key_is_empty():
-    assert minter("GET", f"/agents/{AGENT}/key-activity")["body"] == {"events": []}
+    assert minter("GET", f"/agents/{AGENT}/key-activity")["body"] == {"keys": [], "events": []}
+
+
+def test_never_burned_agent_has_one_active_key(monkeypatch):
+    minter("POST", f"/agents/{AGENT}/credentials", {"types": ["aws_key"]})
+    monkeypatch.setattr(aws.cloudtrail(), "lookup_events", FakeCloudTrail({}).lookup_events)
+    keys = minter("GET", f"/agents/{AGENT}/key-activity")["body"]["keys"]
+    assert [(k["key_ref"], k["status"]) for k in keys] == [(f"burn/{AGENT}/aws_key#v1", "active")]
+
+
+def test_burned_agent_new_key_is_active_even_with_no_events(monkeypatch):
+    minter("POST", f"/agents/{AGENT}/credentials", {"types": ["aws_key"]})
+    old = json.loads(boto3.client("secretsmanager").get_secret_value(SecretId=f"burn/{AGENT}/aws_key")["SecretString"])
+    minter("POST", f"/agents/{AGENT}/rotate", {})
+    t = datetime(2026, 11, 7, 20, 0, 5, tzinfo=timezone.utc)
+    # only the OLD key has events; status must still come from IAM, not from the events
+    fake = FakeCloudTrail({old["access_key_id"]: [ct_event("ListBuckets", "s3.amazonaws.com", t)]})
+    monkeypatch.setattr(aws.cloudtrail(), "lookup_events", fake.lookup_events)
+    body = minter("GET", f"/agents/{AGENT}/key-activity")["body"]
+    assert [(k["key_ref"], k["status"]) for k in body["keys"]] == [
+        (f"burn/{AGENT}/aws_key#v1", "inactive"), (f"burn/{AGENT}/aws_key#v2", "active")]
+    assert {e["key_ref"] for e in body["events"]} == {f"burn/{AGENT}/aws_key#v1"}
