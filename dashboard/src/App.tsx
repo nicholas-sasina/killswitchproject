@@ -79,36 +79,16 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
       <MockBanner visible={mock} />
       <div className="app-shell">
         <header className="site-header">
-          <a href="/" className="brand" aria-label="Burn home">
-            <Flame />
-            <span>BURN</span>
-          </a>
-          <div
-            className={`connection ${error ? "connection-error" : updatedAt ? "connection-live" : ""}`}
-          >
-            <span aria-hidden="true" />
-            {error
-              ? "Connection interrupted"
-              : updatedAt
-                ? "Connected · polling every second"
-                : "Waiting for connection"}
+          <div className="header-identity">
+            <a href="/" className="brand" aria-label="Burn home">
+              <Flame />
+              <span>BURN</span>
+            </a>
+            <h1 className="tagline">
+              Revoke the agent. <span>Contain what it saw.</span>
+            </h1>
           </div>
-        </header>
-        <main>
-          <section className="hero">
-            <div>
-              <p className="eyebrow">Agent containment console</p>
-              <h1>
-                Revoke the agent.
-                <br />
-                <span>Contain what it saw.</span>
-              </h1>
-              <p>
-                One action to revoke access, rotate owned credentials,
-                <br className="desktop-break" /> and flag shared exposure for
-                review.
-              </p>
-            </div>
+          <div className="header-status">
             <dl className="summary">
               <div>
                 <dt>Agents</dt>
@@ -133,7 +113,19 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 </dd>
               </div>
             </dl>
-          </section>
+            <div
+              className={`connection ${error ? "connection-error" : updatedAt ? "connection-live" : ""}`}
+            >
+              <span aria-hidden="true" />
+              {error
+                ? "Connection interrupted"
+                : updatedAt
+                  ? "Connected · polling every second"
+                  : "Waiting for connection"}
+            </div>
+          </div>
+        </header>
+        <main>
           {!configured && (
             <section className="setup panel" role="status">
               <h2>Connect the dashboard</h2>
@@ -152,48 +144,51 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 : ""
             }
           />
-          <section aria-labelledby="agents-title" className="agents-section">
-            <div className="section-heading">
-              <h2 id="agents-title">Agents</h2>
-              <span className="muted">
-                {updatedAt
-                  ? `Last received ${updatedAt.toLocaleTimeString([], { hour12: false })}`
-                  : "Awaiting API data"}
-              </span>
-            </div>
-            {state.agents.length ? (
-              <div className="agent-grid">
-                {state.agents.map((agent) => (
-                  <AgentCard
-                    key={agent.agent_id}
-                    agent={agent}
-                    selected={selectedAgent?.agent_id === agent.agent_id}
-                    busy={busy || Boolean(error)}
-                    burned={Boolean(resultFor(agent)?.revoked)}
-                    onSelect={() => setSelectedId(agent.agent_id)}
-                    onBurn={() => {
-                      setBurnError("");
-                      setConfirmAgent(agent);
-                    }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="empty panel">
-                {updatedAt
-                  ? "No agents in the current scenario. Start a scenario to see its agents here."
-                  : "Agent cards will appear when the API connects."}
-              </div>
-            )}
-          </section>
-          {selectedResult && <BurnOutcome result={selectedResult} />}
           <div className="workspace-grid">
             <div className="detail-column">
+              <section
+                aria-labelledby="agents-title"
+                className="agents-section"
+              >
+                <div className="section-heading">
+                  <h2 id="agents-title">Agents</h2>
+                  <span className="muted">
+                    {updatedAt
+                      ? `Last received ${updatedAt.toLocaleTimeString([], { hour12: false })}`
+                      : "Awaiting API data"}
+                  </span>
+                </div>
+                {state.agents.length ? (
+                  <div className="agent-grid">
+                    {state.agents.map((agent) => (
+                      <AgentCard
+                        key={agent.agent_id}
+                        agent={agent}
+                        selected={selectedAgent?.agent_id === agent.agent_id}
+                        busy={busy || Boolean(error)}
+                        result={resultFor(agent)}
+                        onSelect={() => setSelectedId(agent.agent_id)}
+                        onBurn={() => {
+                          setBurnError("");
+                          setConfirmAgent(agent);
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty panel">
+                    {updatedAt
+                      ? "No agents in the current scenario. Start a scenario to see its agents here."
+                      : "Agent cards will appear when the API connects."}
+                  </div>
+                )}
+              </section>
               <Ledger
                 api={api}
                 agentId={selectedAgent?.agent_id}
                 refresh={refresh}
               />
+              {selectedResult && <BurnOutcome result={selectedResult} />}
               <BlastTimeline api={api} agentId={burnedId} />
             </div>
             <EventFeed events={events} />

@@ -1,24 +1,35 @@
-import type { AgentState } from "../contracts";
+import { useEffect, useState } from "react";
+import type { AgentState, BurnResult } from "../contracts";
+import { BurnOutcome } from "./BurnOutcome";
 import { Flame, Status } from "./common";
 
 export function AgentCard({
   agent,
   selected,
   busy,
-  burned,
+  result,
   onSelect,
   onBurn,
 }: {
   agent: AgentState;
   selected: boolean;
   busy: boolean;
-  burned: boolean;
+  result?: BurnResult;
   onSelect: () => void;
   onBurn: () => void;
 }) {
-  const status = burned ? "revoked" : agent.status;
+  const [recentBurn, setRecentBurn] = useState(false);
+  useEffect(() => {
+    setRecentBurn(Boolean(result));
+    if (!result) return;
+    const timer = window.setTimeout(() => setRecentBurn(false), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [result]);
+  const status = result?.revoked ? "revoked" : agent.status;
   return (
-    <article className={`agent-card ${selected ? "selected" : ""}`}>
+    <article
+      className={`agent-card ${selected ? "selected" : ""} ${recentBurn ? "agent-card-recent" : ""}`}
+    >
       <button
         className="agent-select"
         onClick={onSelect}
@@ -42,6 +53,7 @@ export function AgentCard({
           <span className="inspect">View ledger ↗</span>
         </div>
       </button>
+      {recentBurn && result && <BurnOutcome result={result} compact />}
       <button
         className="burn-button"
         onClick={onBurn}
