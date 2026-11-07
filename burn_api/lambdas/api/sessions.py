@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import badges  # bundled from the identity code at deploy time
 import boto3
+from botocore.exceptions import ClientError
 from burn_contracts import names
 
 import db
@@ -25,28 +26,37 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def revoke_sessions(agent_id: str) -> list[str]:
-    """Mark every active session of the agent revoked and delete its Cognito client.
+def end_session(session: dict, status: str = "revoked") -> bool:
+    """Flip an active session to `revoked` (burned) or `exited` and delete its Cognito client.
 
     The status flip is the real kill switch (the gateway checks it on every call).
-    Deleting the client only stops new tokens being issued.
+    Deleting the client only stops new tokens being issued. Returns False if the session
+    was no longer active (someone else ended it first), so an end is never recorded twice.
     """
-    revoked = []
-    for session in db.sessions_for_agent(agent_id):
-        if session.get("status") != "active":
-            continue
+    stamp = "revoked_at" if status == "revoked" else "exited_at"
+    try:
         db.table(names.SESSIONS_TABLE).update_item(
             Key={"session_id": session["session_id"]},
-            UpdateExpression="SET #s = :r, revoked_at = :t",
+            UpdateExpression=f"SET #s = :new, {stamp} = :t",
+            ConditionExpression="#s = :active",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":r": "revoked", ":t": _now()},
+            ExpressionAttributeValues={":new": status, ":active": "active", ":t": _now()},
         )
-        try:
-            badges.delete_badge(session["client_id"])
-        except Exception as exc:  # already revoked in DynamoDB; a leftover client is harmless
-            print(f"delete_badge failed for {session['session_id']}: {type(exc).__name__}")
-        revoked.append(session["session_id"])
-    return revoked
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+    try:
+        badges.delete_badge(session["client_id"])
+    except Exception as exc:  # already ended in DynamoDB; a leftover client is harmless
+        print(f"delete_badge failed for {session['session_id']}: {type(exc).__name__}")
+    return True
+
+
+def revoke_sessions(agent_id: str) -> list[str]:
+    """Mark every active session of the agent revoked and delete its Cognito client."""
+    return [s["session_id"] for s in db.sessions_for_agent(agent_id)
+            if s.get("status") == "active" and end_session(s, "revoked")]
 
 
 def _store_badge(agent_id: str, badge: dict) -> str:
@@ -61,7 +71,8 @@ def _store_badge(agent_id: str, badge: dict) -> str:
 
 
 def start_session(agent_id: str) -> dict:
-    agent = db.get_agent(agent_id)
+    # Scenario agents only: an instance's agent id is not a way to start a session.
+    agent = db.get_scenario_agent(agent_id)
     if agent is None:
         raise NotFound(agent_id)
 
