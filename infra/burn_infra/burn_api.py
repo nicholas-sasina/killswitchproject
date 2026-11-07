@@ -68,10 +68,12 @@ class BurnApiStack(cdk.Stack):
             actions=["lambda:InvokeFunction"],
             resources=[f"arn:aws:lambda:{region}:{acct}:function:{names.MINTER_FUNCTION}"],
         ))
+        # Pool ARN is published by BurnIdentity; resolved by CloudFormation at deploy time.
+        pool_arn = ssm.StringParameter.value_for_string_parameter(self, "/burn/identity/user-pool-arn")
         role.add_to_policy(iam.PolicyStatement(  # one Cognito app client per session
             actions=["cognito-idp:CreateUserPoolClient", "cognito-idp:DeleteUserPoolClient",
                      "cognito-idp:DescribeUserPool"],
-            resources=[f"arn:aws:cognito-idp:{region}:{acct}:userpool/*"],
+            resources=[pool_arn],
         ))
         role.add_to_policy(iam.PolicyStatement(  # badge helper finds the pool via SSM
             actions=["ssm:GetParameter"],

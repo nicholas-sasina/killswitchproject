@@ -11,11 +11,11 @@ class MinterError(Exception):
     pass
 
 
-def call(method: str, path: str, body: dict | None = None) -> dict:
+def call(method: str, path: str, body: dict | None = None, query: dict | None = None) -> dict:
     global _lambda
     if _lambda is None:
         _lambda = boto3.client("lambda", region_name=names.REGION)
-    payload = {"method": method, "path": path, "body": body or {}}
+    payload = {"method": method, "path": path, "body": body or {}, "query": query or {}}
     resp = _lambda.invoke(FunctionName=names.MINTER_FUNCTION, Payload=json.dumps(payload).encode())
     out = json.loads(resp["Payload"].read() or b"{}")
     if resp.get("FunctionError") or out.get("statusCode") != 200:
