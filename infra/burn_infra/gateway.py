@@ -102,7 +102,7 @@ class BurnGatewayStack(cdk.Stack):
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem"], resources=[table("burn-events")]))
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
-            actions=["dynamodb:UpdateItem"], resources=[table("burn-exposures")]))
+            actions=["dynamodb:UpdateItem", "dynamodb:Query"], resources=[table("burn-exposures")]))
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:BatchGetItem"], resources=[table("burn-fingerprints")]))
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(

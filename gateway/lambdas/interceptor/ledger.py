@@ -11,6 +11,7 @@ seen_in and records nothing twice.
 import functools
 
 import boto3
+from boto3.dynamodb.conditions import Key
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import EXPOSURES_TABLE, REGION
 from burn_detect import Finding
@@ -32,6 +33,22 @@ def record(agent_id: str, finding: Finding, *, source: str, via: str, call: str)
         "owner": finding.owner,
         "owner_agent_id": finding.owner_agent_id,
     }, source=source, via=via, call=call)
+
+
+def entries(agent_id: str) -> list[dict]:
+    items, kwargs = [], {"KeyConditionExpression": Key("agent_id").eq(agent_id), "ConsistentRead": True}
+    while True:
+        page = _table().query(**kwargs)
+        items += page.get("Items", [])
+        if "LastEvaluatedKey" not in page:
+            return items
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def copy_entry(entry: dict, to_agent: str, *, via: str, call: str) -> bool:
+    """Give to_agent the sender's ledger entry (it received a message from them)."""
+    fields = {k: entry.get(k) for k in ("secret_ref", "fingerprint", "secret_type", "owner", "owner_agent_id")}
+    return _upsert(to_agent, entry["secret_ref_or_fp"], fields, source="handoff", via=via, call=call)
 
 
 def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, call: str) -> bool:

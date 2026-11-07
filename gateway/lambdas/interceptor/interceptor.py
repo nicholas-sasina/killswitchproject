@@ -7,6 +7,8 @@ REQUEST (before the tool runs):
      may only go to the agent's allowed recipients.
   4. Inject the real caller id as burn_caller_agent_id (tools get no identity
      from the gateway, and an agent-supplied value must not be trusted).
+  5. send_message / notify: block known credentials; a message that passes
+     hands the sender's ledger to the receiver (exit_check.py).
 RESPONSE (before the reply reaches the agent):
   - tools/call: credentials in the tool output go into the agent's ledger
     (record.py).
@@ -17,6 +19,7 @@ Agents see the plain tool names from contracts/mcp-tools.json; the gateway's
 import logging
 import os
 
+import exit_check
 import record
 import sessions
 import shapes
@@ -67,6 +70,10 @@ def on_request(event: dict) -> dict:
         if recipient not in set(session.get("send_to") or []):
             return refuse(body, session, f"recipient not allowed: {recipient}", tool,
                           target_agent_id=recipient)
+
+    denial = exit_check.check(event, session, tool, arguments)
+    if denial:
+        return denial
 
     params = {**(body.get("params") or {}), "name": _gateway_tool_name(tool), "arguments": arguments}
     return shapes.pass_request({**body, "params": params})
