@@ -115,7 +115,7 @@ class BurnMinterStack(cdk.Stack):
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue",
                      "secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret",
-                     "secretsmanager:DeleteSecret"],
+                     "secretsmanager:DeleteSecret", "secretsmanager:RestoreSecret"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/*"],
         ))
         role.add_to_policy(iam.PolicyStatement(  # read-only: the HMAC key for fingerprints
