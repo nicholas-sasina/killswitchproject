@@ -1,0 +1,68 @@
+services:
+  aws:
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/tests/integration/Dockerfile
+    command: ["moto_server", "-H", "0.0.0.0", "-p", "5000"]
+    networks: [egress]
+  bootstrap:
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/tests/integration/Dockerfile
+    command: ["python", "/app/detection/tests/integration/bootstrap.py"]
+    environment: &test_aws
+      AWS_ACCESS_KEY_ID: local-emulator
+      AWS_SECRET_ACCESS_KEY: local-emulator
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://aws:5000
+      AWS_EC2_METADATA_DISABLED: "true"
+    networks: [egress]
+    volumes: ["test-data:/test-data"]
+    depends_on: [aws]
+  proxy:
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/proxy/Dockerfile
+    environment:
+      <<: *test_aws
+      BURN_SINK_URL: https://sink:8443
+    command: ["--set", "ssl_verify_upstream_trusted_ca=/test-data/sink-cert.pem"]
+    networks: [internal, egress]
+    volumes: ["certs:/certs", "test-data:/test-data:ro"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      sink:
+        condition: service_started
+  sink:
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/sink/Dockerfile
+    networks: [egress]
+    environment:
+      PORT: "8443"
+      BURN_SINK_TLS_CERT: /test-data/sink-cert.pem
+      BURN_SINK_TLS_KEY: /test-data/sink-key.pem
+    volumes: ["receipts:/data", "test-data:/test-data:ro"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+  test-client:
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/tests/integration/Dockerfile
+    networks: [internal]
+    environment:
+      BURN_SINK_URL: https://sink:8443
+    volumes: ["certs:/certs:ro", "test-data:/test-data:ro"]
+    depends_on:
+      proxy:
+        condition: service_started
+networks:
+  internal:
+    internal: true
+  egress: {}
+volumes:
+  certs: {}
+  test-data: {}
+  receipts: {}

@@ -1,0 +1,14 @@
+**/.venv
+**/__pycache__
+**/.run
+**/.env*
+**/*.pem
+**/*.key
+.git
+infra
+agents
+dashboard
+minter
+burn_api
+gateway
+eval

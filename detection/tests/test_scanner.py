@@ -27,7 +27,7 @@ def registered():
     rows = {exact: dict(metadata, fingerprint=exact, kind="exact")}
     parts = shingle_fingerprints(body, key)
     for index, fp in parts:
-        rows[fp] = dict(metadata, fingerprint=fp, kind="shingle", index=index, n_shingles=len(parts))
+        rows[fp] = dict(metadata, part="random", fingerprint=fp, kind="shingle", index=index, n_shingles=len(parts))
     calls = []
     def lookup(fps):
         calls.append(fps)
@@ -44,6 +44,7 @@ def registered():
     (lambda s: s[::-1], "reversed"),
     (lambda s: " ".join(s), "separators"),
     (lambda s: "-".join(s), "separators"),
+    (lambda s: "_".join(s), "separators"),
     (lambda s: "".join("\\u%04x" % ord(c) for c in s), "unicode"),
     (lambda s: json.dumps(s), "plain"),
     (lambda s: s.lower(), "plain"),
@@ -85,6 +86,13 @@ def test_window_count_limit(registered):
     window = SessionWindow(max_payloads=1)
     assert scanner.scan(body[:16], window) == []
     assert scanner.scan(body[16:], window) == []
+
+
+def test_old_evidence_does_not_block_unrelated_followup(registered):
+    scanner, value, *_ = registered
+    window = SessionWindow()
+    assert scanner.scan(value, window)
+    assert scanner.scan("The webhook received the completed report.", window) == []
 
 
 def test_unknown_credentials_are_fingerprinted_only():
