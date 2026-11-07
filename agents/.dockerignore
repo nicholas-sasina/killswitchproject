@@ -1,0 +1,5 @@
+.venv
+.run
+tests
+scripts
+__pycache__
