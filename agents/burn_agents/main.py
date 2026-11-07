@@ -31,6 +31,7 @@ def step_gate(step_file: str):
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # its request lines are noise
     cfg = load_config()
     spec = agent_spec(load_scenario(cfg.scenario_file), cfg.agent_id)
     session = aws_session(cfg.aws_access_key_id, cfg.aws_secret_access_key)

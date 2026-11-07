@@ -27,7 +27,7 @@ def build_app(refuse: bool):
 
     @mcp.tool()
     def list_tickets() -> str:
-        return json.dumps([{"id": "T-1", "subject": "x"}])
+        return json.dumps({"tickets": [{"id": "T-1", "subject": "x"}]})
 
     @mcp.tool()
     def read_ticket(ticket_id: str) -> str:

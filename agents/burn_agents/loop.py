@@ -14,23 +14,13 @@ log = logging.getLogger("burn_agents")
 
 
 def parse_tickets(text: str) -> list[dict]:
-    data = json.loads(text)
-    if isinstance(data, dict):
-        data = data.get("tickets", [])
-    return [{"id": str(t["id"]), "subject": t.get("subject", "")} for t in data]
+    """list_tickets returns {"tickets": [{"id", "subject"}, ...]}."""
+    return [{"id": str(t["id"]), "subject": t.get("subject", "")} for t in json.loads(text)["tickets"]]
 
 
 def parse_messages(text: str) -> list[dict]:
-    text = text.strip()
-    if not text:
-        return []
-    try:
-        data = json.loads(text)
-    except ValueError:
-        return [{"from": "unknown", "text": text}]  # plain text inbox
-    if isinstance(data, dict):
-        data = data.get("messages", [])
-    return [{"from": m.get("from", "unknown"), "text": m.get("text", "")} for m in data]
+    """read_inbox returns {"messages": [{"from", "text", "ts"}, ...]}."""
+    return [{"from": m["from"], "text": m["text"]} for m in json.loads(text)["messages"]]
 
 
 class Worker:
