@@ -65,8 +65,9 @@ Values that only look like a credential format are not blocked here.
 
 A `send_message` that passes still carries whatever the sender knows, in ways no scanner can see,
 so the receiver inherits the sender's whole ledger: each entry is copied with `source: handoff`,
-`via: <sender>`, and an `inherited` event is written. Burning either agent then covers everything
-both may have seen.
+`via: <sender>`. An `inherited` event is written only for entries the receiver did not have yet,
+so a conversation announces each credential once, not on every message. Burning either agent
+then covers everything both may have seen.
 
 A forwarded `tools/call` is edited in two ways:
 - `burn_caller_agent_id` is set to the session's agent id, overwriting any value the agent sent.
@@ -79,8 +80,9 @@ A forwarded `tools/call` is edited in two ways:
 - Replies that are Burn denials pass through untouched (`RESPONSE` still fires after a `REQUEST` deny).
 - `tools/list`: tools are renamed to their plain names and filtered to the session's `tools`.
 - `tools/call`: the result text is scanned with `burn_detect` before the agent sees it. Each
-  credential found (one per credential, exact matches preferred) is added to the agent's ledger
-  and announced with a `recorded` event. The reply itself is passed on unchanged: Burn records
+  credential found (one per credential, exact matches preferred) is added to the agent's ledger.
+  The first time an agent sees a credential it is announced with a `recorded` event; reading it
+  again only updates the entry. The reply itself is passed on unchanged: Burn records
   exposure, it does not redact.
 - Output larger than the scanner's limit (256 KiB) is withheld: the agent gets a `BURN:` denial
   and a `refused` event (source `tool_response`) is written. Burn does not hand over what it
@@ -99,10 +101,10 @@ A forwarded `tools/call` is edited in two ways:
 - Credentials that match only a known format (not minted by Burn) have no `secret_ref`; their sort
   key is `fp#<fingerprint>` and `owner` is `unknown`.
 - `source`, `via` and `first_seen` keep the first sighting; later sightings only update `last_seen`
-  and `seen_in`.
+  and `seen_in`, and write no event. The write is a single `UpdateItem` with `ReturnValues: ALL_OLD`:
+  no old item means a new entry, and only then is `recorded` / `inherited` written.
 - The gateway may retry an interceptor call, so writes are keyed by the call
-  (`X-Amzn-Trace-Id` + JSON-RPC id): a write whose call is already in `seen_in` is skipped,
-  together with its event. Reading the same file again in a new call does write a new event.
+  (`X-Amzn-Trace-Id` + JSON-RPC id): a write whose call is already in `seen_in` is skipped.
 
 ## Session row (written by the Burn API at `POST /sessions`)
 

@@ -49,7 +49,8 @@ def check(event: dict, session: dict, tool: str, arguments: dict) -> dict | None
 
 
 def inherit(session: dict, receiver: str, call: str) -> int:
-    """Copy the sender's ledger entries to the receiver. Returns how many were new."""
+    """Copy the sender's ledger entries to the receiver. Only entries the receiver
+    did not have yet get an "inherited" event. Returns how many were new."""
     sender = session["agent_id"]
     copied = 0
     for entry in ledger.entries(sender):
