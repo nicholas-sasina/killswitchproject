@@ -2,6 +2,7 @@
 import argparse
 import getpass
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -10,6 +11,20 @@ from . import config, render, spec
 from .api import Api, ApiError
 
 CLOUDTRAIL_NOTE = "CloudTrail event history can lag 5-15 minutes behind real activity."
+
+
+RUN_HELP = """Run COMMAND as one Burn instance: burn run --role worker -- python agent.py
+
+burn run joins with a join token (--token or BURN_JOIN_TOKEN), fetches the instance's own credentials, and
+starts COMMAND with only those: your AWS_* variables, BURN_JOIN_TOKEN, the API token and other credential
+variables are removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
+(POST {role, command} to start a child instance), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE.
+It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
+
+HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved clients route through the
+egress proxy. They are not containment: a process can ignore them. Containment is the network rule in the
+demo stack, which gives the agent no route except the proxy.
+"""
 
 
 class UsageError(Exception):
@@ -48,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("role")
     create.add_argument("--uses", type=int, default=1, help="how many instances may join (default 1)")
     create.add_argument("--ttl", type=int, default=3600, help="seconds until it expires (default 3600)")
+    run_p = sub.add_parser("run", help="run a command as a Burn instance", description=RUN_HELP,
+                           formatter_class=argparse.RawDescriptionHelpFormatter)
+    run_p.add_argument("--role", required=True)
+    run_p.add_argument("--token", help="join token (prefer the BURN_JOIN_TOKEN environment variable: "
+                                       "command lines are visible to other users)")
+    run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
+    run_p.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
+    env_p = sub.add_parser("env", help="show the environment `burn run` gives an instance")
+    env_p.add_argument("--show", action="store_true", help="show the values of the kept variables")
     ps = sub.add_parser("ps", help="list instances grouped by role, with lineage")
     ps.add_argument("--role")
     ps.add_argument("--status", choices=["active", "revoked", "exited"])
@@ -197,6 +221,32 @@ def cmd_token_create(api, args):
     print(f"\nJoin with:\n  BURN_JOIN_TOKEN={r['token']} burn run --role {r['role']} -- <command>")
 
 
+def cmd_run(api, args):
+    from .runner import credentials
+    from .runner.run import Instance
+    command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not command:
+        raise UsageError("give the command to run after --, e.g. burn run --role worker -- python agent.py")
+    token = args.token or os.environ.get("BURN_JOIN_TOKEN", "")
+    session = json.loads(args.adopt) if args.adopt else None
+    if not token and not session:
+        raise UsageError("a join token is required: set BURN_JOIN_TOKEN or pass --token")
+    gateway = config.get("BURN_GATEWAY_URL", args.dotenv)
+    if not gateway:
+        raise UsageError("BURN_GATEWAY_URL not set (run `make env`, or export it)")
+    try:
+        source = credentials.from_name(os.environ.get("BURN_CREDENTIAL_SOURCE", ""))
+    except ValueError as exc:
+        raise UsageError(str(exc)) from None
+    return Instance(api, source, args.role, command, gateway_url=gateway.rstrip("/"), enroll_token=token,
+                    session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv)).run()
+
+
+def cmd_env(args):
+    from .runner import env
+    print("\n".join(env.describe(dict(os.environ), config.get("BURN_PROXY_URL", args.dotenv), args.show)))
+
+
 def cmd_ps(api, args):
     query = "&".join(f"{k}={v}" for k, v in (("role", args.role), ("status", args.status)) if v)
     instances = api.request("GET", "/instances" + (f"?{query}" if query else ""))["instances"]
@@ -218,18 +268,19 @@ def cmd_ps(api, args):
     print("\n\n".join(blocks))
 
 
-COMMANDS = {"agents": cmd_agents, "apply": cmd_apply, "pull": cmd_pull, "ps": cmd_ps, "token": cmd_token_create, "kill": cmd_kill, "ledger": cmd_ledger,
+COMMANDS = {"agents": cmd_agents, "run": cmd_run, "apply": cmd_apply, "pull": cmd_pull, "ps": cmd_ps, "token": cmd_token_create, "kill": cmd_kill, "ledger": cmd_ledger,
             "blast-radius": cmd_blast_radius, "events": cmd_events}
 
 
 def run(argv: list[str] | None = None, dotenv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)  # argparse exits 2 on bad usage
+    args.dotenv = dotenv
     if args.command == "kill" and not (args.target or args.role or args.lineage or args.token):
         parser.error("name what to burn: a SESSION, an agent id, --role, --lineage or --token")
     try:
-        if args.command in ("login", "init"):  # these run before any API config exists
-            cmd_login(args, dotenv) if args.command == "login" else cmd_init(args)
+        if args.command in ("login", "init", "env"):  # these need no API config
+            {"login": lambda: cmd_login(args, dotenv), "init": lambda: cmd_init(args), "env": lambda: cmd_env(args)}[args.command]()
             return 0
         url, token = config.load(dotenv)
         return COMMANDS[args.command](Api(url, token), args) or 0

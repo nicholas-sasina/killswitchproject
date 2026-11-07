@@ -20,6 +20,12 @@ the event stream. It is the terminal twin of the dashboard. `import burn` is a s
 | `burn_cli/main.py` | Argument parsing and the commands |
 | `burn_cli/spec.py` | `burn.yaml`: validation against `burn.schema.json`, the starter template, role mapping |
 | `burn_cli/retry.py` | Exponential backoff with jitter |
+| `burn_cli/runner/run.py` | `burn run`: session, lifecycle, heartbeat, stop on burn |
+| `burn_cli/runner/env.py` | Scrubbing the host environment and building the instance's |
+| `burn_cli/runner/credentials.py` | Credential sources: Secrets Manager, and a fake for tests and the mocks |
+| `burn_cli/runner/badge.py` | Badge token minting and refresh |
+| `burn_cli/runner/mcp_proxy.py` | The local MCP endpoint |
+| `burn_cli/runner/spawn_endpoint.py` | The local spawn endpoint |
 | `burn/__init__.py` | The SDK: `burn.session`, `burn.spawn` |
 | `burn_cli/api.py` | The HTTP client |
 | `burn_cli/config.py` | URL and token lookup |
@@ -37,6 +43,36 @@ make burn ARGS="kill sess_1a2b"             # one instance; or --role worker | -
 ```
 `burn kill` asks for confirmation unless you pass `--yes`. A role created in the dashboard stays editable there
 until `burn apply` takes it over; after that the dashboard shows it read-only.
+
+### `burn run`
+```bash
+BURN_JOIN_TOKEN=bjt_... burn run --role worker -- python agent.py
+burn env            # what an instance's environment would hold (values hidden; --show reveals the kept ones)
+```
+`burn run` starts one instance:
+1. `POST /sessions {role, enroll_token}`, retrying 429, 5xx and network errors with exponential backoff and
+   jitter (new IAM keys take seconds to work, and 20 parallel spawns hit rate limits).
+2. Reads the instance's own badge, AWS key and provider key from Secrets Manager with the host's AWS access
+   (`BURN_CREDENTIAL_SOURCE=aws`, the default; `fake` is for the mock servers).
+3. Starts the command with the host's credentials **removed** (`AWS_*` except the region and CA bundle,
+   `BURN_JOIN_TOKEN`, the API token, and variables named `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY`...) and
+   the instance's own values **set**: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `BURN_API_KEY`,
+   `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE`, `BURN_MCP_URL`, `BURN_SPAWN_URL`, and `HTTPS_PROXY`/`HTTP_PROXY`
+   when `BURN_PROXY_URL` is set (with the agent id and session id as the proxy user and password, which is how
+   the egress proxy attributes traffic).
+4. `BURN_MCP_URL` is a local endpoint (127.0.0.1, random port) that forwards to `BURN_GATEWAY_URL` and adds
+   `Authorization: Bearer <badge token>`. The token comes from the badge's client-credentials token URL and is
+   refreshed before it expires. The agent never sees the badge secret or token, and MCP activity triggers heartbeats.
+5. `BURN_SPAWN_URL` is a local endpoint: `POST {role, command}` starts a child with `POST /sessions
+   {role, parent_session}` and runs it under its own `burn run` (own credentials, own endpoints). It returns
+   `{session_id, agent_id}`. Children stop when their parent's `burn run` ends.
+6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL
+   after 5 s) and `burn run` exits with 3. A normal exit posts `/instances/{id}/exit`. SIGINT and SIGTERM are
+   forwarded to the agent.
+
+`HTTPS_PROXY` is a convenience so well-behaved clients use the egress proxy. It is **not containment**: a process
+can ignore it. Containment is the network rule in the demo stack, which gives agents no route except the proxy.
+`burn run` also needs `BURN_GATEWAY_URL` (written by `make env`) and, optionally, `BURN_PROXY_URL`.
 
 ### SDK
 ```python
@@ -68,6 +104,9 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
   confirmation unless you pass `--yes`.
 - **Why does `burn apply` refuse a role?** The API answers 409 when a role is managed elsewhere, for example
   made in the dashboard. Run `burn pull` to bring it into `burn.yaml` first.
+- **Does the agent get my AWS credentials?** No. `burn run` removes them from the agent's environment and gives it
+  only its own key. `burn run` itself uses your AWS access to read that key.
+- **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
 - **Where can I see a join token again?** Nowhere: only its hash is stored. Create another one.
 - **Why is the blast radius empty right after a burn?** CloudTrail can lag 5-15 minutes; the CLI says so when there is nothing yet.
 - **Can it print credentials?** No. The API never returns credential values; the CLI shows secret refs and 8-character fingerprint prefixes only.
