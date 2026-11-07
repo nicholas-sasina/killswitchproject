@@ -71,7 +71,7 @@ replays the pre-rotation key without anyone having stored a copy.
 | join token | `bjt_` + 16 hex token id + `.` + 43 chars `[A-Za-z0-9_-]` (`secrets.token_urlsafe(32)`) | shown once at creation; only sha256 of the secret part is stored. `names.parse_join_token` |
 | `aws_key` | a real IAM access key on IAM user `burn-agent-<agent_id>` (path `/burn-agents/`) | narrow policy: invoke the allowlisted Bedrock model + `s3:ListAllMyBuckets`. Rotation = new key, old key Inactive |
 | `other` | rendered scenario template, e.g. a connection string | shared credentials |
-| canary | `mpk_live_` + 32 chars `[A-Za-z0-9]`, one per session; looks like an `api_key` | **never authenticates**. Registry rows have `secret_type=canary`; fingerprint rows have `secret_type=other` plus `canary=true`, `session_id`, `instance_id` (so detectors that predate canaries still treat it as a normal registered credential, and no provider build can ever accept it) |
+| canary | `mpk_live_` + 32 chars `[A-Za-z0-9]`, one per session; looks like an `api_key` | **never authenticates**. Registry rows have `secret_type=canary`; fingerprint rows have `secret_type=other` plus `canary=true` and `session_id` (so detectors that predate canaries still treat it as a normal registered credential, and no provider build can ever accept it) |
 
 ### Fingerprints
 `burn_contracts.fingerprint` is the only implementation. Everyone imports it.
@@ -141,7 +141,7 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
   the Burn API. Repeated presentations only bump a counter on the canary's registry row.
 - **Trusted-signal policy** (what may contain a session automatically): the canary maps to exactly one
   session; that session's agent has the canary in its exposure ledger (it was really delivered to it); the
-  session row still exists, belongs to the same agent (and instance), and is `active`. Containment is the
+  session row still exists, belongs to the same agent, and is `active`. Containment is the
   conditional flip of that one session `active -> revoked`, so concurrent or repeated incidents contain once.
   Anything else is recorded and flagged for review, never contained, and never widened to the agent or role.
 - **Flag levels** for credentials an agent saw but does not own (`burn-credentials.flag_level`):

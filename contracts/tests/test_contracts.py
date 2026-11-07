@@ -192,14 +192,21 @@ def test_burn_api_refs_resolve():
         assert ref in api["components"]["schemas"], ref
     for path in ["/roles", "/roles/{name}", "/roles/{name}/tokens", "/tokens/{token_id}", "/instances", "/burns"]:
         assert path in api["paths"], path
+
+
+WORKER = names.instance_agent_id("worker", "3fa91c")  # agent-worker-3fa91c: one instance of role worker
+
+
 def test_canary_used_event_with_instance_is_schema_valid():
-    ref = names.canary_secret_ref("agent-worker", "sess_0123456789abcdef")
+    ref = names.canary_secret_ref(WORKER, "sess_0123456789abcdef")
     event = events.make_event(
-        agent_id="agent-worker", source="provider", action="canary_used", session_id="sess_0123456789abcdef",
-        instance_id="inst-07", secret_ref=ref, secret_type="other", owner="agent", owner_agent_id="agent-worker",
+        agent_id=WORKER, source="provider", action="canary_used", session_id="sess_0123456789abcdef",
+        role="worker", secret_ref=ref, secret_type="other", owner="agent", owner_agent_id=WORKER,
         detail="canary presented at the provider",
     )
     jsonschema.validate(event, EVENT_SCHEMA)
+    with pytest.raises(TypeError):  # the instance is the session: there is no separate instance_id
+        events.make_event(agent_id=WORKER, source="provider", action="canary_used", instance_id="x")
 
 
 def test_flag_levels_are_ordered_validated_and_match_schema():
@@ -214,23 +221,25 @@ def test_flag_levels_are_ordered_validated_and_match_schema():
 
 def test_events_without_new_fields_stay_valid():
     event = events.make_event(agent_id="agent-a", source="burn", action="revoked")
-    assert event["instance_id"] is None and event["flag_level"] is None
+    assert event["flag_level"] is None
     jsonschema.validate(event, EVENT_SCHEMA)
 
 
 def test_canary_secret_ref_is_per_session_deterministic_and_valid():
-    a = names.canary_secret_ref("agent-worker", "sess_aaaa")
-    b = names.canary_secret_ref("agent-worker", "sess_bbbb")
-    assert a == names.canary_secret_ref("agent-worker", "sess_aaaa")
-    assert a != b and a.startswith("burn/agent-worker/canary_") and len(a.rsplit("_", 1)[1]) == 24
-    assert names.owner_of(a) == "agent-worker"
-    assert names.is_canary_ref(a) and not names.is_canary_ref("burn/agent-worker/api_key")
+    a = names.canary_secret_ref(WORKER, "sess_aaaa")
+    b = names.canary_secret_ref(WORKER, "sess_bbbb")
+    other = names.canary_secret_ref(names.instance_agent_id("worker", "0b7c2e"), "sess_aaaa")
+    assert a == names.canary_secret_ref(WORKER, "sess_aaaa")
+    assert len({a, b, other}) == 3  # per session, and per instance of the same role
+    assert a.startswith(f"burn/{WORKER}/canary_") and len(a.rsplit("_", 1)[1]) == 24
+    assert names.owner_of(a) == WORKER
+    assert names.is_canary_ref(a) and not names.is_canary_ref(f"burn/{WORKER}/api_key")
     # stays inside the event schema's secret_ref grammar even for long instance-style ids
     long_ref = names.canary_secret_ref("agent-" + "w" * 40, "i-" + "x" * 120)
     jsonschema.validate(events.make_event(agent_id="system", source="provider", action="canary_used",
                                           secret_ref=long_ref), EVENT_SCHEMA)
     for bad in ("", "has space", "x" * 129, "sess/../x"):
         with pytest.raises(ValueError):
-            names.canary_secret_ref("agent-worker", bad)
+            names.canary_secret_ref(WORKER, bad)
     with pytest.raises(ValueError):
         names.canary_secret_ref("shared", "sess_aaaa")

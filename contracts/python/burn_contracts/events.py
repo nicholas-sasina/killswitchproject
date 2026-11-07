@@ -29,7 +29,7 @@ OPTIONAL_FIELDS = (
     "session_id", "tool", "secret_ref", "fingerprint", "secret_type", "owner",
     "owner_agent_id", "target_agent_id", "destination", "encoding", "detail",
     "role", "parent_session",
-    "instance_id", "flag_level",
+    "flag_level",
 )
 
 _SECRET_REF_RE = re.compile(r"^burn/(agent-[a-z0-9-]{1,40}|shared)/[a-z0-9_]{1,40}$")

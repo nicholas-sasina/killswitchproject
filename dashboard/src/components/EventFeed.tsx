@@ -14,6 +14,7 @@ const actions: Record<EventAction, { icon: string; text: string }> = {
   started: { icon: "▶", text: "Agent instance started" },
   exited: { icon: "◼", text: "Agent instance exited" },
   unregistered: { icon: "?", text: "Unregistered agent refused" },
+  canary_used: { icon: "⚠", text: "Canary credential used" },
 };
 
 export function EventFeed({ events }: { events: LedgerEvent[] }) {

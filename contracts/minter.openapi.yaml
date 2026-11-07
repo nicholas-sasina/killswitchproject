@@ -84,12 +84,11 @@ paths:
                   items: { type: string }
                 evidence:
                   type: object
-                  description: Optional safe ids of what caused the burn (event_id, session_id, instance_id). The minter sets source=burn and agent_id itself.
+                  description: Optional safe ids of what caused the burn (event_id, session_id). The minter sets source=burn and agent_id itself.
                   additionalProperties: false
                   properties:
                     event_id: { type: string, pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$' }
                     session_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
-                    instance_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
       responses:
         '200':
           description: Rotation result. Canaries the agent owns are never rotated (they never authenticate).
@@ -151,7 +150,7 @@ paths:
     post:
       summary: Issue the session's canary. Idempotent per session - a retry returns the same canary.
       description: |
-        One decoy credential per session (or instance). It looks like a mock-provider api_key
+        One decoy credential per session (the session id is the instance's identity). It looks like a mock-provider api_key
         (`mpk_live_` + 32 chars) but never authenticates. The value goes only to Secrets Manager at
         `canary_ref` (= names.canary_secret_ref(agent_id, session_id)); this route returns metadata only.
         Called by session/instance creation right after the session id is known.
@@ -165,8 +164,7 @@ paths:
               type: object
               required: [agent_id]
               properties:
-                agent_id: { type: string, example: agent-worker }
-                instance_id: { type: string, nullable: true, description: 'Set when the session belongs to one instance of a role.' }
+                agent_id: { type: string, example: agent-worker-3fa91c }
       responses:
         '200':
           description: The session's canary (reference only, never the value)
@@ -283,7 +281,6 @@ components:
         event_id: { type: string, pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$' }
         agent_id: { type: string, pattern: '^(agent-[a-z0-9-]{1,40}|system)$' }
         session_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
-        instance_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
         tool: { type: string, pattern: '^[A-Za-z0-9_.-]{1,64}$' }
         ts: { type: string, format: date-time }
         fingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
@@ -291,10 +288,9 @@ components:
       type: object
       required: [canary_ref, agent_id, session_id, version, status, issued_at]
       properties:
-        canary_ref: { type: string, example: burn/agent-worker/canary_0f1e2d3c4b5a69788796a5b4 }
-        agent_id: { type: string }
+        canary_ref: { type: string, example: burn/agent-worker-3fa91c/canary_0f1e2d3c4b5a69788796a5b4 }
+        agent_id: { type: string, example: agent-worker-3fa91c }
         session_id: { type: string }
-        instance_id: { type: string, nullable: true }
         version: { type: integer, description: always 1; canaries are never rotated }
         status: { type: string, enum: [issuing, active, tripped] }
         issued_at: { type: string, format: date-time }
