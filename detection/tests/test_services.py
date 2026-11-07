@@ -75,11 +75,12 @@ class FakeCloud:
         self.ref = f"burn/{self.agent}/api_key"
         self.value = "mpk_" + "live_" + secrets.token_hex(16)
         self.secret_reads = []
+        self.sessions = [{"status": "active", "session_id": secrets.token_urlsafe(24)}]
 
     def Table(self, name):
         if name == "burn-exposures":
             return Mock(query=Mock(return_value={"Items": [{"secret_ref": self.ref}]}))
-        return Mock(query=Mock(return_value={"Items": [{"status": "active", "session_id": secrets.token_urlsafe(24)}]}))
+        return Mock(query=Mock(return_value={"Items": self.sessions}))
 
     def get_secret_value(self, SecretId):
         self.secret_reads.append(SecretId)
@@ -138,6 +139,67 @@ def test_tool_only_reads_ledger_secrets_and_sanitizes_proxy_reason():
     assert cloud.secret_reads == []
     result = service.run(agent_id=cloud.agent)
     assert result["reason"] == "proxy_rejected" and result["event_id"] is None
+
+
+@pytest.mark.parametrize("free_text", [None, "The report is complete."])
+def test_burned_agent_reaches_proxy_with_latest_revoked_session(free_text):
+    cloud = FakeCloud()
+    newest = secrets.token_urlsafe(24)
+    cloud.sessions = [
+        {"status": "revoked", "session_id": newest, "created_at": "2026-11-07T12:00:00Z"},
+        {"status": "revoked", "session_id": secrets.token_urlsafe(24), "created_at": "2026-11-07T11:00:00Z"},
+    ]
+    sent = []
+    event = make_event(agent_id=cloud.agent, source="egress", action="refused")
+    def transport(request):
+        sent.append(True)
+        return httpx.Response(403, json={"reason": "session_inactive", "event_id": event["event_id"]})
+    def client_factory(**kwargs):
+        assert httpx.URL(kwargs["proxy"]).password == newest
+        return httpx.Client(transport=httpx.MockTransport(transport))
+    service = LeakTest(ddb=cloud, secrets_client=cloud, client_factory=client_factory)
+    response = TestClient(create_app(service)).post("/leak-test", json={
+        "agent_id": cloud.agent, "encoding": "base64", "free_text": free_text})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["blocked"] and result["reason"] == "session_inactive"
+    assert result["requests_sent"] == 1 and sent == [True]
+    assert result["event_id"] == event["event_id"]
+    assert cloud.value not in response.text
+
+
+def test_active_session_is_preferred_to_a_newer_revoked_session():
+    cloud = FakeCloud()
+    active = secrets.token_urlsafe(24)
+    cloud.sessions = [
+        {"status": "revoked", "session_id": secrets.token_urlsafe(24), "created_at": "2026-11-07T13:00:00Z"},
+        {"status": "active", "session_id": active, "created_at": "2026-11-07T12:00:00Z"},
+        {"status": "active", "session_id": secrets.token_urlsafe(24), "created_at": "2026-11-07T11:00:00Z"},
+    ]
+    service = LeakTest(ddb=cloud, secrets_client=cloud)
+    assert service.current_session(cloud.agent) == active
+
+
+def test_agent_without_a_session_gets_specific_error_before_reading_secrets():
+    cloud = FakeCloud()
+    cloud.sessions = []
+    factory = Mock()
+    service = LeakTest(ddb=cloud, secrets_client=cloud, client_factory=factory)
+    response = TestClient(create_app(service)).post("/leak-test", json={"agent_id": cloud.agent})
+    assert response.status_code == 400 and response.json() == {"reason": "no_session"}
+    assert cloud.secret_reads == []
+    factory.assert_not_called()
+
+
+def test_invalid_encoding_keeps_generic_input_error():
+    cloud = FakeCloud()
+    cloud.sessions = []
+    service = LeakTest(ddb=cloud, secrets_client=cloud)
+    response = TestClient(create_app(service)).post("/leak-test", json={
+        "agent_id": cloud.agent, "encoding": "unsupported"})
+    assert response.status_code == 400
+    assert response.json() == {"reason": "invalid_or_unavailable_test"}
+    assert cloud.secret_reads == []
 
 
 def test_http_api_encodings_cors_and_safe_errors():

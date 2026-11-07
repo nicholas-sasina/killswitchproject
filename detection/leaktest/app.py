@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from leaktest.service import ENCODINGS, LeakTest
+from leaktest.service import ENCODINGS, LeakTest, NoSession
 
 
 class Attempt(BaseModel):
@@ -45,6 +45,8 @@ def create_app(service=None):
         try:
             service = service or LeakTest()
             return service.run(**attempt.model_dump())
+        except NoSession:
+            return JSONResponse(status_code=400, content={"reason": "no_session"})
         except ValueError:
             return JSONResponse(status_code=400, content={"reason": "invalid_or_unavailable_test"})
         except Exception:

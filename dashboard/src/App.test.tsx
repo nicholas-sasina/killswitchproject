@@ -119,7 +119,10 @@ describe("containment dashboard", () => {
     expect(screen.queryByRole("status", { name: "Burn result" })).toBeNull();
   });
 
-  it("clears a custom test payload after sending and reports the proxy outcome", async () => {
+  it.each([
+    { status: "active", reason: "Credential match stopped" },
+    { status: "revoked", reason: "session_inactive" },
+  ])("reports $status proxy outcomes", async ({ status, reason }) => {
     const id = `agent-${crypto.randomUUID()}`;
     const payload = crypto.randomUUID();
     const fetcher = vi
@@ -136,16 +139,18 @@ describe("containment dashboard", () => {
             JSON.stringify({
               blocked: true,
               encoding: "plain",
-              reason: "Credential match stopped",
+              reason,
             }),
           );
         }
         const body =
           path === "/events"
-            ? { events: [], agents: [{ agent_id: id, status: "active" }] }
+            ? { events: [], agents: [{ agent_id: id, status }] }
             : path === "/encodings"
               ? { encodings: ["plain"] }
-              : { agent_id: id, entries: [] };
+              : path.endsWith("/blast-radius")
+                ? { agent_id: id, keys: [], events: [] }
+                : { agent_id: id, entries: [] };
         return new Response(JSON.stringify(body));
       });
     vi.stubGlobal("fetch", fetcher);
@@ -174,7 +179,7 @@ describe("containment dashboard", () => {
       fireEvent.click(screen.getByRole("button", { name: "Send test ↗" }));
     });
     expect(screen.getByText("⊘ Blocked")).toBeTruthy();
-    expect(screen.getByText("Credential match stopped")).toBeTruthy();
+    expect(screen.getByText(reason)).toBeTruthy();
     expect(
       (screen.getByLabelText(/Free-text payload/) as HTMLTextAreaElement).value,
     ).toBe("");
