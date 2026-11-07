@@ -28,4 +28,6 @@ def load(directory):
         raise ValueError("supply one measured window for each of 36 B, 1 KiB and 16 KiB")
     return {"status": "measured", "source_commit": data["source_commit"], "measured_at": data["measured_at"],
             "scope": "DynamoDB read cost only, including cache refreshes in each measurement window",
+            "measurement_scope": data.get("scope", "owner-supplied (environment unspecified)"),
+            "notes": data.get("notes", "Capacity attribution to a specific test has not been independently verified."),
             "samples": sorted(rows, key=lambda r: r["output_bytes"])}

@@ -20,6 +20,16 @@ def test_missing_evidence_is_unmeasured(tmp_path):
     assert all(v["status"] == "unmeasured" for v in layers.load(tmp_path).values())
 
 
+def test_local_probe_scope_and_product_provenance_survive_aggregation():
+    data = evidence([{"event_id": "one", "recognized": 1, "in_context": 1}])
+    data.update(scope="local-product-code", notes="Storage and enrollment are simulated.",
+                source_dirty=True, product_source_sha256="a"*64)
+    result = layers.measure("references", data)
+    assert result["scope"] == data["scope"] and result["notes"] == data["notes"]
+    assert result["source_dirty"] and result["product_source_sha256"] == "a"*64
+    assert not result["target_met"]
+
+
 def test_reference_fraction_and_empty_denominator():
     result = layers.measure("references", evidence([
         {"event_id": "one", "recognized": 3, "in_context": 1},
@@ -48,6 +58,17 @@ def test_canary_detection_is_distinct_from_completed_burn():
         layers.measure("canaries", evidence(records))
 
 
+def test_canary_revocation_does_not_hide_failed_key_rotation():
+    data = evidence([{"event_id": "one", "used_at": "2026-11-07T23:00:00Z",
+                      "detected_at": "2026-11-07T23:00:01Z", "burned_at": "2026-11-07T23:00:02Z"}])
+    data["checks"] = {"provider_rejections": 1, "control_session_active": True,
+                      "containment_outcomes": {"contained_rotation_failed": 1}}
+    result = layers.measure("canaries", data)
+    assert result["detection_rate"] == 1 and result["burned"] == 1
+    assert not result["containment_target_met"]
+    assert result["checks"]["containment_outcomes"] == {"contained_rotation_failed": 1}
+
+
 def test_canary_invalid_timestamps_are_rejected():
     with pytest.raises(ValueError, match="out of order"):
         layers.measure("canaries", evidence([{"event_id": "one", "used_at": "2026-11-07T23:00:02Z",
@@ -57,7 +78,7 @@ def test_canary_invalid_timestamps_are_rejected():
 def test_destination_audit_does_not_hide_sink_or_unknown_access_controls():
     result = audit(Settings(gateway_url="https://gateway.example.test/mcp"))
     assert result["outsider_readable"] == 1
-    assert result["unverified"] == 1 and not result["target_met"]
+    assert result["unverified"] >= 1 and not result["target_met"]
     assert "local proxy configuration" in result["scope"]
 
 

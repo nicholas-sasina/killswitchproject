@@ -71,7 +71,7 @@ cd eval
 uv run --python 3.12 python run_offline.py --output-dir out/current
 ```
 
-This command runs offline and preserves the checked-in historical report. The generated report
+This command runs offline and preserves the published aggregate. The generated draft report
 separates established and held-out scanner corpora, references, canaries, destination review,
 and post-cache read costs. Missing owner evidence stays unmeasured. Load-test results distinguish
 refused, throttled, successful, and other failed calls; an exact throttling quota requires

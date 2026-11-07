@@ -39,6 +39,46 @@ def measure(kind, evidence):
         raise ValueError("observation event ids must be nonempty and unique")
     out = {"status": "measured", "source_commit": evidence["source_commit"],
            "measured_at": evidence["measured_at"], "observations": len(records)}
+    scope = evidence.get("scope", "owner-supplied (environment unspecified)")
+    if scope not in {"local-emulator", "local-product-code", "deployed-aws",
+                     "owner-supplied (environment unspecified)"}:
+        raise ValueError("unknown evidence scope")
+    out["scope"] = scope
+    if evidence.get("notes"):
+        if not isinstance(evidence["notes"], str):
+            raise ValueError("evidence notes must be text")
+        out["notes"] = evidence["notes"]
+    if "source_dirty" in evidence:
+        if type(evidence["source_dirty"]) is not bool:
+            raise ValueError("source_dirty must be a boolean")
+        out["source_dirty"] = evidence["source_dirty"]
+    if "product_source_sha256" in evidence:
+        digest = evidence["product_source_sha256"]
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("product_source_sha256 must be a SHA-256 digest")
+        out["product_source_sha256"] = digest
+    if "checks" in evidence:
+        checks = evidence["checks"]
+        if not isinstance(checks, dict):
+            raise ValueError("checks must be aggregate observations")
+        safe = {}
+        fields = ("responses", "withheld_responses", "tool_errors") if kind == "references" else ("provider_rejections",)
+        for field in fields:
+            if field in checks:
+                safe[field] = count(checks[field])
+        if kind == "canaries":
+            if "control_session_active" in checks:
+                if type(checks["control_session_active"]) is not bool:
+                    raise ValueError("control_session_active must be a boolean")
+                safe["control_session_active"] = checks["control_session_active"]
+            if "containment_outcomes" in checks:
+                outcomes = checks["containment_outcomes"]
+                allowed = {"contained", "contained_rotation_deferred", "contained_rotation_failed",
+                           "already_contained", "not_actionable", "ignored", "unknown"}
+                if not isinstance(outcomes, dict) or set(outcomes) - allowed:
+                    raise ValueError("unrecognized containment outcome")
+                safe["containment_outcomes"] = {k: count(v) for k, v in outcomes.items()}
+        out["checks"] = safe
     if kind == "references":
         recognized = exposed = 0
         for r in records:
@@ -69,6 +109,10 @@ def measure(kind, evidence):
                    burned=len(latencies), target_met=detected == len(records),
                    burn_seconds_p50=ordered[len(ordered)//2] if ordered else None,
                    burn_seconds_p95=ordered[min(len(ordered)-1, int(len(ordered)*.95))] if ordered else None)
+        if "checks" in out:
+            checks = out["checks"]
+            out["containment_target_met"] = (checks.get("containment_outcomes", {}).get("contained") == len(records)
+                and checks.get("control_session_active") is True and len(latencies) == len(records))
     else:
         raise ValueError("unknown measurement layer")
     return out

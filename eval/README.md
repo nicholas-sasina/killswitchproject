@@ -11,12 +11,15 @@ It measures `burn_detect` as it is; nothing here tunes a detector.
 - `payloads/forms.py` defines 31 ways to smuggle a value out (encodings, separators, splits across requests, partial leaks). Split forms run through one `SessionWindow`.
 - `catch_rate.py` runs every form for every credential type, 10 trials by default, and records "named" (the right credential identified) and "blocked" (any finding).
 - `false_positives.py` runs 31 normal payload types against a registry of decoy credentials.
-- Live scripts use throwaway `agent-eval-<random>` badges and sessions through the deployed Gateway and delete them afterwards: `latency_gateway.py` (client round trip plus Lambda REPORT durations from CloudWatch), `loadtest.py` (asyncio + httpx), `proxy_overhead.py` (same POST via the proxy and directly, in Docker).
+- AWS measurements use throwaway `agent-eval-<random>` badges and sessions through the deployed Gateway: `latency_gateway.py` (client round trip plus Lambda REPORT durations from CloudWatch) and `loadtest.py` (asyncio + httpx). Their cleanup is part of the live run.
+- `latency_scan.py` measures the scanner locally. `proxy_overhead.py` compares direct and proxied requests in Docker against a local AWS emulator, not the deployed Gateway.
 - `cost.py` multiplies list prices (with source URLs) by per-call usage; assumed usage is labelled.
 
 ## Key files
 - `run_offline.py`: runs the offline checks, merges any live output from `out/`, writes `results.json` and `RESULTS.md`.
 - `ddb_reads.py`: DynamoDB read/write units per call from CloudWatch over a load-test window, plus offline counts of fingerprints requested for larger outputs.
+- `capture_cache_cost.py`: validates a plan for three completed post-cache runs, reads CloudWatch capacity, and writes private measurement evidence.
+- `probes/`: runs actual Gateway response or canary handlers from an explicit source checkout against local AWS emulation.
 - `latency_gateway.py`, `latency_scan.py`, `loadtest.py`, `proxy_overhead.py`, `live/`: live and latency measurements.
 - `payloads/`: credential generators, smuggling forms, normal payloads.
 - `catch_rate.py`, `false_positives.py`, `cost.py`.
@@ -26,46 +29,67 @@ It measures `burn_detect` as it is; nothing here tunes a detector.
 ```bash
 cd eval
 uv run pytest -q
-uv run python run_offline.py --trials 10
-# live (needs AWS credentials; the proxy test also needs Docker)
-uv run python latency_gateway.py --calls 200
+uv run python run_offline.py --trials 10 --output-dir out/current
 uv run python latency_scan.py
+# local containers (requires Docker; no real AWS account)
 uv run python proxy_overhead.py --n 200
+# paid AWS measurements: coordinate approval and the shared-account owner first
+uv run python latency_gateway.py --calls 200
 uv run python loadtest.py --agents 50 --calls 5 --think 0.3 --revoke 3   # small by default; see the cost warning
-uv run python run_offline.py   # fold the results in
+uv run python run_offline.py --output-dir out/current   # combine the available evidence
 ```
 
-## Results so far
-Details and the full tables are in `RESULTS.md` and `results.json`. Scale numbers come from three runs against the deployed Gateway. The first two give each agent its own badge:
+## Published and historical measurements
+
+`RESULTS.md` and `results.json` hold the published aggregate. Read each layer's source commit,
+scope, observations and simulated steps; one report can combine measurements of different
+source checkouts. A local or staged-source measurement does not establish deployed behavior.
+
+The original deployed measurements, generated at commit `2c1d57c`, are preserved in
+[`reports/initial-deployed.md`](reports/initial-deployed.md) and
+[`reports/initial-deployed.json`](reports/initial-deployed.json). The following scale numbers
+come from three runs against that historical Gateway deployment. The first two give each agent its own badge:
 - 50 agents x 5 calls: 250 calls, 0 errors, about 62 calls/s, p50 253 ms, p95 360 ms.
 - 40 agents x 5 calls with 3 sessions revoked mid-run: every one of the 15 calls the revoked agents made after the revoke was refused, and all 185 calls from the other agents succeeded.
 
 - 1,000 simulated agents x 5 calls sharing 100 badges (agent i uses badge i % 100), concurrency 50, 10 of the 100 badges revoked mid-run (about 100 agents lose access). Command: `uv run python loadtest.py --agents 1000 --calls 5 --badges 100 --concurrency 50 --revoke 10`.
   5,000 tool calls in 41.8 s (about 120 calls/s); calls that were served had p50 227 ms and p95 810 ms.
-  4,593 succeeded, 262 were refused after the revoke, and 145 got HTTP 429 (the Gateway throttled at concurrency 50). No other errors.
+  4,593 succeeded, 262 were refused after the revoke, and 145 got HTTP 429 at the Gateway endpoint. Concurrency was 50; this does not identify the exact service quota or its value. No other errors were recorded.
   After the revoke, 262 of 281 calls from revoked agents were refused (the other 19 were throttled with 429, none succeeded) and 2,238 of 2,364 calls from the other agents succeeded (the rest were 429).
   All 100 badges, sessions and test events were deleted afterwards and checked.
 
-## DynamoDB reads scale with tool output size
-The Gateway's response step scans each tool output and looks up every candidate fingerprint (0.5 read unit per key, found or not). Measured over the 1,000-agent run with `read_ticket` (a ~36-byte output): 15.9 read units per call (13.3 fingerprints, 2.1 sessions, 0.5 scenario) and 0.07 write units. A 16 KiB config-like output asks for about 18,000 fingerprints, roughly $1,150 per 1M calls in reads alone; see `RESULTS.md`. The CloudWatch metrics are account-wide, so other traffic in the window is included.
+## Historical uncached read costs
+The historical uncached Gateway response step looked up every candidate fingerprint. Over the
+1,000-agent run with `read_ticket` (a roughly 36-byte output), the report measured 15.9 read units
+per call and 0.07 write units. Larger-output figures in that report are estimates from scanner
+candidate counts, not deployed 1 KiB or 16 KiB measurements. The CloudWatch metrics include
+other account traffic in the window. New cache code needs fresh measurements, including cache
+refreshes; candidate counts alone cannot establish its DynamoDB cost.
 
 ## Cost warning
 Every badge is one Cognito app client and one token request, billed at $0.00225 each, and every call also costs Gateway, Lambda and DynamoDB usage. `loadtest.py` defaults to 50 agents x 5 calls and refuses more than 20,000 calls, but a large run still costs real money (1,000 badges is about $2.25 in token requests alone; the 1,000-agent run above used 100 badges). Run big tests only deliberately.
 
 ## FAQ
-**Why not just report one catch-rate number?** One number hides the shape. Some forms (plain, any base64, hex, URL-encoding) are always caught; others (gzip, base32, rot13, junk characters, partial leaks) are not. `RESULTS.md` lists every form so the limits are visible.
+**Why not just report one catch-rate number?** One number hides the shape. Some forms were
+caught in every observed trial, while others were only partly caught or missed. That is a
+result for the sampled corpus, not a guarantee for every payload. `RESULTS.md` lists each form.
 
 **Is the eval tuned to the detector?** No. The forms were fixed before the first run, credentials are random each run, and the detector is not modified. Misses are reported as misses, with the outbound allowlist as the backstop.
 
-**Where do cost numbers come from?** AWS list prices fetched on the date in `results.json`, each with a source URL. Per-call usage that has not been measured on the deployed Gateway is marked `assumed`.
+**Where do cost numbers come from?** `cost.py` records its pricing date and source URLs.
+Per-call usage that has not been measured is marked `assumed`. These are estimates; price
+inputs and observed usage must be reviewed before making a current deployment-cost claim.
 
-**Is there a no-Burn latency baseline?** Not for the Gateway: its interceptor cannot be switched off without redeploying, so we report the interceptor's own Lambda durations and its share of the client round trip instead. The proxy has a true baseline (direct request to the sink). The proxy figures use a local AWS emulator for fingerprint lookups, so real DynamoDB adds its own round trip.
+**Is there a no-Burn latency baseline?** The Gateway report uses the interceptor's Lambda
+durations and share of the client round trip; it has no deployed no-interceptor baseline.
+The local proxy test compares direct and proxied requests to the sink. Its fingerprint
+lookups use an AWS emulator, so its timings exclude real DynamoDB network latency.
 
 **Do simulated agents share badges?** By default each has its own. `--badges N` makes fewer real badges and spreads the agents over them, which avoids Cognito's client-creation rate limit; the Gateway path is identical and the results state how many real badges were used.
 
 ## Separate layers and held-out tests
 
-Run the offline report without replacing historical checked-in measurements:
+Generate a draft offline report without replacing the published aggregate:
 
 ```bash
 uv run --python 3.12 python run_offline.py --trials 10 --output-dir out/current
@@ -78,12 +102,16 @@ detectors against it; if another owner adds decoders, report this corpus separat
 freeze a new unseen corpus for future tuning. It is developer-authored evaluation, not an
 independent audit. Scanner results are offline measurements, not end-to-end protection rates.
 
-References, canaries and post-cache reads require observations from their component owners.
+References, canaries and post-cache reads require observations from the code path being measured.
 Missing observations are **unmeasured**, never zero or a passing target. Use `--evidence-dir`
 to select a private evidence directory (default `out/`). Keep inputs and draft reports there;
 never commit raw secrets or fabricate observations to complete a report.
 
-Each evidence file includes `source_commit`, a timezone-bearing `measured_at`, and:
+Each evidence file includes `source_commit` (a 7–40 character lowercase Git hash), a
+timezone-bearing `measured_at`, and the observations below. Reference/canary evidence also
+carries `scope`: `local-product-code`, `local-emulator`, or `deployed-aws`, with `notes` describing
+simulated steps. Older owner-supplied artifacts without a scope remain environment-unspecified.
+Never treat a local measurement as a deployed result.
 
 | File | Required observations |
 |---|---|
@@ -97,9 +125,59 @@ Cache measurements report DynamoDB read cost, not an entire infrastructure cost.
 inputs retain their stated assumptions and the pricing date in `cost.py`. Owner-produced
 observations are supplied evidence, not independently verified by the aggregator.
 
-The destination audit uses this process's configured proxy endpoints. The default attacker
-sink counts as readable; unverified application endpoints remain unverified. It does not load
-a deployed proxy's environment automatically or claim the target of zero is met.
+## Measure actual handlers locally
+
+From `eval/`, measure the Gateway response interceptor in the current checkout:
+
+```bash
+uv run --locked --python 3.12 --extra probes python -m probes references --source-root .. --trials 5 --output out/references.json
+```
+
+The probe generates private test credentials, supplies a synthetic tool response, and runs
+the actual response handler with AWS services emulated in memory. It counts recognized raw
+values remaining in the output the agent would receive. It does not replace or simulate a
+reference implementation to obtain a passing result. If the selected source still passes
+recognized values through, the measured exposure target fails.
+
+Canary measurements require a source checkout containing the canary owner's implementation
+and `burn_api/scripts/canary_harness.py`. To evaluate that reviewed branch without merging it,
+prepare a detached checkout from the repository root:
+
+```bash
+git fetch origin ws/canaries
+git worktree add --detach .run/canary-source origin/ws/canaries
+```
+
+Then, from `eval/`:
+
+```bash
+uv run --locked --python 3.12 --extra probes python -m probes canaries --source-root ../.run/canary-source --trials 5 --output out/canaries.json
+uv run --python 3.12 python run_offline.py --output-dir out/current
+```
+
+This executes the selected source's provider, Burn API and minter handlers against moto.
+Enrollment, canary planting and exposure, the leak and attacker decoding are simulated by
+the owner's harness. Incident dispatch is synchronous in process. The resulting timings
+exclude real AWS networking and asynchronous Lambda dispatch, so they are local handler
+measurements, not deployed end-to-end latency.
+
+Both probes run in a subprocess with outbound socket connections denied. They write private
+observation files and print counts and provenance rather than credentials. Each artifact
+identifies its source commit and source hashes; inspect the dirty-source flag and the scope
+before publishing. The references and canary probes can measure different commits. Neither
+asserts that the selected source is merged or deployed.
+
+The destination audit uses this process's configured proxy endpoints. It does not load a
+deployed proxy's environment automatically. The configured attacker sink counts as readable;
+AWS and application endpoints remain unverified until actual capability and access-control
+evidence establishes what an outsider could read. An authenticated hostname alone does not
+establish that it is safe.
+
+`BURN_SINK_URL=''` explicitly removes the test sink from the proxy's deployment allowlist and
+removes its private-address exception. The default still includes the demo sink. Run the
+audit with the same configuration as the proxy being evaluated. Removing the sink does not
+verify the remaining destinations. An empty session `egress` list permits no hosts, but it
+also prevents the agent from doing its work; this is not a usable zero-exposure deployment.
 
 New load runs split post-revocation calls into refused, throttled, succeeded and other errors,
 for revoked and unaffected agents separately. Latency includes successful calls only; no
@@ -111,3 +189,32 @@ retain their original grouping and are labelled legacy when rendered.
 Live measurements incur charges and change shared state. Coordinate them with Oliver and the
 integration owner. After the fingerprint-cache change is deployed, collect the three output
 sizes and full Gateway metrics together; do not reuse pre-cache inputs as post-cache results.
+
+## Capture post-cache read costs
+
+The integration owner first verifies which cache-enabled source commit is deployed and runs
+the approved 36 B, 1 KiB and 16 KiB output measurements. Record the actual completed call count
+and CloudWatch window for each run in private `out/cache-windows.json`:
+
+- `source_commit`: the deployed Git hash, and `cache_enabled: true` confirmed by the owner.
+- `samples`: exactly three entries, with `output_bytes` equal to 36, 1024 and 16384.
+- Each entry has `calls`, `tool`, `start` and `end`. Times include a timezone, are aligned to
+  whole minutes, and cover the completed run. Use separate, non-overlapping windows for the
+  three sizes. `calls` is the number completed in that window,
+  not the planned load-test count.
+
+Then, from `eval/`:
+
+```bash
+uv run --python 3.12 python capture_cache_cost.py --plan out/cache-windows.json
+uv run --python 3.12 python run_offline.py --output-dir out/current
+```
+
+The collector writes `out/fingerprint_cache.json` by default; `--output` selects another path.
+It reads AWS metrics but does not deploy a cache or start a load test. Missing read-capacity
+datapoints fail the collection rather than being reported as zero. Allow time for CloudWatch
+publication and investigate missing metrics before trying again.
+
+The sum covers the selected account tables and includes unrelated traffic and cache refreshes.
+Dividing it by the supplied call count is an estimate over that window, not proof that every read
+was caused by those calls. Keep that attribution limit beside published cost results.

@@ -95,7 +95,9 @@ def revoke_note(l: dict) -> str:
     if not r:
         return ""
     if "revoked_outcomes" in r:
-        return f"; after revoke: revoked agents {r['revoked_outcomes']}; other agents {r['other_outcomes']}"
+        def describe(counts):
+            return ", ".join(f"{v} {name.replace('_', ' ')}" for name, v in counts.items())
+        return f"; after revoke: revoked agents ({describe(r['revoked_outcomes'])}); other agents ({describe(r['other_outcomes'])})"
     return ("; legacy report (throttling not separated by group): "
             f"{r['refused_of_those']}/{r['calls_after_revoke_from_revoked']} calls from revoked agents refused, "
             f"{r['succeeded_of_those']}/{r['calls_after_revoke_from_others']} from other agents succeeded")
@@ -160,15 +162,35 @@ def markdown(r: dict) -> str:
         if layer["status"] == "unmeasured":
             out.append(f"- {name}: **unmeasured**. {layer['reason']}")
         else:
-            values = {k: v for k, v in layer.items() if k not in {"source_commit", "measured_at", "status"}}
-            out.append(f"- {name}: {values}; source commit `{layer['source_commit']}`, measured {layer['measured_at']}.")
+            scope = layer.get("scope", "environment unspecified")
+            out += [f"### {name.capitalize()}", "",
+                    f"Scope: **{scope}**. Source commit `{layer['source_commit']}`, measured {layer['measured_at']}.", ""]
+            if layer.get("notes"):
+                out += [layer["notes"], ""]
+            if "source_dirty" in layer:
+                out += [f"Product checkout has uncommitted changes: {layer['source_dirty']}.", ""]
+            if layer.get("product_source_sha256"):
+                out += [f"Inspected product source SHA-256: `{layer['product_source_sha256']}`.", ""]
+            if name == "references":
+                rate = pct(layer["exposure_rate"]) if layer["exposure_rate"] is not None else "unmeasured (no recognized credentials)"
+                out += [f"Credentials in agent context: {layer['in_context']}/{layer['recognized']} ({rate}).", ""]
+            elif name == "canaries":
+                timing = f"p50 {layer['burn_seconds_p50']} s; p95 {layer['burn_seconds_p95']} s" if layer['burned'] else "unmeasured (no completed burns)"
+                out += [f"Uses detected: {layer['detected']}/{layer['uses']} ({pct(layer['detection_rate'])}). "
+                        f"Recorded revocations: {layer['burned']}/{layer['uses']}. Time from use to revocation: {timing}.", ""]
+            if layer.get("checks"):
+                out += ["Additional observed checks:", ""]
+                out += [f"- {key.replace('_', ' ')}: {value}" for key, value in layer["checks"].items()]
+                out += [""]
     audit = r.get("destinations")
     if audit:
         out += ["", "## Destinations", "", audit["scope"], "",
                 f"Outsider-readable destinations: {audit['outsider_readable']}; unverified: {audit['unverified']}. "
                 f"Target zero verified: {audit['target_met']}. The simulated-attacker sink is included.", "",
                 "| Host | Outsider readable | Basis |", "|---|---|---|"]
-        out += [f"| {x['host']} | {x['outsider_readable']} | {x['basis']} |" for x in audit["destinations"]]
+        out += [f"| {x['host']} | {'unknown' if x['outsider_readable'] is None else 'yes' if x['outsider_readable'] else 'no'} | {x['basis']} |" for x in audit["destinations"]]
+        if "mode" in audit:
+            out += ["", f"Configuration mode: {audit['mode']}. A deny-all configuration is not a usable production configuration."]
     cache = r.get("cache_costs")
     if cache:
         out += ["", "## Post-cache DynamoDB read cost", ""]
@@ -176,6 +198,7 @@ def markdown(r: dict) -> str:
             out += [cache["reason"] + " This report does not claim a post-cache cost improvement."]
         else:
             out += [f"Source commit `{cache['source_commit']}`, measured {cache['measured_at']}. {cache['scope']}.", "",
+                    f"Measurement scope: {cache.get('measurement_scope', 'environment unspecified')}. {cache.get('notes', '')}", "",
                     "| Output bytes | Calls | Read units/call | Read USD/1M calls |", "|---|---|---|---|"]
             out += [f"| {x['output_bytes']} | {x['calls']} | {x['read_units_per_call']} | {x['dynamodb_read_usd_per_1m_calls']} |" for x in cache["samples"]]
     out += ["", "## Exit check: established corpus", "",
