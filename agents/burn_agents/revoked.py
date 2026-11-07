@@ -1,11 +1,14 @@
 """Decide whether a failure means "this agent has been burned".
 
-After a burn three things happen: the gateway refuses the badge ("BURN:"
-errors), the badge issuer stops issuing tokens, and the agent's AWS key is
-rotated so the model call fails authentication. Any of them means the same
+After a burn four things happen: the gateway refuses the badge ("BURN:"
+errors), the badge issuer stops issuing tokens, the agent's AWS key is
+rotated so the model call fails authentication, and the egress proxy refuses
+the agent's session. Any of them means the same
 thing to the agent: stop, quietly, and do not retry.
 """
-from botocore.exceptions import ClientError
+import httpcore
+import httpx
+from botocore.exceptions import ClientError, ProxyConnectionError
 
 from .badge import TokenRefused
 
@@ -32,15 +35,29 @@ def is_refusal_text(text: str) -> bool:
     return "BURN:" in text and any(m in text.lower() for m in BADGE_MARKERS)
 
 
+def is_proxy_refusal(exc: BaseException) -> bool:
+    """The egress proxy refuses a burned agent's session (HTTP 403, or 407 for bad proxy auth)."""
+    proxy_errors = (httpx.ProxyError, httpcore.ProxyError, ProxyConnectionError)
+    return isinstance(exc, proxy_errors) and any(code in str(exc) for code in ("403", "407"))
+
+
 def looks_revoked(exc: BaseException) -> bool:
-    seen = set()
-    while exc is not None and id(exc) not in seen:
+    """Walk the cause/context chain and into exception groups.
+
+    The MCP client runs its transport in an asyncio TaskGroup, so a refused
+    proxy CONNECT arrives wrapped in an ExceptionGroup inside a RuntimeError.
+    """
+    pending, seen = [exc], set()
+    while pending:
+        exc = pending.pop()
+        if exc is None or id(exc) in seen:
+            continue
         seen.add(id(exc))
-        if isinstance(exc, (Revoked, TokenRefused)):
+        if isinstance(exc, (Revoked, TokenRefused)) or is_proxy_refusal(exc):
             return True
         if isinstance(exc, ClientError) and exc.response.get("Error", {}).get("Code") in AUTH_ERROR_CODES:
             return True
         if is_refusal_text(str(exc)) or any(m.lower() in str(exc).lower() for m in MESSAGE_MARKERS):
             return True
-        exc = exc.__cause__ or exc.__context__
+        pending += [exc.__cause__, exc.__context__, *getattr(exc, "exceptions", ())]
     return False

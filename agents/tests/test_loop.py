@@ -74,3 +74,36 @@ def test_looks_revoked_recognises_each_signal():
     assert not looks_revoked(RuntimeError("BURN: blocked: the message contains a credential"))
     assert not looks_revoked(RuntimeError("BURN: access refused: recipient not allowed: agent-x"))
     assert not looks_revoked(throttle)
+
+
+def test_proxy_refusal_inside_an_exception_group_is_a_stop():
+    """The real chain: ProxyError in a TaskGroup's ExceptionGroup, then the MCP client's RuntimeError."""
+    import httpcore
+    import httpx
+
+    for proxy_error in (httpcore.ProxyError("403 Forbidden"), httpx.ProxyError("407 Proxy Authentication Required")):
+        group = ExceptionGroup("unhandled errors in a TaskGroup", [proxy_error])
+        closed = RuntimeError("Connection to the MCP server was closed")
+        closed.__context__ = group
+        assert looks_revoked(closed)
+        assert looks_revoked(group)
+
+
+def test_run_agent_logs_the_stop_line_once_for_the_grouped_proxy_error(caplog):
+    import httpcore
+
+    def work():
+        try:
+            raise ExceptionGroup("unhandled errors in a TaskGroup", [httpcore.ProxyError("403 Forbidden")])
+        except ExceptionGroup as group:
+            raise RuntimeError("Connection to the MCP server was closed") from group
+
+    with caplog.at_level("ERROR", logger="burn_agents"):
+        assert run_agent(work) == "revoked"
+    assert caplog.text.count("badge revoked/credentials rotated - stopping") == 1
+
+
+def test_proxy_errors_that_are_not_refusals_still_raise():
+    import httpcore
+
+    assert not looks_revoked(ExceptionGroup("x", [httpcore.ProxyError("502 Bad Gateway")]))
