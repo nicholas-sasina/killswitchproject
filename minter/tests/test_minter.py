@@ -165,6 +165,17 @@ def test_delete_removes_everything(secrets_client, tables):
     assert call("DELETE", f"/agents/{AGENT}/credentials")[1] == {"deleted": []}  # safe to repeat
 
 
+def test_delete_api_key_only_agent_never_touches_iam(monkeypatch):
+    issue(types=["api_key"])
+
+    def forbidden(*args, **kwargs):  # real IAM answers AccessDenied for a user that never existed
+        raise AssertionError("IAM must not be called for an agent without an aws_key")
+
+    for name in ("list_access_keys", "delete_user_policy", "delete_user"):
+        monkeypatch.setattr(aws.iam(), name, forbidden)
+    assert call("DELETE", f"/agents/{AGENT}/credentials") == (200, {"deleted": [f"burn/{AGENT}/api_key"]})
+
+
 def test_delete_shared():
     call("POST", "/shared/credentials", {"name": "tok", "type": "other", "template": "t-{random}"})
     assert call("DELETE", "/shared/credentials")[1] == {"deleted": ["burn/shared/tok"]}
@@ -174,3 +185,22 @@ def test_bad_requests():
     assert call("POST", "/agents/Not_An_Agent/credentials", {"types": ["api_key"]})[0] == 400
     assert call("POST", f"/agents/{AGENT}/credentials", {"types": ["root_key"]})[0] == 400
     assert call("GET", "/nope")[0] == 404
+
+
+def test_recreating_a_just_deleted_secret_retries(monkeypatch, secrets_client):
+    import vault
+    monkeypatch.setattr(vault.time, "sleep", lambda s: None)
+    client, real = aws.secrets(), aws.secrets().create_secret
+    calls = []
+
+    def flaky(**kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            raise client.exceptions.InvalidRequestException(
+                {"Error": {"Code": "InvalidRequestException", "Message": "already scheduled for deletion"}},
+                "CreateSecret")
+        return real(**kwargs)
+
+    monkeypatch.setattr(client, "create_secret", flaky)
+    vault.put("burn/shared/tok", "v")
+    assert len(calls) == 3 and secret(secrets_client, "burn/shared/tok") == "v"
