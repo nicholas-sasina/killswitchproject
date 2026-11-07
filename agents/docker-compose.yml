@@ -1,0 +1,29 @@
+# Static part of the demo stack. The agent services are generated per scenario
+# into .run/compose.agents.yml by scripts/run_demo.py and layered on top.
+#
+#   agents_internal: no route to the internet; agents can only reach the proxy.
+#   egress:          the proxy's way out, and where the sink listens.
+services:
+  proxy:
+    build: ../detection/proxy
+    networks: [agents_internal, egress]
+    volumes:
+      - certs:/certs
+    environment:
+      # The proxy looks up fingerprints and sessions; it uses your AWS credentials.
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - BURN_API_URL
+  sink:
+    build: ../detection/sink
+    networks: [egress]
+
+networks:
+  agents_internal:
+    internal: true
+  egress: {}
+
+volumes:
+  certs: {}
