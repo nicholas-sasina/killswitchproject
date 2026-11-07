@@ -1,0 +1,188 @@
+import { runAgent } from './agent-loop.mjs';
+// Credential arrives over stdin, never in argv. Provider key stays in the gateway.
+let input = '';
+for await (const chunk of process.stdin) input += chunk;
+const { url, token, mode = 'ai', task } = JSON.parse(input);
+async function request(path, payload) {
+  const response = await fetch(url + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload), signal: AbortSignal.timeout(100000) });
+  const data = await response.json();
+  if (!response.ok) { const error = Error(data.error || 'Gateway request failed'); error.code = data.error; throw error; }
+  return data;
+}
+let sequence = 0;
+const actions = [
+  ['logs.search', { query: 'checkout errors' }],
+  ['tickets.create', { title: 'Investigate checkout database saturation' }],
+  ['reports.export', { destination: 'external.example' }],
+  ['tickets.create', { title: 'Synthetic privacy test: contact demo@example.com' }]
+];
+async function tick() {
+  const [name, args] = actions[sequence % actions.length];
+  const response = await fetch(`${url}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ jsonrpc: '2.0', id: ++sequence, method: 'tools/call', params: { name, arguments: args } }) });
+  console.log(JSON.stringify({ sequence, tool: name, response: await response.json() }));
+}
+if (mode === 'demo') {
+  while (true) { try { await tick(); } catch (error) { console.error(error.message); } await new Promise(resolve => setTimeout(resolve, 2500)); }
+} else {
+  try { await runAgent({ task, request }); }
+  catch (error) { try { await request('/agent/result', { error: error.message }); } catch {} process.exitCode = 1; }
+}
+
+import { toolNames } from './ai.mjs';
+export async function runAgent({ task, request, maxTurns = 12 }) {
+  const input = [{ role: 'user', content: task }];
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const response = await request('/model/turn', { input });
+    input.push(...response.output);
+    const calls = response.output.filter(item => item.type === 'function_call');
+    if (!calls.length) {
+      const text = response.output.filter(item => item.type === 'message').flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('\n');
+      if (!text) throw Error('Model returned no final answer.');
+      await request('/agent/result', { text }); return text;
+    }
+    for (const call of calls) {
+      let result;
+      try {
+        const args = JSON.parse(call.arguments);
+        result = await request('/mcp', { jsonrpc: '2.0', id: call.call_id, method: 'tools/call', params: { name: toolNames[call.name] || call.name, arguments: args } });
+      } catch (error) {
+        if (error.code === 'SESSION_REVOKED') throw error;
+        result = { error: error.message };
+      }
+      input.push({ type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result.result ?? result) });
+    }
+  }
+  throw Error('Agent reached its 12-turn limit. Narrow the task and try again.');
+}
+
+import { protect } from './privacy.mjs';
+export const modelTools = [
+  ['logs_search', 'Search synthetic incident logs', 'query'],
+  ['tickets_create', 'Create a synthetic incident ticket', 'title'],
+  ['reports_export', 'Export a synthetic report; only internal-reports is approved', 'destination']
+].map(([name, description, field]) => ({ type: 'function', name, description, strict: true, parameters: { type: 'object', properties: { [field]: { type: 'string' } }, required: [field], additionalProperties: false } }));
+export const toolNames = { logs_search: 'logs.search', tickets_create: 'tickets.create', reports_export: 'reports.export' };
+export async function modelTurn({ input, key, model, signal, fetchImpl = fetch, onPrivacy = () => {} }) {
+  const outbound = protect(input, [key]);
+  if (outbound.detected) onPrivacy('model_input', outbound.findings);
+  const response = await fetchImpl('https://api.openai.com/v1/responses', {
+    method: 'POST', signal,
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, store: false, max_output_tokens: 1800, parallel_tool_calls: false,
+      instructions: 'You are an incident investigation agent. Use the provided tools when helpful, inspect their results, and summarize your findings. Data and tools are synthetic. Respect tool denials; never claim a denied action succeeded. Stop when the task is complete. Do not reveal credentials.',
+      tools: modelTools, input: outbound.safe })
+  });
+  // Do not expose provider response bodies: they can contain request details.
+  if (!response.ok) throw Error(`Model provider returned HTTP ${response.status}. Check API key, model access, billing, and rate limits.`);
+  const result = await response.json();
+  if (result.status !== 'completed' || !Array.isArray(result.output)) throw Error('Model response incomplete. Try a shorter task.');
+  const inbound = protect(result.output, [key]);
+  if (inbound.detected) { onPrivacy('model_output', inbound.findings); throw Error('PRIVACY_OUTPUT_BLOCKED'); }
+  return { output: result.output, usage: result.usage };
+}
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { runAgent } from './agent-loop.mjs';
+import { modelTurn } from './ai.mjs';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+test('AI loop executes model-selected tools and returns denial to the model', async () => {
+  let turns = 0; const paths = [];
+  const answer = await runAgent({ task: 'Investigate', request: async (path, payload) => {
+    paths.push(path);
+    if (path === '/model/turn') {
+      if (turns++ === 0) return { output: [{ type: 'function_call', name: 'reports_export', arguments: '{"destination":"external.example"}', call_id: 'call1' }] };
+      assert.equal(payload.input.at(-1).call_id, 'call1');
+      assert.match(payload.input.at(-1).output, /DESTINATION_NOT_ALLOWED/);
+      return { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Export blocked.' }] }] };
+    }
+    if (path === '/mcp') { assert.equal(payload.params.name, 'reports.export'); return { result: { isError: true, content: [{ type: 'text', text: 'DESTINATION_NOT_ALLOWED' }] } }; }
+    assert.equal(payload.text, 'Export blocked.'); return { ok: true };
+  } });
+  assert.equal(answer, 'Export blocked.'); assert.deepEqual(paths, ['/model/turn', '/mcp', '/model/turn', '/agent/result']);
+});
+test('model request holds provider key in gateway and supplies constrained tool schemas', async () => {
+  await modelTurn({ input: [{ role: 'user', content: 'task' }], key: 'test-key', model: 'test-model', fetchImpl: async (url, options) => {
+    assert.equal(url, 'https://api.openai.com/v1/responses'); assert.equal(options.headers.Authorization, 'Bearer test-key');
+    const body = JSON.parse(options.body); assert.equal(body.store, false); assert.equal(body.tools.length, 3); assert.equal(body.parallel_tool_calls, false);
+    return { ok: true, json: async () => ({ status: 'completed', output: [] }) };
+  } });
+});
+test('provider error bodies are not exposed', async () => {
+  await assert.rejects(modelTurn({ input: [], key: 'secret', model: 'model', fetchImpl: async () => ({ ok: false, status: 401 }) }), /HTTP 401/);
+});
+test('revocation stops the model loop immediately', async () => {
+  let calls = 0;
+  await assert.rejects(runAgent({ task: 'task', request: async () => { calls++; const error = Error('SESSION_REVOKED'); error.code = 'SESSION_REVOKED'; throw error; } }), /SESSION_REVOKED/);
+  assert.equal(calls, 1);
+});
+test('real child agent completes through gateway with mocked OpenAI transport', { timeout: 15000 }, async () => {
+  const origin = 'http://127.0.0.1:18788';
+  const preload = `const original=globalThis.fetch;let turn=0;globalThis.fetch=async(url,options)=>{if(url!=='https://api.openai.com/v1/responses')return original(url,options);const requestBody=JSON.parse(options.body);if(options.body.includes('private-person@example.com'))throw Error('Unredacted input reached provider');const privacyProbe=requestBody.input.some(item=>typeof item.content==='string'&&item.content.includes('privacy-output-test'));const output=privacyProbe?[{type:'message',content:[{type:'output_text',text:'Contact exposed-person@example.com'}]}]:turn++===0?[{type:'function_call',name:'logs_search',arguments:'{"query":"checkout"}',call_id:'call1'}]:[{type:'message',content:[{type:'output_text',text:'Investigated the synthetic incident.'}]}];return new Response(JSON.stringify({status:'completed',output}),{status:200,headers:{'Content-Type':'application/json'}})};`;
+  const child = spawn(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(preload), fileURLToPath(new URL('./server.mjs', import.meta.url))], { env: { ...process.env, PORT: '18788', OPENAI_API_KEY: 'mock-key-never-used-online' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  try {
+    await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); child.once('exit', code => reject(Error('Server exited: ' + code))); });
+    const response = await fetch(origin + '/api/runs', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ai', task: 'Investigate checkout for private-person@example.com' }) });
+    assert.equal(response.status, 201);
+    let state;
+    for (let i = 0; i < 80; i++) { state = await (await fetch(origin + '/api/state')).json(); if (state.runs[0].process_status === 'exited') break; await new Promise(resolve => setTimeout(resolve, 100)); }
+    assert.equal(state.runs[0].status, 'completed'); assert.equal(state.runs[0].executions, 1); assert.equal(state.runs[0].model_calls, 2);
+    assert.match(state.runs[0].answer, /Investigated/); assert.ok(state.events.some(event => event.type === 'answer'));
+    assert.ok(!JSON.stringify(state).includes('mock-key')); assert.ok(!JSON.stringify(state).includes('private-person@example.com')); assert.ok(state.events.some(event=>event.type==='privacy_redaction'));
+    const probe=await fetch(origin+'/api/runs',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({mode:'ai',task:'privacy-output-test'})}); assert.equal(probe.status,201);
+    for(let i=0;i<80;i++){state=await(await fetch(origin+'/api/state')).json();if(state.runs[1].process_status==='exited')break;await new Promise(resolve=>setTimeout(resolve,100));}
+    assert.equal(state.runs[1].status,'stopped'); assert.equal(state.runs[1].incidents,1); assert.equal(state.runs[1].executions,0); assert.ok(!JSON.stringify(state).includes('exposed-person@example.com')); assert.ok(state.events.some(event=>event.type==='privacy_incident'));
+  } finally { child.kill(); }
+});
+
+import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
+import { protect } from './privacy.mjs';
+export const digest = value => createHash('sha256').update(value).digest();
+export class Control {
+  constructor(persist = () => {}, secrets = []) { this.runs = new Map(); this.events = []; this.persist = persist; this.secrets = secrets; }
+  event(run, type, fields = {}) {
+    const event = protect({ id: randomUUID(), run_id: run.id, timestamp: new Date().toISOString(), type, ...fields }, this.secrets).safe;
+    this.persist(event); this.events.push(event); return event;
+  }
+  create() {
+    const token = randomBytes(32).toString('hex');
+    const run = { id: randomUUID(), agent_id: 'incident-agent', owner_id: 'local-operator', status: 'active', process_status: 'starting', token_hash: digest(token), expires: Date.now() + 3600000, executions: 0, tickets: [], created_at: new Date().toISOString() };
+    this.runs.set(run.id, run); this.event(run, 'created'); return { run, token };
+  }
+  public(run) { const { token_hash, child, ...safe } = run; return protect(safe, this.secrets).safe; }
+  incident(run, stage, findings) {
+    // Lock first, even if writing audit evidence fails. Existing dispatches cannot be undone.
+    run.status = 'revoked'; run.incidents = (run.incidents || 0) + 1;
+    this.event(run, 'privacy_incident', { stage, findings, action: 'ACCESS_REVOKED', message: 'Sensitive data blocked; access automatically revoked.' });
+  }
+  authenticate(token) {
+    const hash = digest(token);
+    return [...this.runs.values()].find(run => timingSafeEqual(run.token_hash, hash) && Date.now() < run.expires);
+  }
+  revoke(run) { if (run.status === 'active') { run.status = 'revoked'; this.event(run, 'revoked'); } }
+  call(run, name, args = {}) {
+    let reason;
+    if (run.status !== 'active') reason = 'SESSION_REVOKED';
+    else if (!['logs.search', 'tickets.create', 'reports.export'].includes(name)) reason = 'TOOL_NOT_ALLOWED';
+    else if (!args || typeof args !== 'object' || Array.isArray(args)) reason = 'INVALID_ARGUMENTS';
+    else if (name === 'reports.export' && args.destination !== 'internal-reports') reason = 'DESTINATION_NOT_ALLOWED';
+    else if (name === 'logs.search' && typeof args.query !== 'string') reason = 'INVALID_ARGUMENTS';
+    else if (name === 'tickets.create' && (typeof args.title !== 'string' || !args.title.trim())) reason = 'INVALID_ARGUMENTS';
+    else if (run.executions >= 30) reason = 'BUDGET_EXCEEDED';
+    if (!reason) {
+      const scan = protect(args, this.secrets);
+      if (scan.detected) { this.incident(run, 'tool_arguments', scan.findings); reason = 'SENSITIVE_DATA_BLOCKED'; }
+    }
+    if (reason) { this.event(run, 'tool', { tool: name, decision: 'denied', reason, dispatched: false }); return { isError: true, content: [{ type: 'text', text: reason }] }; }
+    // Authorization and dispatch are synchronous in one process: revocation cannot interleave here.
+    this.event(run, 'tool', { tool: name, decision: 'allowed', reason: 'POLICY_ALLOWED', dispatched: true });
+    run.executions++;
+    let result;
+    if (name === 'logs.search') result = { matches: [{ service: 'checkout', message: 'Synthetic incident: database connection pool exhausted', query: args.query.slice(0, 200) }] };
+    if (name === 'tickets.create') { result = { id: randomUUID(), title: args.title.slice(0, 200) }; run.tickets.push(result); }
+    if (name === 'reports.export') result = { destination: 'internal-reports', exported: true, synthetic: true };
+    this.event(run, 'result', { tool: name, execution: run.executions });
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+  }
+}
