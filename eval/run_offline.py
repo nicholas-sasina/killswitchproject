@@ -25,7 +25,7 @@ def load_live() -> dict:
         "scan_latency": read("latency_scan.json"),
         "proxy_overhead": read("proxy_overhead.json"),
         "load_small": read("loadtest_50x5.json"),
-        "load_1000": read("loadtest_1000x5.json"),
+        "load_revocation": read("loadtest_40x5.json"),
     }.items() if v}
     return live
 
@@ -58,6 +58,14 @@ def classify(row: dict) -> str:
     return "missed" if row["blocked"] == 0 else "partial"
 
 
+def revoke_note(l: dict) -> str:
+    r = l.get("revocation")
+    if not r:
+        return ""
+    return (f"; after revoke: {r['refused_of_those']}/{r['calls_after_revoke_from_revoked']} calls from revoked agents refused, "
+            f"{r['succeeded_of_those']}/{r['calls_after_revoke_from_others']} from other agents succeeded")
+
+
 def live_rows(live: dict) -> list[str]:
     rows = []
     g = live.get("gateway_latency")
@@ -76,12 +84,13 @@ def live_rows(live: dict) -> list[str]:
         a, b = p["sizes"]["1024"], p["sizes"]["16384"]
         rows.append(f"| Egress proxy overhead, 1 KiB / 16 KiB POST (local) | +{a['added_p50_ms']} / +{b['added_p50_ms']} ms p50, "
                     f"+{a['added_p95_ms']} / +{b['added_p95_ms']} ms p95 |")
-    for key, label in (("load_small", "Load test (small)"), ("load_1000", "Load test (1,000 agents)")):
+    for key, label in (("load_small", "Load test"), ("load_revocation", "Load test with 3 sessions revoked mid-run")):
         l = live.get(key)
         if l:
             rows.append(f"| {label}: {l['simulated_agents']} agents x {l['calls_per_agent']} calls, "
                         f"{l['real_badges_and_sessions']} real badges | {l['throughput_calls_per_s']} calls/s, "
-                        f"p50 {l['latency']['p50_ms']} ms, p95 {l['latency']['p95_ms']} ms, errors {sum(l['errors'].values())} |")
+                        f"p50 {l['latency']['p50_ms']} ms, p95 {l['latency']['p95_ms']} ms, errors {sum(l['errors'].values())}"
+                        + revoke_note(l) + " |")
     return rows
 
 

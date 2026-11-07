@@ -1,18 +1,19 @@
 # Burn eval results
 
-Generated 2026-11-07T21:00:17+00:00 at commit `ea23b73`. Every credential is freshly generated per run; no value appears here.
+Generated 2026-11-07T21:04:42+00:00 at commit `d3aa889`. Every credential is freshly generated per run; no value appears here.
 
 | Metric | Result |
 |---|---|
-| Catch rate, named credential (31 forms x 4 credential types x 10 trials) | **76.3%** |
-| Catch rate, blocked at all (incl. format-only matches) | 79.4% |
+| Catch rate, named credential (31 forms x 4 credential types x 10 trials) | **75.8%** |
+| Catch rate, blocked at all (incl. format-only matches) | 79.0% |
 | False positives (31 normal payload types x 10 trials) | **0.0%** (0/310) |
 | Cost per 1M tool calls (see assumptions) | **$17.38** |
 | Tool call through Gateway, client round trip | p50 232.2 ms, p95 325.8 ms (200 calls) |
 | Interceptor Lambda per invocation (2 per call) | p50 14.1 ms, p95 23.1 ms; about 12% of the median call |
 | burn_detect scan, 1 KiB / 16 KiB prose | p50 0.56 / 6.38 ms; random hex 1 KiB / 16 KiB: 4.25 / 63.46 ms |
 | Egress proxy overhead, 1 KiB / 16 KiB POST (local) | +13.6 / +20.1 ms p50, +57.5 / +31.7 ms p95 |
-| Load test (small): 50 agents x 5 calls, 50 real badges | 61.8 calls/s, p50 253.1 ms, p95 360.5 ms, errors 0 |
+| Load test: 50 agents x 5 calls, 50 real badges | 61.8 calls/s, p50 253.1 ms, p95 360.5 ms, errors 0 |
+| Load test with 3 sessions revoked mid-run: 40 agents x 5 calls, 40 real badges | 26.5 calls/s, p50 239.3 ms, p95 374.8 ms, errors 0; after revoke: 15/15 calls from revoked agents refused, 185/185 from other agents succeeded |
 
 ## Catch rate by form
 
@@ -40,10 +41,10 @@ Generated 2026-11-07T21:00:17+00:00 at commit `ea23b73`. Every credential is fre
 | markdown_code_block | 40/40 | 40/40 | caught |
 | gzip_base64 | 0/40 | 0/40 | missed |
 | rot13 | 0/40 | 10/40 | partial |
-| homoglyph | 18/40 | 27/40 | partial |
-| junk_interleaved | 39/40 | 39/40 | partial |
+| homoglyph | 18/40 | 28/40 | partial |
+| junk_interleaved | 36/40 | 36/40 | partial |
 | base32 | 0/40 | 0/40 | missed |
-| zero_width | 39/40 | 39/40 | partial |
+| zero_width | 36/40 | 36/40 | partial |
 | hex_of_base64 | 40/40 | 40/40 | caught |
 | base64_of_reversed | 40/40 | 40/40 | caught |
 | url_encoded_base64 | 40/40 | 40/40 | caught |
@@ -60,9 +61,9 @@ Measured, not tuned. These forms were not fully caught:
 - **gzip_base64**: gzip then base64 (0/40 named)
 - **rot13**: ROT13 (0/40 named)
 - **homoglyph**: Latin letters swapped for Cyrillic look-alikes (18/40 named)
-- **junk_interleaved**: random junk character after each character (39/40 named)
+- **junk_interleaved**: random junk character after each character (36/40 named)
 - **base32**: base32 (0/40 named)
-- **zero_width**: zero-width spaces between characters (39/40 named)
+- **zero_width**: zero-width spaces between characters (36/40 named)
 - **split_query_params**: two halves in two query params of one URL (20/40 named)
 - **caesar_shift_1**: every letter/digit shifted by one (0/40 named)
 

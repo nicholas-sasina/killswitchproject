@@ -30,9 +30,19 @@ uv run python run_offline.py --trials 10
 uv run python latency_gateway.py --calls 200
 uv run python latency_scan.py
 uv run python proxy_overhead.py --n 200
-uv run python loadtest.py --agents 50 --calls 5 --badges 10   # refuses > 20,000 calls
+uv run python loadtest.py --agents 50 --calls 5 --think 0.3 --revoke 3   # small by default; see the cost warning
 uv run python run_offline.py   # fold the results in
 ```
+
+## Results so far
+Details and the full tables are in `RESULTS.md` and `results.json`. Scale numbers come only from two small runs against the deployed Gateway, each agent with its own badge:
+- 50 agents x 5 calls: 250 calls, 0 errors, about 62 calls/s, p50 253 ms, p95 360 ms.
+- 40 agents x 5 calls with 3 sessions revoked mid-run: every one of the 15 calls the revoked agents made after the revoke was refused, and all 185 calls from the other agents succeeded.
+
+A 1,000-agent run has not been done, so no 1,000-agent figure is reported.
+
+## Cost warning
+Every badge is one Cognito app client and one token request, billed at $0.00225 each, and every call also costs Gateway, Lambda and DynamoDB usage. `loadtest.py` defaults to 50 agents x 5 calls and refuses more than 20,000 calls, but a large run still costs real money (1,000 badges is about $2.25 in token requests alone). Run big tests only deliberately.
 
 ## FAQ
 **Why not just report one catch-rate number?** One number hides the shape. Some forms (plain, any base64, hex, URL-encoding) are always caught; others (gzip, base32, rot13, junk characters, partial leaks) are not. `RESULTS.md` lists every form so the limits are visible.
@@ -43,4 +53,4 @@ uv run python run_offline.py   # fold the results in
 
 **Is there a no-Burn latency baseline?** Not for the Gateway: its interceptor cannot be switched off without redeploying, so we report the interceptor's own Lambda durations and its share of the client round trip instead. The proxy has a true baseline (direct request to the sink). The proxy figures use a local AWS emulator for fingerprint lookups, so real DynamoDB adds its own round trip.
 
-**Why do load tests share badges?** Cognito rate-limits app-client creation. `--badges N` makes N real badges and sessions and spreads the simulated agents over them; the Gateway path is identical. The results say how many real badges were used.
+**Do simulated agents share badges?** By default each has its own. `--badges N` makes fewer real badges and spreads the agents over them, which avoids Cognito's client-creation rate limit; the Gateway path is identical and the results state how many real badges were used.

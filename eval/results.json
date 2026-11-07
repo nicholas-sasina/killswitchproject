@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-11-07T21:00:17+00:00",
-  "git_sha": "ea23b73",
+  "timestamp": "2026-11-07T21:04:42+00:00",
+  "git_sha": "d3aa889",
   "catch_rate": {
     "trials_per_cell": 10,
     "forms": 31,
@@ -11,8 +11,8 @@
       "conn_string"
     ],
     "total_payload_runs": 1240,
-    "blocked_rate": 0.7943548387096774,
-    "attributed_rate": 0.7629032258064516,
+    "blocked_rate": 0.7903225806451613,
+    "attributed_rate": 0.7580645161290323,
     "per_form": {
       "plain": {
         "describe": "value pasted as-is in prose",
@@ -633,7 +633,7 @@
       "homoglyph": {
         "describe": "Latin letters swapped for Cyrillic look-alikes",
         "n": 40,
-        "blocked": 27,
+        "blocked": 28,
         "attributed": 18,
         "by_type": {
           "api_key": {
@@ -648,21 +648,21 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 3,
-            "attributed": 3
+            "blocked": 4,
+            "attributed": 4
           },
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 1
+            "attributed": 0
           }
         }
       },
       "junk_interleaved": {
         "describe": "random junk character after each character",
         "n": 40,
-        "blocked": 39,
-        "attributed": 39,
+        "blocked": 36,
+        "attributed": 36,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -676,8 +676,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 9,
-            "attributed": 9
+            "blocked": 6,
+            "attributed": 6
           },
           "conn_string": {
             "n": 10,
@@ -717,8 +717,8 @@
       "zero_width": {
         "describe": "zero-width spaces between characters",
         "n": 40,
-        "blocked": 39,
-        "attributed": 39,
+        "blocked": 36,
+        "attributed": 36,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -732,8 +732,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 9,
-            "attributed": 9
+            "blocked": 6,
+            "attributed": 6
           },
           "conn_string": {
             "n": 10,
@@ -1148,6 +1148,33 @@
         "p50_ms": 253.1,
         "p95_ms": 360.5,
         "mean_ms": 266.7
+      }
+    },
+    "load_revocation": {
+      "simulated_agents": 40,
+      "calls_per_agent": 5,
+      "concurrency": 20,
+      "real_badges_and_sessions": 40,
+      "token_fetch_seconds_total": 1.2,
+      "tool_calls_ok": 185,
+      "tool_calls_refused": 15,
+      "tool_calls_attempted": 200,
+      "errors": {},
+      "wall_seconds": 7.5,
+      "throughput_calls_per_s": 26.5,
+      "latency": {
+        "n": 185,
+        "p50_ms": 239.3,
+        "p95_ms": 374.8,
+        "mean_ms": 275.9
+      },
+      "revocation": {
+        "revoked_agents": 3,
+        "calls_after_revoke_from_revoked": 15,
+        "refused_of_those": 15,
+        "calls_after_revoke_from_others": 185,
+        "succeeded_of_those": 185,
+        "revoked_calls_before_revoke_succeeded": 0
       }
     }
   }

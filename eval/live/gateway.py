@@ -102,7 +102,7 @@ class Mcp:
 
     def __init__(self, http: httpx.AsyncClient, url: str, token: str):
         self.http, self.url, self.token = http, url, token
-        self.mcp_session, self.next_id = None, 1
+        self.mcp_session, self.next_id, self.last_refused = None, 1, False
 
     async def rpc(self, method: str, params: dict | None = None, notify: bool = False):
         body = {"jsonrpc": "2.0", "method": method, "params": params or {}}
@@ -125,6 +125,7 @@ class Mcp:
     async def call_tool(self, name: str, arguments: dict) -> tuple[float, bool, int]:
         elapsed, r = await self.rpc("tools/call", {"name": name, "arguments": arguments})
         is_error = r.status_code != 200 or '"isError":true' in r.text.replace(" ", "")
+        self.last_refused = "BURN:" in r.text   # the interceptor's denial marker
         return elapsed, is_error, r.status_code
 
 

@@ -29,3 +29,14 @@ def test_loadtest_refuses_too_many_calls(monkeypatch):
     monkeypatch.setattr("sys.argv", ["loadtest", "--agents", "5000", "--calls", "5"])
     with pytest.raises(SystemExit, match="exceeds --max-calls"):
         loadtest.main()
+
+
+def test_revocation_report_counts_only_calls_after_the_revoke():
+    run = loadtest.Run()
+    run.revoked, run.revoked_at = {1}, 10.0
+    # (agent, started_at, refused, is_error)
+    run.calls_log = [(1, 5.0, False, False), (1, 11.0, True, True), (2, 11.0, False, False), (2, 12.0, False, False)]
+    report = loadtest.revocation_report(run)
+    assert report["refused_of_those"] == report["calls_after_revoke_from_revoked"] == 1
+    assert report["succeeded_of_those"] == report["calls_after_revoke_from_others"] == 2
+    assert report["revoked_calls_before_revoke_succeeded"] == 1
