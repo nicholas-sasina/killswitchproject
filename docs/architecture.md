@@ -7,12 +7,12 @@ see or leak one is a checkpoint Burn controls.
 
 ```mermaid
 flowchart LR
-  subgraph local["Presenter machine (Docker)"]
+  subgraph local["Presenter machine"]
     A1[reader agent] & A2[analyst agent] & A3[notifier agent]
     P[egress proxy<br/>exit check]
     S[webhook sink]
     D[dashboard]
-    L[leak-test tool]
+    O[exit-check CLI<br/>operator tool]
   end
   subgraph aws["AWS us-east-1"]
     C[Cognito<br/>one badge per session]
@@ -41,7 +41,7 @@ flowchart LR
   API --> DB & M & C
   M --> CT
   D -->|polls /events every second| API
-  L --> P
+  O -->|on-demand check| P
 ```
 
 ## Components
@@ -57,7 +57,8 @@ flowchart LR
 | Mock API provider (`minter/lambdas/provider`) | AWS | Accepts only the current version of each agent's API key, so a rotated key is visibly rejected. |
 | Burn API (`burn_api/`) | AWS | Sessions, burn, blast radius, event feed, per-agent ledger. |
 | Detection library (`detection/burn_detect`) | Shared by gateway, proxy, eval | Decodes common encodings, matches exact and partial (shingle) fingerprints, accumulates evidence across a session's recent requests, and flags known credential formats. |
-| Dashboard (`dashboard/`) | Browser | Agents, live events, ledger, Burn button, blast-radius timeline, leak-test panel. |
+| Dashboard (`dashboard/`) | Browser | Agents, live events from real traffic, ledger, Burn button and blast-radius timeline. |
+| Exit-check CLI (`detection/leaktest`) | Operator terminal | On-demand verification through the proxy with `make exit-check-test AGENT=...`; reports blocked/allowed and the reason without exposing credentials. |
 
 ## Core flows
 

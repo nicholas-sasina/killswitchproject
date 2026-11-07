@@ -1,4 +1,5 @@
 import sys
+import secrets
 from unittest.mock import MagicMock
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parents[1] / "scripts"))
@@ -22,3 +23,16 @@ def test_missing_values_are_blank_not_errors():
 def test_render_renames_for_vite():
     text = make_env.render({"BURN_API_URL": "https://x.invalid"}, ["BURN_API_URL"], {"BURN_API_URL": "VITE_BURN_API_URL"})
     assert text.startswith("VITE_BURN_API_URL=https://x.invalid")
+
+
+def test_dashboard_env_contains_only_burn_connection(tmp_path, monkeypatch, capsys):
+    token = secrets.token_hex(24)
+    monkeypatch.setattr(make_env, "REPO", tmp_path)
+    monkeypatch.setattr(make_env.boto3, "client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(make_env, "collect", lambda *args: {
+        "BURN_API_URL": "https://api.example.invalid", "BURN_DEMO_TOKEN": token,
+    })
+    make_env.main()
+    lines = (tmp_path / "dashboard" / ".env.local").read_text().splitlines()
+    assert {line.split("=", 1)[0] for line in lines} == {"VITE_BURN_API_URL", "VITE_BURN_DEMO_TOKEN"}
+    assert token not in capsys.readouterr().out

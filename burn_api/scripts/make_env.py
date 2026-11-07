@@ -59,7 +59,7 @@ def main() -> None:
     dash.mkdir(exist_ok=True)
     local = render(values, ["BURN_API_URL", "BURN_DEMO_TOKEN"],
                    {"BURN_API_URL": "VITE_BURN_API_URL", "BURN_DEMO_TOKEN": "VITE_BURN_DEMO_TOKEN"})
-    (dash / ".env.local").write_text(local + "VITE_LEAKTEST_URL=http://localhost:8787\n")
+    (dash / ".env.local").write_text(local)
     missing = [k for k, v in values.items() if not v]
     print("wrote .env and dashboard/.env.local" + (f" (blank: {', '.join(missing)})" if missing else ""))
 

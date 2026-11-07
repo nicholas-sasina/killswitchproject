@@ -2,14 +2,14 @@
 
 ## What it does
 Detects credentials in tool output and blocks outbound leaks through an authenticated HTTP/HTTPS proxy.
-Includes a content-free webhook sink and a local leak-test API and CLI clearly labeled TEST TOOL.
+Includes a content-free webhook sink and an operator CLI for on-demand exit checks.
 
 ## How it works
 - `Scanner(key=..., lookup=...)` uses only the Python standard library and `burn_contracts`.
 - Normalization, exact fingerprints and 60% shingle coverage detect plain, encoded and split credentials.
 - The proxy checks sessions every second, refreshes fingerprints every two seconds and writes safe events.
 - Only approved destinations pass; Bedrock and gateway bodies and credentials in their own service headers follow the trust boundary.
-- The sink records only size and SHA-256; the test tool reads credentials privately and sends them through the proxy.
+- The sink records only size and SHA-256; the operator CLI reads credentials privately and sends them through the proxy.
 
 ## Key files
 - `burn_detect/scanner.py`: `Scanner` and immutable `Finding` with the shared interface.
@@ -18,7 +18,7 @@ Includes a content-free webhook sink and a local leak-test API and CLI clearly l
 - `tests/test_scanner.py`: freshly generated credential tests independent of external evaluation.
 - `proxy/addon.py`, `proxy/policy.py`, `proxy/state.py`: mitmproxy hooks, trust boundary and AWS caches.
 - `sink/__main__.py`: partner webhook, optional TLS and receipt metadata.
-- `leaktest/app.py`, `leaktest/service.py`, `leaktest/__main__.py`: local TEST TOOL API and CLI.
+- `leaktest/service.py`, `leaktest/__main__.py`: operator exit-check CLI.
 - `scripts/proxy_env.py`: private `.run/proxy.env` from `burn-system/egress-proxy-key`.
 - `scripts/test_containment.py`, `docker-compose.test.yml`: disposable isolated-network proof.
 - `../infra/burn_infra/egress.py`: least-privilege proxy identity and its Secrets Manager entry.
@@ -102,26 +102,23 @@ all destinations must use port 443 and resolve exclusively to public addresses. 
 always refused. DNS answers are checked and the outgoing connection is pinned to a checked IP.
 The sink exception supports Docker's private service address; it does not open an entire subnet.
 
-Run the local TEST TOOL after starting the real proxy and sink:
+Run an operator exit check from the repository root after starting the real proxy and sink:
 ```bash
-cd detection
-uv run --python 3.12 --extra leaktest uvicorn leaktest.app:app --host 127.0.0.1 --port 8787 --no-access-log
-uv run --python 3.12 --extra leaktest python -m leaktest --agent "$AGENT_ID" --encoding base64
-uv run --python 3.12 --extra leaktest python -m leaktest --agent "$AGENT_ID" --free-text 'The report is complete.'
+make exit-check-test AGENT="$AGENT_ID" ENCODING=base64
 ```
 
-`GET /encodings` and `POST /leak-test` implement `contracts/leaktest.openapi.yaml`; CORS allows
-`http://localhost:5173`. Set `BURN_PROXY_URL` (default `http://localhost:8080`) and `BURN_SINK_URL`
-(default `http://sink:8081`). For an HTTPS sink, set `BURN_PROXY_CA_CERT` to a local copy of the
-proxy CA certificate. The host resolves the sink through the proxy, so its Docker hostname works.
+The command loads `.env`, uses the proxy CA at `.run/proxy-certs/mitmproxy-ca-cert.pem`, and
+prints blocked/allowed with the reason. Encoding defaults to `random` when omitted.
+Set `BURN_PROXY_URL` (default `http://localhost:8080`) and `BURN_SINK_URL` (default `http://sink:8081`)
+in `.env`. The host resolves the sink through the proxy, so its Docker hostname works.
 The tool uses the default AWS chain to read the selected agent's ledger, current session and
 Secrets Manager value. If `BURN_API_URL` is set it reads the ledger through that API using
 `BURN_DEMO_TOKEN`; otherwise it queries `burn-exposures`. Only credentials in that ledger are
 eligible. Free text is sent unchanged. Results include no payload or raw credential.
 The tool prefers the latest active session, falling back to the latest session of any status so
 a burned agent's attempt reaches the proxy and returns `blocked=true` with `session_inactive`.
-An agent without any session gets HTTP 400 with `no_session`; invalid encoding or credential
-selection keeps the generic HTTP 400 `invalid_or_unavailable_test` reason.
+An agent without a session, an invalid encoding or an unavailable credential produces a sanitized
+CLI error without printing the payload or credential.
 
 ## FAQ
 **Why 60% coverage?** A 32-character random body has 25 shingles. Splitting it into two halves

@@ -1,4 +1,4 @@
-// Mirrors contracts/burn-api.openapi.yaml, ledger-event.schema.json and leaktest.openapi.yaml.
+// Mirrors contracts/burn-api.openapi.yaml and ledger-event.schema.json.
 export type SecretType = "aws_key" | "api_key" | "other";
 export type Owner = "agent" | "shared" | "unknown";
 export type EventAction =
@@ -100,23 +100,4 @@ export interface BlastRadius {
   }[];
   events: BlastEvent[];
   note?: string;
-}
-
-export interface EncodingsResponse {
-  encodings?: string[];
-}
-export interface LeakTestRequest {
-  agent_id: string;
-  secret_ref?: string | null;
-  encoding?: string;
-  free_text?: string | null;
-}
-export interface LeakTestResult {
-  blocked: boolean;
-  encoding: string;
-  secret_ref?: string | null;
-  destination?: string;
-  requests_sent?: number;
-  reason?: string | null;
-  event_id?: string | null;
 }

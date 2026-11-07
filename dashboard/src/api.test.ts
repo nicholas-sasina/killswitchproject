@@ -7,7 +7,6 @@ function setup(
   const config = {
     burnUrl: "https://burn.example.test/",
     demoToken: crypto.randomUUID(),
-    leakTestUrl: "https://test.example.test",
   };
   const fetcher = vi
     .fn<typeof fetch>()
@@ -37,22 +36,15 @@ describe("API client", () => {
     await api.ledger(id);
     await api.blastRadius(id);
     await api.burn({ agent_id: id, reason: "Containment requested" });
-    await api.encodings();
-    await api.leakTest({ agent_id: id, encoding: "plain" });
     expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual([
       `https://burn.example.test/agents/${id}/ledger`,
       `https://burn.example.test/burn/${id}/blast-radius`,
       "https://burn.example.test/burn",
-      "https://test.example.test/encodings",
-      "https://test.example.test/leak-test",
     ]);
-    for (const [, init] of fetcher.mock.calls.slice(0, 3)) {
+    for (const [, init] of fetcher.mock.calls) {
       expect(new Headers(init?.headers).get("x-burn-demo-token")).toBe(
         config.demoToken,
       );
-    }
-    for (const [, init] of fetcher.mock.calls.slice(3)) {
-      expect(new Headers(init?.headers).has("x-burn-demo-token")).toBe(false);
     }
     const burn = fetcher.mock.calls[2][1];
     expect(burn?.method).toBe("POST");

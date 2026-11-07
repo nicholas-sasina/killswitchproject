@@ -3,8 +3,8 @@
 ## Before judging
 - Start the agents **at least 15 minutes before** the first judge. CloudTrail delivers events with a lag
   of several minutes, and the blast-radius timeline only shows activity CloudTrail has already recorded.
-- Start, each in its own terminal: `make demo` (or `make demo-step` to hold the reader), `make dashboard`,
-  `make leak-test`. Check the dashboard has no MOCK DATA banner.
+- Start, each in its own terminal: `make demo` (or `make demo-step` to hold the reader) and `make dashboard`.
+  Check the dashboard has no MOCK DATA banner.
 - Keep another terminal open in the repo root for the CLI commands below (`make burn ARGS="agents"` lists the
   agents and their status).
 
@@ -28,16 +28,14 @@ events streaming, the exposure ledger filling as the reader reads config files.
 tries them: the mock provider answers 401 and AWS answers `InvalidClientTokenId`. The dashboard
 shows the provider's `rejected` event.
 
-## 2:05 - Moment 3: leak test (60 s)
-1. In the dashboard open **Leak test** (labelled as a test tool) for an agent that is still active but has seen
-   credentials. In the support-desk scenario that is the notifier: it inherited the reader's keys and the shared
-   database URL through the analyst. Pick one of them and an encoding (e.g. `base64`, or "random").
-2. The credential is sent out through the proxy as that agent. Show the `blocked` event: "We did not burn this
-   agent, and it still cannot leak what it saw."
-3. Run the same test for the burned agent: the proxy refuses it outright (`session_inactive`). A burned agent
-   cannot send anything at all.
-4. Paste a payload of your own into the free-text box and send it; ordinary text goes through.
-5. Say honestly: a novel transformation can slip past; the egress allowlist is the backstop. Quote the eval catch rate.
+## 2:05 - Moment 3: exit check (60 s)
+1. Point at the real `blocked` event with source `handoff`: the reader tried to send its API key to the
+   analyst through `send_message`. Show the explanation, such as `send_message blocked: known credential`.
+2. Show the outbound side from the operator terminal: `make exit-check-test AGENT=agent-notifier ENCODING=base64`.
+   The notifier was never burned, but it inherited the reader's keys through the analyst; the proxy refuses to let
+   them leave (`blocked: credential_detected`) and a `blocked` event with source `egress` appears in the stream.
+3. Run it for the burned agent: the proxy refuses it outright (`session_inactive`).
+4. Say honestly: a novel transformation can slip past; the egress allowlist is the backstop. Quote the eval catch rate.
 
 ## 3:05 - Blast radius (55 s)
 Open the burned agent's **Blast radius** panel (`GET /burn/<agent-id>/blast-radius`): every CloudTrail

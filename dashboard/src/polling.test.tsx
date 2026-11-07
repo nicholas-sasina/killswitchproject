@@ -34,7 +34,6 @@ describe("event polling", () => {
       {
         burnUrl: "https://burn.example.test",
         demoToken: crypto.randomUUID(),
-        leakTestUrl: "",
       },
       () => {},
       fetcher,
@@ -63,10 +62,7 @@ describe("event polling", () => {
   it("does not overlap a slow request", async () => {
     vi.useFakeTimers();
     let resolve!: (value: EventsResponse) => void;
-    const api = createApi(
-      { burnUrl: "", demoToken: "", leakTestUrl: "" },
-      () => {},
-    );
+    const api = createApi({ burnUrl: "", demoToken: "" }, () => {});
     api.events = vi.fn().mockImplementation(
       () =>
         new Promise<EventsResponse>((done) => {

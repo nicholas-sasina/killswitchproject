@@ -11,7 +11,6 @@ import { BurnOutcome } from "./components/BurnOutcome";
 import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
-import { LeakTest } from "./components/LeakTest";
 
 export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const [mock, setMock] = useState(false);
@@ -22,7 +21,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   );
   const api = useMemo(
     () => createApi(config, observeResponse),
-    [config.burnUrl, config.demoToken, config.leakTestUrl, observeResponse],
+    [config.burnUrl, config.demoToken, observeResponse],
   );
   const configured = Boolean(config.burnUrl && config.demoToken);
   const { state, error, updatedAt } = useEventFeed(api, configured);
@@ -193,11 +192,6 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
             </div>
             <EventFeed events={events} />
           </div>
-          <LeakTest
-            api={api}
-            agents={state.agents}
-            configured={configured && Boolean(config.leakTestUrl)}
-          />
         </main>
         <footer>
           <span>Burn · Agent containment</span>

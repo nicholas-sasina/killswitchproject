@@ -22,9 +22,7 @@ body {
   margin: 0;
 }
 button,
-input,
-select,
-textarea {
+input {
   font: inherit;
 }
 button {
@@ -36,16 +34,12 @@ button:disabled {
 }
 button,
 a,
-input,
-select,
-textarea {
+input {
   outline-offset: 5px;
 }
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
+input:focus-visible {
   outline: 3px solid #b6d8ff;
 }
 a {
@@ -635,36 +629,6 @@ td code {
   color: #a7b5c5;
   margin-top: 4px;
 }
-.test-label {
-  color: #edd09a;
-}
-.test-panel {
-  margin-bottom: 30px;
-}
-.test-description {
-  padding: 20px 24px 0;
-  color: #adbdce;
-  font-size: 0.85rem;
-}
-.service-note {
-  margin: 20px 24px 0;
-  padding: 14px 16px;
-  background: #202c39;
-  border: 1px solid #455b72;
-  border-radius: 6px;
-  color: #c6d5e6;
-  font-size: 0.85rem;
-}
-.test-panel form {
-  padding: 20px 24px;
-}
-.test-controls {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 16px;
-  align-items: end;
-  margin-bottom: 18px;
-}
 label {
   display: block;
   font-size: 0.8rem;
@@ -675,9 +639,7 @@ label > .muted {
   font-size: 0.73rem;
   font-weight: 400;
 }
-input,
-select,
-textarea {
+input {
   width: 100%;
   border: 1px solid #45566a;
   border-radius: 6px;
@@ -687,11 +649,6 @@ textarea {
   margin-top: 7px;
   font-size: 0.85rem;
 }
-textarea {
-  resize: vertical;
-  display: block;
-}
-textarea::placeholder,
 input::placeholder {
   color: #94a7bd;
 }
@@ -707,29 +664,6 @@ input::placeholder {
 }
 .secondary-button:hover:enabled {
   background: #334960;
-}
-.send-button {
-  margin-bottom: 0;
-}
-.test-result {
-  display: flex;
-  gap: 8px;
-  flex-direction: column;
-  margin: 0 24px 24px;
-  border: 1px solid #4a705f;
-  border-radius: 6px;
-  background: #192e28;
-  padding: 16px;
-  color: #abe9cb;
-  font-size: 0.85rem;
-}
-.test-result small {
-  font-size: 0.73rem;
-}
-.test-delivered {
-  background: #302b20;
-  border-color: #76613f;
-  color: #f4d395;
 }
 .error {
   color: #ffb9b3;
@@ -965,14 +899,6 @@ dialog .error {
     max-width: 90px;
     text-align: right;
   }
-  .test-controls {
-    grid-template-columns: 1fr;
-  }
-  .test-panel form,
-  .test-description {
-    padding-left: 18px;
-    padding-right: 18px;
-  }
   .burn-outcome {
     grid-template-columns: 1fr;
   }
@@ -1001,10 +927,6 @@ dialog .error {
   }
   .event {
     padding: 18px;
-  }
-  .test-result {
-    margin-left: 18px;
-    margin-right: 18px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

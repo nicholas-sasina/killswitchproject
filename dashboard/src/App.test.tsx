@@ -49,7 +49,6 @@ describe("containment dashboard", () => {
         else if (path.endsWith("/ledger")) body = { agent_id: id, entries: [] };
         else if (path.endsWith("/blast-radius"))
           body = { agent_id: id, keys: [], events: [] };
-        else if (path === "/encodings") body = { encodings: ["plain"] };
         else if (path === "/burn") {
           expect(init?.method).toBe("POST");
           expect(JSON.parse(String(init?.body))).toEqual({
@@ -76,7 +75,6 @@ describe("containment dashboard", () => {
           config={{
             burnUrl: "https://burn.example.test",
             demoToken: crypto.randomUUID(),
-            leakTestUrl: "https://test.example.test",
           }}
         />,
       );
@@ -119,84 +117,13 @@ describe("containment dashboard", () => {
     expect(screen.queryByRole("status", { name: "Burn result" })).toBeNull();
   });
 
-  it.each([
-    { status: "active", reason: "Credential match stopped" },
-    { status: "revoked", reason: "session_inactive" },
-  ])("reports $status proxy outcomes", async ({ status, reason }) => {
-    const id = `agent-${crypto.randomUUID()}`;
-    const payload = crypto.randomUUID();
-    const fetcher = vi
-      .fn<typeof fetch>()
-      .mockImplementation(async (input, init) => {
-        const path = new URL(String(input)).pathname;
-        if (path === "/leak-test") {
-          expect(JSON.parse(String(init?.body))).toEqual({
-            agent_id: id,
-            encoding: "plain",
-            free_text: payload,
-          });
-          return new Response(
-            JSON.stringify({
-              blocked: true,
-              encoding: "plain",
-              reason,
-            }),
-          );
-        }
-        const body =
-          path === "/events"
-            ? { events: [], agents: [{ agent_id: id, status }] }
-            : path === "/encodings"
-              ? { encodings: ["plain"] }
-              : path.endsWith("/blast-radius")
-                ? { agent_id: id, keys: [], events: [] }
-                : { agent_id: id, entries: [] };
-        return new Response(JSON.stringify(body));
-      });
-    vi.stubGlobal("fetch", fetcher);
-    await act(async () => {
-      render(
-        <App
-          config={{
-            burnUrl: "https://burn.example.test",
-            demoToken: crypto.randomUUID(),
-            leakTestUrl: "https://test.example.test",
-          }}
-        />,
-      );
-    });
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Send test ↗",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false);
-    fireEvent.change(screen.getByLabelText(/Free-text payload/), {
-      target: { value: payload },
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Send test ↗" }));
-    });
-    expect(screen.getByText("⊘ Blocked")).toBeTruthy();
-    expect(screen.getByText(reason)).toBeTruthy();
-    expect(
-      (screen.getByLabelText(/Free-text payload/) as HTMLTextAreaElement).value,
-    ).toBe("");
-    expect(screen.queryByText(payload)).toBeNull();
-  });
-
-  it("renders nullable live metadata while the test tool is offline, then recovers automatically", async () => {
+  it("renders nullable agent, ledger and CloudTrail metadata", async () => {
     const id = `agent-${crypto.randomUUID()}`;
     const ref = `burn/${id}/aws_key#v1`;
-    let testAvailable = false;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
       let body: unknown;
-      if (path === "/encodings") {
-        if (!testAvailable) throw new TypeError("Service unavailable");
-        body = { encodings: ["plain"] };
-      } else if (path === "/events")
+      if (path === "/events")
         body = {
           agents: [
             {
@@ -272,7 +199,6 @@ describe("containment dashboard", () => {
           config={{
             burnUrl: "https://burn.example.test",
             demoToken: crypto.randomUUID(),
-            leakTestUrl: "https://test.example.test",
           }}
         />,
       );
@@ -281,22 +207,65 @@ describe("containment dashboard", () => {
     expect(screen.getByText("Unidentified credential")).toBeTruthy();
     expect(screen.getByText("Source unavailable")).toBeTruthy();
     expect(screen.getByText("No active session")).toBeTruthy();
-    expect(screen.getByText(/Leak-test service unavailable/)).toBeTruthy();
     expect(screen.getByText("Connected · polling every second")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(
-      (screen.getByRole("button", { name: "Send test ↗" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
     expect(screen.queryByText("MOCK DATA")).toBeNull();
-    testAvailable = true;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
-    expect(screen.queryByText(/Leak-test service unavailable/)).toBeNull();
-    expect(
-      (screen.getByRole("button", { name: "Send test ↗" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
   });
+
+  it.each(["handoff", "egress"] as const)(
+    "keeps blocked %s traffic visible in the live stream",
+    async (source) => {
+      const id = `agent-${crypto.randomUUID()}`;
+      const detail =
+        source === "handoff"
+          ? "send_message blocked: known credential"
+          : "Outbound request blocked: known credential";
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (input) => {
+          const path = new URL(String(input)).pathname;
+          if (path === "/events")
+            return new Response(
+              JSON.stringify({
+                agents: [{ agent_id: id, status: "active" }],
+                events: [
+                  {
+                    event_id: `evt_${String(1).padStart(26, "0")}`,
+                    ts: new Date().toISOString(),
+                    agent_id: id,
+                    source,
+                    action: "blocked",
+                    detail,
+                  },
+                ],
+              }),
+            );
+          if (path.endsWith("/ledger"))
+            return new Response(JSON.stringify({ agent_id: id, entries: [] }));
+          throw new Error("Unexpected endpoint");
+        });
+      vi.stubGlobal("fetch", fetcher);
+      await act(async () => {
+        render(
+          <App
+            config={{
+              burnUrl: "https://burn.example.test",
+              demoToken: crypto.randomUUID(),
+            }}
+          />,
+        );
+      });
+      const feed = screen.getByRole("region", { name: "Live events" });
+      expect(within(feed).getByText("Outbound leak blocked")).toBeTruthy();
+      expect(within(feed).getByText(detail)).toBeTruthy();
+      expect(feed.textContent).toContain(source);
+      expect(
+        fetcher.mock.calls.every(([url]) =>
+          ["/events", `/agents/${id}/ledger`].includes(
+            new URL(String(url)).pathname,
+          ),
+        ),
+      ).toBe(true);
+    },
+  );
 });
