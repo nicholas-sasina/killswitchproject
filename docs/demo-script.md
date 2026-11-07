@@ -21,9 +21,10 @@ events streaming, the exposure ledger filling as the reader reads config files.
 5. Show the other two agents still working.
 
 ## 1:20 - Moment 2: the old key is dead (45 s)
-"The key this agent held before the burn is rotated." Use the dashboard's **Replay pre-rotation key**
-action. The mock provider rejects it and the dashboard
-shows a `rejected` event.
+"The key this agent held before the burn is rotated." In the second terminal run
+`make replay-old-key AGENT=<agent-id>`. It reads the pre-rotation values from Secrets Manager and
+tries them: the mock provider answers 401 and AWS answers `InvalidClientTokenId`. The dashboard
+shows the provider's `rejected` event.
 
 ## 2:05 - Moment 3: leak test (60 s)
 1. In the dashboard open **Leak test** (labelled as a test tool) for the burned agent, or use the leak-test CLI
@@ -40,4 +41,4 @@ Burn revoked the agent and killed everything it held or saw, and nothing else."
 ## If something goes wrong
 - Agent already finished its queue: the reader repeats the queue after a pause, or use `--step` for control.
 - Blast radius empty: CloudTrail lag. Show the plain list of key uses instead and explain the delay.
-- Switching scenario live: `make demo SCENARIO=agents/scenarios/billing-ops.yaml`. Same code, different agents and data.
+- Switching scenario live: `make demo SCENARIO=scenarios/billing-ops.yaml`. Same code, different agents and data.
