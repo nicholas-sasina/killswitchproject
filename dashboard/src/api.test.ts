@@ -46,10 +46,13 @@ describe("API client", () => {
       "https://test.example.test/encodings",
       "https://test.example.test/leak-test",
     ]);
-    for (const [, init] of fetcher.mock.calls) {
+    for (const [, init] of fetcher.mock.calls.slice(0, 3)) {
       expect(new Headers(init?.headers).get("x-burn-demo-token")).toBe(
         config.demoToken,
       );
+    }
+    for (const [, init] of fetcher.mock.calls.slice(3)) {
+      expect(new Headers(init?.headers).has("x-burn-demo-token")).toBe(false);
     }
     const burn = fetcher.mock.calls[2][1];
     expect(burn?.method).toBe("POST");
