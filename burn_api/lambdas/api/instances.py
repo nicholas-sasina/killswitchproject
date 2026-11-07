@@ -13,6 +13,7 @@ sessions have no `last_seen` and are never swept.
 """
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from boto3.dynamodb.conditions import Attr, Key
@@ -28,6 +29,8 @@ import sessions
 DEFAULT_IDLE_SECONDS = 600
 SWEEP_LIMIT = 10
 SWEEP_BUDGET_SECONDS = 2.0
+MAX_LISTED = 500
+COUNT_WORKERS = 16
 
 
 def idle_seconds() -> int:
@@ -55,12 +58,23 @@ def _exposures(agent_id: str) -> int:
         KeyConditionExpression=Key("agent_id").eq(agent_id), Select="COUNT")["Count"]
 
 
-def view(session: dict) -> dict:
+_pool: ThreadPoolExecutor | None = None
+
+
+def _count_pool() -> ThreadPoolExecutor:
+    global _pool
+    if _pool is None:
+        _pool = ThreadPoolExecutor(max_workers=COUNT_WORKERS, thread_name_prefix="exposure-count")
+    return _pool
+
+
+def view(session: dict, exposures: int | None = None) -> dict:
     return {
         "session_id": session["session_id"], "agent_id": session["agent_id"], "role": role_of(session),
         "status": session["status"], "tools": list(session.get("tools", [])),
         **{k: session.get(k) for k in ("parent_session", "token_id", "owner", "egress", "last_seen", "exited_at")},
-        "created_at": session.get("created_at"), "exposures": _exposures(session["agent_id"]),
+        "created_at": session.get("created_at"),
+        "exposures": _exposures(session["agent_id"]) if exposures is None else exposures,
     }
 
 
@@ -85,7 +99,11 @@ def list_instances(role: str | None, status: str | None) -> list[dict]:
     rows = [s for s in db.scan_all(db.table(names.SESSIONS_TABLE)) if role_of(s)]
     rows = [s for s in rows if (role is None or role_of(s) == role) and (status is None or s["status"] == status)]
     rows.sort(key=lambda s: s.get("created_at", ""), reverse=True)
-    return [view(s) for s in rows]
+    rows = rows[:MAX_LISTED]  # the dashboard shows the newest; older runs must not slow every poll
+    # One COUNT query per row, run concurrently. The pool is kept between calls so each thread's
+    # DynamoDB resource is built once per warm container, not on every poll.
+    counts = list(_count_pool().map(lambda s: _exposures(s["agent_id"]), rows))
+    return [view(s, n) for s, n in zip(rows, counts)]
 
 
 def heartbeat(session_id: str) -> dict:

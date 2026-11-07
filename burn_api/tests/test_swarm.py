@@ -484,10 +484,10 @@ def make_stale(env, count):
 def test_sweep_queues_slow_credential_deletes_instead_of_waiting(env):
     import time
     sids = make_stale(env, 8)
-    env.minter.delay = 1.0  # every awaited minter call now takes a second
+    env.minter.delay = 3.0  # every awaited minter call now takes 3 s; awaiting 8 would take 24 s
     started = time.monotonic()
     status, body = call(env, "GET", "/instances")
-    assert status == 200 and time.monotonic() - started < 1.0
+    assert status == 200 and time.monotonic() - started < 2.5
     assert {i["status"] for i in body["instances"]} == {"exited"} and len(body["instances"]) == 8
     assert sorted(q[1] for q in env.minter.queued) == sorted(
         f"/agents/{i['agent_id']}/credentials" for i in body["instances"])
@@ -540,3 +540,35 @@ def test_call_async_uses_an_event_invoke():
         minter_client._lambda = None
     assert sent["InvocationType"] == "Event" and sent["FunctionName"] == "burn-minter"
     assert b'"DELETE"' in sent["Payload"]
+
+
+def test_listing_is_capped_to_the_newest_rows_and_counts_exposures(env, monkeypatch):
+    import instances
+    monkeypatch.setattr(instances, "MAX_LISTED", 3)
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 5})[1]["token"]
+    bodies = [call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[1] for _ in range(5)]
+    for n, body in enumerate(bodies):  # distinct created_at so "newest" is well defined
+        env.ddb.Table("burn-sessions").update_item(
+            Key={"session_id": body["session_id"]}, UpdateExpression="SET created_at = :t",
+            ExpressionAttributeValues={":t": f"2026-01-01T00:00:0{n}.000Z"})
+    env.ddb.Table("burn-exposures").put_item(Item={
+        "agent_id": bodies[4]["agent_id"], "secret_ref_or_fp": "fp#x", "fingerprint": "a" * 64})
+    listed = call(env, "GET", "/instances")[1]["instances"]
+    assert [i["session_id"] for i in listed] == [b["session_id"] for b in reversed(bodies[2:])]
+    assert [i["exposures"] for i in listed] == [1, 0, 0]
+    assert set(listed[0]) >= {"session_id", "agent_id", "role", "status", "tools", "created_at", "exposures"}
+
+
+def test_exposure_counts_run_concurrently(env, monkeypatch):
+    import time, instances
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 12})[1]["token"]
+    for _ in range(12):
+        call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
+    call(env, "GET", "/instances")  # warm: threads build their DynamoDB resource once
+    real = instances._exposures
+    monkeypatch.setattr(instances, "_exposures", lambda agent_id: (time.sleep(0.2), real(agent_id))[1])
+    started = time.monotonic()
+    assert len(call(env, "GET", "/instances")[1]["instances"]) == 12
+    assert time.monotonic() - started < 1.2  # sequential would be 2.4 s
