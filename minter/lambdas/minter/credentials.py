@@ -42,14 +42,20 @@ def rotate(agent_id: str, exposed_refs: list[str]) -> dict:
 
 
 def delete(agent_id: str) -> list[str]:
+    """Delete only the credential types the agent actually has; safe to repeat.
+
+    Skipping absent types matters for IAM: asking about a user that was never
+    created is answered with AccessDenied (the minter's policy is scoped to
+    /burn-agents/ users), not "no such entity".
+    """
     deleted = []
     for secret_type, module in BY_TYPE.items():
         ref = agent_secret_ref(agent_id, secret_type)
-        existed = registry.get(ref) is not None or vault.exists(ref)
+        if registry.get(ref) is None and not vault.exists(ref):
+            continue
         vault.delete(ref)
         module.teardown(agent_id)
         fingerprints.delete_all(ref)
         registry.delete(ref)
-        if existed:
-            deleted.append(ref)
+        deleted.append(ref)
     return deleted

@@ -165,6 +165,17 @@ def test_delete_removes_everything(secrets_client, tables):
     assert call("DELETE", f"/agents/{AGENT}/credentials")[1] == {"deleted": []}  # safe to repeat
 
 
+def test_delete_api_key_only_agent_never_touches_iam(monkeypatch):
+    issue(types=["api_key"])
+
+    def forbidden(*args, **kwargs):  # real IAM answers AccessDenied for a user that never existed
+        raise AssertionError("IAM must not be called for an agent without an aws_key")
+
+    for name in ("list_access_keys", "delete_user_policy", "delete_user"):
+        monkeypatch.setattr(aws.iam(), name, forbidden)
+    assert call("DELETE", f"/agents/{AGENT}/credentials") == (200, {"deleted": [f"burn/{AGENT}/api_key"]})
+
+
 def test_delete_shared():
     call("POST", "/shared/credentials", {"name": "tok", "type": "other", "template": "t-{random}"})
     assert call("DELETE", "/shared/credentials")[1] == {"deleted": ["burn/shared/tok"]}
