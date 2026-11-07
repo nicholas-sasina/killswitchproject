@@ -22,7 +22,7 @@ Scenarios (agents, tickets, files, customers) live in YAML, so a new scenario ne
 | `burn_agents/turn.py` | One Strands agent turn, refusal watcher, local tools |
 | `burn_agents/cloud.py` | `check_cloud_access`, `check_provider` (use the agent's own keys) |
 | `docker-compose.yml` | Proxy, sink and networks; agent services are generated per scenario into `.run/` |
-| `scripts/` | `load_scenario.py`, `reset.py`, `run_demo.py` |
+| `scripts/` | `load_scenario.py`, `reset.py`, `run_demo.py`, `mock_badge_issuer.py` (dev) |
 
 ## How to test it
 ```bash
@@ -34,7 +34,7 @@ uv run python scripts/run_demo.py --scenario scenarios/billing-ops.yaml --step  
 ```
 `run_demo.py` resets demo state, loads the scenario, starts one session per agent, writes
 `.run/<agent>.env` (mode 600, gitignored) and starts Docker Compose. In `--step` mode the reader waits;
-press Enter to let it take one ticket, `q` to stop. Against mocks, set `BURN_API_URL`, `BURN_GATEWAY_URL`
+press Enter to let it take one ticket, `q` to stop. Against `mocks/mcp_tools_mock.py`, run `scripts/mock_badge_issuer.py` as the token URL (client id = agent id, bearer `mock-<agent_id>`) and set `BURN_API_URL`, `BURN_GATEWAY_URL`
 and `BURN_PROVIDER_URL` to the mock servers; nothing else changes.
 
 ## FAQ

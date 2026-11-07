@@ -7,7 +7,7 @@ from burn_agents.badge import TokenRefused
 from burn_agents.loop import Worker, parse_messages, parse_tickets, run_agent
 from burn_agents.revoked import Revoked, looks_revoked
 
-TICKETS = json.dumps([{"id": "T-1", "subject": "a"}, {"id": "T-2", "subject": "b"}])
+TICKETS = json.dumps({"tickets": [{"id": "T-1", "subject": "a"}, {"id": "T-2", "subject": "b"}]})
 
 
 def worker(call_tool, run_turn, **kw):
@@ -28,17 +28,15 @@ def test_gate_is_waited_on_before_each_ticket():
 
 
 def test_inbox_agent_runs_a_turn_per_message():
-    inbox = [json.dumps([{"from": "agent-x", "text": "hello"}]), "[]"]
+    inbox = [json.dumps({"messages": [{"from": "agent-x", "text": "hello", "ts": "t"}]}), '{"messages": []}']
     prompts = []
     worker(lambda n, a: inbox.pop(0), prompts.append).work_inbox(max_polls=2)
     assert len(prompts) == 1 and "hello" in prompts[0]
 
 
-def test_parsers_tolerate_wrapped_and_plain_forms():
+def test_parsers_read_the_gateway_envelopes():
     assert parse_tickets(json.dumps({"tickets": [{"id": 5, "subject": "s"}]})) == [{"id": "5", "subject": "s"}]
-    assert parse_messages("") == []
     assert parse_messages('{"messages": []}') == []
-    assert parse_messages("just text")[0]["text"] == "just text"
 
 
 def test_revoked_mid_queue_stops_cleanly(caplog):
@@ -49,7 +47,7 @@ def test_revoked_mid_queue_stops_cleanly(caplog):
         if len(turns) == 2:
             raise Revoked("BURN: badge revoked")
 
-    w = worker(lambda n, a: json.dumps([{"id": f"T-{i}", "subject": ""} for i in range(5)]), run_turn)
+    w = worker(lambda n, a: json.dumps({"tickets": [{"id": f"T-{i}", "subject": ""} for i in range(5)]}), run_turn)
     with caplog.at_level("ERROR", logger="burn_agents"):
         assert run_agent(w.work_tickets) == "revoked"
     assert len(turns) == 2
