@@ -18,9 +18,12 @@ os.environ.update({
 })
 
 import badges  # noqa: E402
+import detection  # noqa: E402
+import ledger  # noqa: E402
 import placeholders  # noqa: E402
 import sessions  # noqa: E402
 import store  # noqa: E402
+from burn_contracts import fingerprint as fp  # noqa: E402
 
 TABLES = {
     "burn-sessions": ("session_id", None, [("by_client", "client_id"), ("by_agent", "agent_id")]),
@@ -34,7 +37,8 @@ TABLES = {
 
 def _reset_caches():
     for cached in (sessions._dynamodb, store._dynamodb, placeholders._secrets,
-                   badges._cognito, badges.identity_config):
+                   badges._cognito, badges.identity_config,
+                   detection._dynamodb, detection.scanner, ledger._table):
         cached.cache_clear()
     sessions._session_ids.clear()
 
@@ -59,8 +63,36 @@ def aws(monkeypatch):
                 + ([{"AttributeName": sk, "KeyType": "RANGE"}] if sk else []),
                 **kwargs,
             )
+        boto3.client("secretsmanager", region_name="us-east-1").create_secret(
+            Name="burn-system/fingerprint-key", SecretString=secrets.token_hex(32))
         yield boto3.resource("dynamodb", region_name="us-east-1")
         _reset_caches()
+
+
+def register_credential(dynamodb, secret_ref: str, owner_agent_id: str, secret_type="api_key",
+                        status="active") -> str:
+    """Mint a random credential and register its fingerprints the way the minter does.
+
+    Returns the value, which only the test holds.
+    """
+    value = secrets.token_hex(16)
+    key = detection.scanner().key
+    base = {"secret_ref": secret_ref, "owner_agent_id": owner_agent_id, "secret_type": secret_type,
+            "part": "value", "version": 1, "status": status}
+    rows = {fp.fingerprint(value, key): {**base, "kind": "exact"}}
+    windows = fp.shingle_fingerprints(value, key)
+    for index, digest in windows:
+        rows.setdefault(digest, {**base, "kind": "shingle", "index": index, "n_shingles": len(windows)})
+    with dynamodb.Table("burn-fingerprints").batch_writer() as batch:
+        for digest, row in rows.items():
+            batch.put_item(Item={"fingerprint": digest, **row})
+    return value
+
+
+def ledger_rows(dynamodb, agent_id: str) -> dict[str, dict]:
+    items = dynamodb.Table("burn-exposures").query(
+        KeyConditionExpression="agent_id = :a", ExpressionAttributeValues={":a": agent_id})["Items"]
+    return {i["secret_ref_or_fp"]: i for i in items}
 
 
 def put_session(dynamodb, agent_id="agent-alpha", status="active",

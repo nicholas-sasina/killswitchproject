@@ -57,14 +57,15 @@ class BurnGatewayStack(cdk.Stack):
         def table(name: str) -> str:
             return arn("dynamodb", f"table/{name}")
 
-        def python_fn(cid: str, name: str, folder: str, handler: str) -> lambda_.Function:
+        def python_fn(cid: str, name: str, folder: str, handler: str,
+                      shared: tuple[str, ...] = ("burn_contracts",)) -> lambda_.Function:
             return lambda_.Function(
                 self, cid,
                 function_name=name,
                 runtime=lambda_.Runtime.PYTHON_3_12,
                 architecture=lambda_.Architecture.ARM_64,
                 handler=handler,
-                code=lambda_.Code.from_asset(lambda_asset(name, folder)),
+                code=lambda_.Code.from_asset(lambda_asset(name, folder, shared=shared)),
                 timeout=cdk.Duration.seconds(15),
                 memory_size=512,
                 log_group=logs.LogGroup(
@@ -90,15 +91,23 @@ class BurnGatewayStack(cdk.Stack):
                        arn("secretsmanager", "secret:burn/agent-*/aws_key-*"),
                        arn("secretsmanager", "secret:burn/shared/*")]))
 
-        # --- Interceptor Lambda: badge check, allowlists, events ------------
+        # --- Interceptor Lambda: badge check, allowlists, ledger, exit check ---
         interceptor_fn = python_fn(
-            "InterceptorFn", INTERCEPTOR_FUNCTION, "gateway/lambdas/interceptor", "interceptor.handler")
+            "InterceptorFn", INTERCEPTOR_FUNCTION, "gateway/lambdas/interceptor", "interceptor.handler",
+            shared=("burn_contracts", "burn_detect"))
         interceptor_fn.add_environment("BURN_TOOL_TARGET", TARGET_NAME)
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:GetItem", "dynamodb:Query"],
             resources=[table("burn-sessions"), table("burn-sessions") + "/index/by_client"]))
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem"], resources=[table("burn-events")]))
+        interceptor_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["dynamodb:UpdateItem", "dynamodb:Query"], resources=[table("burn-exposures")]))
+        interceptor_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["dynamodb:BatchGetItem"], resources=[table("burn-fingerprints")]))
+        interceptor_fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[arn("secretsmanager", "secret:burn-system/fingerprint-key-*")]))
 
         # --- Gateway ---------------------------------------------------------
         gateway_role = iam.Role(

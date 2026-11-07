@@ -53,6 +53,20 @@ Denials always start with `BURN:` so agents, logs and the `RESPONSE` step can re
 | Session `status` is `active` (consistent read on every call) | `refused`, "badge revoked" |
 | `tools/call`: tool is in the session's `tools` | `refused`, "tool not allowed for this agent: <tool>" |
 | `send_message`: `to` is in the session's `send_to` | `refused`, "recipient not allowed: <id>" (`target_agent_id` = `to`) |
+| `send_message` / `notify`: arguments carry no credential Burn minted (exit check) | `blocked`, "BURN: blocked: the message contains a credential" |
+
+### Exit check
+`send_message` (to another agent) and `notify` (to a customer or channel) are the tools that move
+text out of an agent. Their arguments are scanned with `burn_detect`, which undoes common encodings
+(base64, hex, URL, reversal, separators, ...) and also matches fragments by shingle coverage. Any
+credential Burn minted, current or rotated, blocks the call: one `blocked` event per credential
+(source `handoff` for send_message, `egress` for notify) with the `encoding` that was undone.
+Values that only look like a credential format are not blocked here.
+
+A `send_message` that passes still carries whatever the sender knows, in ways no scanner can see,
+so the receiver inherits the sender's whole ledger: each entry is copied with `source: handoff`,
+`via: <sender>`, and an `inherited` event is written. Burning either agent then covers everything
+both may have seen.
 
 A forwarded `tools/call` is edited in two ways:
 - `burn_caller_agent_id` is set to the session's agent id, overwriting any value the agent sent.
@@ -64,6 +78,31 @@ A forwarded `tools/call` is edited in two ways:
 
 - Replies that are Burn denials pass through untouched (`RESPONSE` still fires after a `REQUEST` deny).
 - `tools/list`: tools are renamed to their plain names and filtered to the session's `tools`.
+- `tools/call`: the result text is scanned with `burn_detect` before the agent sees it. Each
+  credential found (one per credential, exact matches preferred) is added to the agent's ledger
+  and announced with a `recorded` event. The reply itself is passed on unchanged: Burn records
+  exposure, it does not redact.
+- Output larger than the scanner's limit (256 KiB) is withheld: the agent gets a `BURN:` denial
+  and a `refused` event (source `tool_response`) is written. Burn does not hand over what it
+  cannot check.
+
+## Ledger row (`burn-exposures`)
+
+```json
+{"agent_id": "agent-alpha", "secret_ref_or_fp": "burn/agent-alpha/api_key",
+ "secret_ref": "burn/agent-alpha/api_key", "fingerprint": "<64 hex>", "secret_type": "api_key",
+ "owner": "agent", "owner_agent_id": "agent-alpha",
+ "source": "tool_response", "via": "read_config",
+ "first_seen": "2026-11-07T20:50:33.201Z", "last_seen": "...", "seen_in": ["<trace id>#<rpc id>", "..."]}
+```
+
+- Credentials that match only a known format (not minted by Burn) have no `secret_ref`; their sort
+  key is `fp#<fingerprint>` and `owner` is `unknown`.
+- `source`, `via` and `first_seen` keep the first sighting; later sightings only update `last_seen`
+  and `seen_in`.
+- The gateway may retry an interceptor call, so writes are keyed by the call
+  (`X-Amzn-Trace-Id` + JSON-RPC id): a write whose call is already in `seen_in` is skipped,
+  together with its event. Reading the same file again in a new call does write a new event.
 
 ## Session row (written by the Burn API at `POST /sessions`)
 
@@ -81,3 +120,9 @@ All built with `burn_contracts.events.make_event`, stored with `stream = "all"`.
 | action | source | fields |
 |---|---|---|
 | `refused` | `gateway` | `agent_id`, `session_id`, `tool`, `target_agent_id` (send_message), `detail` |
+| `recorded` | `tool_response` | `agent_id`, `session_id`, `tool`, `secret_ref`, `fingerprint`, `secret_type`, `owner`, `owner_agent_id`, `detail` (e.g. "shared credential seen in read_config output") |
+| `refused` | `tool_response` | output too large to check |
+| `blocked` | `handoff` / `egress` | `agent_id` = sender, `tool`, `secret_ref`, `fingerprint`, `secret_type`, `owner`, `owner_agent_id`, `encoding`, `target_agent_id` = receiver (send_message), `destination` = channel (notify) |
+| `inherited` | `handoff` | `agent_id` = receiver, `target_agent_id` = receiver, `session_id` = sender's session, `tool` = send_message, credential fields, `detail` "inherited from <sender> via send_message" |
+
+No event or ledger row ever holds a credential value.
