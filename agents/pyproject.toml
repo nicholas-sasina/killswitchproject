@@ -1,0 +1,31 @@
+[project]
+name = "burn-agents"
+version = "1.0.0"
+description = "Strands agents that do the demo work behind a Burn badge."
+requires-python = ">=3.12"
+dependencies = [
+  "strands-agents>=1.0",
+  # mcp 2.x removed streamablehttp_client; Strands 1.x talks to the 1.x API.
+  "mcp>=1.9,<2",
+  "boto3>=1.35",
+  "httpx>=0.27",
+  "pyyaml>=6",
+]
+
+[dependency-groups]
+# scripts/ (load, reset, run_demo) and the tests use these; the container image does not.
+dev = ["pytest>=8", "jsonschema>=4", "burn-contracts"]
+
+[tool.uv.sources]
+burn-contracts = { path = "../contracts", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["burn_agents"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
