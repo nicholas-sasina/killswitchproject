@@ -7,7 +7,7 @@ see or leak one is a checkpoint Burn controls.
 
 ```mermaid
 flowchart LR
-  subgraph local["Presenter machine"]
+  subgraph local["Local machine"]
     A1[reader agent] & A2[analyst agent] & A3[notifier agent]
     P[egress proxy<br/>exit check]
     S[webhook sink]

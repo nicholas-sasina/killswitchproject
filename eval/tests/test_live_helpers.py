@@ -49,3 +49,51 @@ def test_revocation_report_counts_only_calls_after_the_revoke():
     assert report["refused_of_those"] == report["calls_after_revoke_from_revoked"] == 1
     assert report["succeeded_of_those"] == report["calls_after_revoke_from_others"] == 2
     assert report["revoked_calls_before_revoke_succeeded"] == 1
+
+
+@pytest.mark.parametrize("status,payload,error,refused", [
+    (200, '{"id":1,"result":{"content":[]}}', False, False),
+    (200, '{"id":1,"result":{"isError": true,"content":[{"text":"BURN: revoked"}]}}', True, True),
+    (200, '{"id":1,"error":{"code":-32603,"message":"unavailable"}}', True, False),
+    (429, '{"error":"throttled"}', True, False),
+    (200, 'not a valid RPC response', True, False),
+    (200, 'data: {"id":1,"result":{"content":[]}}\n\n', False, False),
+    (200, '{"id":1,"result":{"content":[{"text":"BURN: quoted ticket text"}]}}', False, False),
+])
+def test_mcp_classifies_real_rpc_outcomes(status, payload, error, refused):
+    import asyncio
+    import httpx
+    from live.gateway import Mcp
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(status, text=payload))) as http:
+            mcp = Mcp(http, "https://gateway.example.test/mcp", "test-token")
+            _, failed, actual_status = await mcp.call_tool("read_ticket", {})
+            assert failed == error and mcp.last_refused == refused
+            assert actual_status == status
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("startup_fails", [False, True])
+def test_load_run_distinguishes_startup_failure_from_failed_tool_calls(monkeypatch, startup_fails):
+    import asyncio
+    class FakeMcp:
+        last_refused = False
+        def __init__(self, *args):
+            self.calls = 0
+        async def start(self):
+            if startup_fails:
+                raise RuntimeError("startup")
+        async def call_tool(self, *args):
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("transport")
+            return .1, False, 200
+    monkeypatch.setattr(loadtest, "Mcp", FakeMcp)
+    run = loadtest.Run()
+    asyncio.run(loadtest.one_agent(0, asyncio.Semaphore(1), None, "unused", "unused", 2, 0, run))
+    if startup_fails:
+        assert run.startup_errors == {"RuntimeError": 1} and run.calls_log == []
+    else:
+        assert run.startup_errors == {} and run.errors == {"TimeoutError": 1}
+        assert loadtest.outcomes(run.calls_log) == dict(succeeded=1, other_errors=1, throttled=0, refused=0)

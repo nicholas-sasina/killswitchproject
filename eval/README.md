@@ -62,3 +62,52 @@ Every badge is one Cognito app client and one token request, billed at $0.00225 
 **Is there a no-Burn latency baseline?** Not for the Gateway: its interceptor cannot be switched off without redeploying, so we report the interceptor's own Lambda durations and its share of the client round trip instead. The proxy has a true baseline (direct request to the sink). The proxy figures use a local AWS emulator for fingerprint lookups, so real DynamoDB adds its own round trip.
 
 **Do simulated agents share badges?** By default each has its own. `--badges N` makes fewer real badges and spreads the agents over them, which avoids Cognito's client-creation rate limit; the Gateway path is identical and the results state how many real badges were used.
+
+## Separate layers and held-out tests
+
+Run the offline report without replacing historical checked-in measurements:
+
+```bash
+uv run --python 3.12 python run_offline.py --trials 10 --output-dir out/current
+```
+
+The report separates the established scanner corpus from the eight forms in
+`payloads/heldout.py`. That corpus was introduced against detector commit `d618897`, before
+this workstream's policy changes. Its source hash is recorded in each report. Do not tune
+detectors against it; if another owner adds decoders, report this corpus separately and
+freeze a new unseen corpus for future tuning. It is developer-authored evaluation, not an
+independent audit. Scanner results are offline measurements, not end-to-end protection rates.
+
+References, canaries and post-cache reads require observations from their component owners.
+Missing observations are **unmeasured**, never zero or a passing target. Use `--evidence-dir`
+to select a private evidence directory (default `out/`). Keep inputs and draft reports there;
+never commit raw secrets or fabricate observations to complete a report.
+
+Each evidence file includes `source_commit`, a timezone-bearing `measured_at`, and:
+
+| File | Required observations |
+|---|---|
+| `references.json` | `records`: unique `event_id`, integer `recognized` and `in_context` counts per observed response. Counts refer only to recognized credentials. |
+| `canaries.json` | `records`: unique use `event_id`, `used_at`, optional `detected_at` and `burned_at` (timezone-bearing timestamps). Include every use, including undetected uses. |
+| `fingerprint_cache.json` | `cache_enabled: true` and `samples`: `output_bytes`, `calls`, `read_units`; exactly one window each for 36, 1024 and 16384 bytes. Include cache refresh read units in the window. |
+
+The canary report distinguishes detection from completed burns and reports latency only for
+completed burns. Reference exposure has no rate when no recognized credentials were observed.
+Cache measurements report DynamoDB read cost, not an entire infrastructure cost. Other cost
+inputs retain their stated assumptions and the pricing date in `cost.py`. Owner-produced
+observations are supplied evidence, not independently verified by the aggregator.
+
+The destination audit uses this process's configured proxy endpoints. The default attacker
+sink counts as readable; unverified application endpoints remain unverified. It does not load
+a deployed proxy's environment automatically or claim the target of zero is met.
+
+New load runs split post-revocation calls into refused, throttled, succeeded and other errors,
+for revoked and unaffected agents separately. Latency includes successful calls only; no
+successful calls produces null percentiles. HTTP 429 is recorded at the Gateway endpoint;
+the exact originating service quota remains unverified until service evidence identifies it.
+The configured concurrency is a load setting, not proof of an AWS quota. Historical reports
+retain their original grouping and are labelled legacy when rendered.
+
+Live measurements incur charges and change shared state. Coordinate them with Oliver and the
+integration owner. After the fingerprint-cache change is deployed, collect the three output
+sizes and full Gateway metrics together; do not reuse pre-cache inputs as post-cache results.

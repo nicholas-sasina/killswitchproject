@@ -1,50 +1,83 @@
-# Demo script (4 minutes)
+# Demo walkthrough
 
-## Before judging
-- Start the agents **at least 15 minutes before** the first judge. CloudTrail delivers events with a lag
-  of several minutes, and the blast-radius timeline only shows activity CloudTrail has already recorded.
-- Start, each in its own terminal: `make demo` (or `make demo-step` to hold the reader) and `make dashboard`.
-  Check the dashboard has no MOCK DATA banner.
-- Keep another terminal open in the repo root for the CLI commands below (`make burn ARGS="agents"` lists the
-  agents and their status).
+Commands run from the repository root. Live commands mint credentials, make paid service calls,
+or change shared state; the integration owner runs them on the shared stack after approval.
+Deployment and resets belong to that owner until isolated stages are available.
 
-## 0:00 - Setup (20 s)
-"Three agents work a support queue: a reader, an analyst and a notifier. Each has its own badge and its own
-AWS and API keys. Everything they send leaves through one proxy." Show the dashboard: three agents active,
-events streaming, the exposure ledger filling as the reader reads config files.
+## Start the current scenario
 
-## 0:20 - Moment 1: burn an agent mid-task (60 s)
-1. Point at an agent that is mid-ticket (the reader is the clearest). With `make demo-step`, press Enter
-   once so it is visibly working.
-2. Click **Burn** on that agent in the dashboard (any agent can be chosen, including by a judge).
-3. Show the event stream: badge revoked, credentials rotated, shared credentials flagged.
-4. Show the agent's container log: `badge revoked/credentials rotated - stopping`
-   (`docker logs burn-demo-<agent-id>-1`).
-5. Show the other two agents still working.
+```bash
+make demo
+make dashboard
+```
 
-## 1:20 - Moment 2: the old key is dead (45 s)
-"The key this agent held before the burn is rotated." In the second terminal run
-`make replay-old-key AGENT=<agent-id>`. It reads the pre-rotation values from Secrets Manager and
-tries them: the mock provider answers 401 and AWS answers `InvalidClientTokenId`. The dashboard
-shows the provider's `rejected` event.
+Run these in separate terminals. Open http://localhost:5173. The current scenario starts
+three agents with separate badges and credentials. Agent activity appears in the event feed
+and credential references appear in the exposure ledger. A MOCK DATA banner identifies a
+mock connection. `make demo-step` advances work one ticket at a time.
 
-## 2:05 - Moment 3: exit check (60 s)
-1. Point at the real `blocked` event with source `handoff`: the reader tried to send its API key to the
-   analyst through `send_message`. Show the explanation, such as `send_message blocked: known credential`.
-2. Show the outbound side from the operator terminal: `make exit-check-test AGENT=agent-notifier ENCODING=base64`.
-   The notifier was never burned, but it inherited the reader's keys through the analyst; the proxy refuses to let
-   them leave (`blocked: credential_detected`) and a `blocked` event with source `egress` appears in the stream.
-3. Run it for the burned agent: the proxy refuses it outright (`session_inactive`).
-4. Say honestly: a novel transformation can slip past; the egress allowlist is the backstop. Quote the eval catch rate.
+## Contain one agent
 
-## 3:05 - Blast radius (55 s)
-Open the burned agent's **Blast radius** panel (`GET /burn/<agent-id>/blast-radius`): every CloudTrail
-call made with its AWS key, before and after rotation. Close with: "Revoking an agent isn't revoking what it saw.
-Burn revoked the agent and killed everything it held or saw, and nothing else."
+Select an active agent and confirm Burn. The response lists revoked sessions, rotated owned
+credentials, and shared credentials flagged for review. The agent stops when a subsequent
+request is refused. Other agents retain their own credentials.
 
-## If something goes wrong
-- Agent already finished its queue: the reader repeats the queue after a pause, or use `--step` for control.
-- Blast radius empty: CloudTrail lag. Show the plain list of key uses instead and explain the delay.
-- Dashboard unresponsive: burn from the terminal with `make burn ARGS="kill <agent-id> --yes"`, then
-  `make burn ARGS="ledger <agent-id>"` and `make burn ARGS="blast-radius <agent-id>"`.
-- Switching scenario live: `make demo SCENARIO=scenarios/billing-ops.yaml`. Same code, different agents and data.
+The CLI provides the same operation:
+
+```bash
+make burn ARGS="agents"
+make burn ARGS="kill <agent-id> --yes"
+```
+
+Replace `<agent-id>` with an actual id from the first command.
+
+## Verify old credentials are refused
+
+```bash
+make replay-old-key AGENT=<burned-agent-id>
+```
+
+The command privately loads the previous credential versions. The mock provider rejects the
+old API key; AWS rejects the inactive access key. No credential values should be displayed.
+
+## Inspect outbound containment
+
+The event feed includes blocked tool handoffs and proxy requests when they occur. To exercise
+the outbound proxy independently, choose an active agent with a recorded exposure:
+
+```bash
+make exit-check-test AGENT=<active-agent-id> ENCODING=base64
+```
+
+A recognized credential produces `credential_detected`. A burned session produces
+`session_inactive`. A missed encoding is an observed miss, not a successful detection.
+The simulated-attacker sink remains an explicitly configured destination for these tests.
+S3 accepts only HTTPS `GET /` without a query or body; object reads and writes are refused.
+
+## Inspect recorded AWS activity
+
+```bash
+make burn ARGS="blast-radius <burned-agent-id>"
+```
+
+The dashboard also provides a blast-radius view. CloudTrail records can arrive several minutes
+late; an empty view does not prove that no activity occurred. Start activity at least 15 minutes
+before checking this view.
+
+## Inspect measurements
+
+```bash
+cd eval
+uv run --python 3.12 python run_offline.py --output-dir out/current
+```
+
+This command runs offline and preserves the checked-in historical report. The generated report
+separates established and held-out scanner corpora, references, canaries, destination review,
+and post-cache read costs. Missing owner evidence stays unmeasured. Load-test results distinguish
+refused, throttled, successful, and other failed calls; an exact throttling quota requires
+independent service evidence.
+
+## Reset or change the scenario
+
+The integration owner can reset with `make reset` or start a second scenario with
+`make demo SCENARIO=scenarios/billing-ops.yaml`. A reset deletes the scenario's minted credentials.

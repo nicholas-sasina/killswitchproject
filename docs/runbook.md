@@ -33,7 +33,7 @@ make demo            # resets demo state, mints fresh credentials, starts proxy 
 make dashboard       # http://localhost:5173
 ```
 
-`make demo-step` holds the reader so the presenter advances one ticket per Enter.
+`make demo-step` holds the reader and advances one ticket per Enter.
 `make demo SCENARIO=scenarios/billing-ops.yaml` runs a second scenario through the same code.
 
 Start the agents at least 15 minutes before an audience arrives: CloudTrail delivers events
