@@ -204,3 +204,29 @@ def test_recreating_a_just_deleted_secret_retries(monkeypatch, secrets_client):
     monkeypatch.setattr(client, "create_secret", flaky)
     vault.put("burn/shared/tok", "v")
     assert len(calls) == 3 and secret(secrets_client, "burn/shared/tok") == "v"
+
+
+def test_reissue_right_after_delete_and_rotation_keeps_previous(secrets_client):
+    for _ in range(2):  # delete then immediately re-mint, twice in a row
+        issue("agent-a", ["api_key"])
+        shared_body = {"name": "tok", "type": "other", "template": "t-{random}"}
+        assert call("POST", "/shared/credentials", shared_body)[0] == 200
+        call("DELETE", "/agents/agent-a/credentials")
+        call("DELETE", "/shared/credentials")
+    # nothing is left in a recovery window: the names are gone for good
+    with pytest.raises(secrets_client.exceptions.ResourceNotFoundException):
+        secrets_client.describe_secret(SecretId="burn/agent-a/api_key")
+
+    issue("agent-a", ["api_key"])  # rotation still leaves the old value at AWSPREVIOUS
+    old = secret(secrets_client, "burn/agent-a/api_key")
+    call("POST", "/agents/agent-a/rotate", {})
+    assert secret(secrets_client, "burn/agent-a/api_key", "AWSPREVIOUS") == old
+
+
+def test_put_restores_a_secret_that_is_in_a_recovery_window(secrets_client):
+    import vault
+    secrets_client.create_secret(Name="burn/shared/old", SecretString="v1")
+    secrets_client.delete_secret(SecretId="burn/shared/old", RecoveryWindowInDays=7)
+    assert vault.exists("burn/shared/old") is False and vault.get("burn/shared/old") is None
+    vault.put("burn/shared/old", "v2")
+    assert secret(secrets_client, "burn/shared/old") == "v2"
