@@ -20,22 +20,39 @@ PRICES = {
 # Per-call usage. `source` is "assumed" until the deployed Gateway has been measured.
 USAGE = {
     "interceptor_requests_per_call": (2, "design: one pre-call and one post-call Lambda"),
-    "interceptor_ms": (30, "assumed"),          # average billed duration per interceptor invocation
+    "interceptor_ms": (30, "assumed until measured"),          # average billed duration per interceptor invocation
     "interceptor_mb": (256, "assumed"),
-    "tool_ms": (40, "assumed"),
+    "tool_ms": (40, "assumed until measured"),
     "tool_mb": (256, "assumed"),
-    "ddb_reads_per_call": (1 + 300, "assumed: 1 session read + ~600 fingerprint keys at 0.5 RRU (eventually consistent) for a ~1 KB response"),
-    "ddb_writes_per_call": (1.2, "assumed: 1 event + ~0.2 ledger writes"),
-    "secrets_calls_per_call": (1, "assumed: tool resolves its placeholders with one GetSecretValue"),
+    "ddb_reads_per_call": (1.5, "counted from gateway code for read_ticket: 1 consistent session read (1 RRU) + 1 eventually consistent GetItem (0.5 RRU)"),
+    "ddb_writes_per_call": (0, "counted from gateway code: an allowed call writes nothing; refusals write one event"),
+    "secrets_calls_per_call": (0, "counted from gateway code: only read_config resolves secrets (one GetSecretValue per placeholder)"),
     "calls_per_token": (200, "assumed: one badge token (1 h) covers ~200 calls"),
     "burn_api_requests_per_call": (0, "tool calls do not touch the Burn API"),
 }
 SECRETS_AT_REST = {"agents": 1000, "secrets_per_agent": 3}   # api_key, aws_key, badge
 
 
+def read_sensitivity(candidates: dict, base_read_units: float, measured_fp_units: float, price: float) -> list[dict]:
+    """Cost per 1M calls if the tool output were larger, from the scan's candidate count.
+
+    Only the fingerprint lookups scale with output size (0.5 RRU per requested key); the
+    other reads (session, scenario) are unchanged.
+    """
+    other = base_read_units - measured_fp_units
+    rows = []
+    for name, c in candidates.items():
+        units = c["read_units"] + other
+        rows.append({"output": name, "fingerprints_requested": c["fingerprints_requested"],
+                     "read_units_per_call": round(units, 1), "dynamodb_read_usd_per_1m_calls": round(units * price, 2)})
+    return rows
+
+
 def compute(prices=PRICES, usage=USAGE, measured: dict | None = None) -> dict:
+    measured = measured or {}
     u = {k: v[0] for k, v in usage.items()}
-    u.update(measured or {})
+    # measured values are (value, basis) pairs
+    u.update({k: v[0] for k, v in measured.items()})
     p = {k: v[0] for k, v in prices.items()}
     n = 1_000_000
     gb_s = lambda ms, mb: ms / 1000 * mb / 1024
@@ -56,7 +73,7 @@ def compute(prices=PRICES, usage=USAGE, measured: dict | None = None) -> dict:
         "per_1m_tool_calls_usd": {k: round(v, 2) for k, v in lines.items()},
         "total_per_1m_tool_calls_usd": round(sum(lines.values()), 2),
         "secret_storage_usd_per_month_for_1000_agents": round(at_rest, 2),
-        "usage": {k: {"value": u[k], "basis": usage[k][1] if k not in (measured or {}) else "measured"} for k in u},
+        "usage": {k: {"value": u[k], "basis": measured[k][1] if k in measured else usage[k][1]} for k in u},
         "prices": {k: {"value": v[0], "source": v[1]} for k, v in prices.items()},
         "priced_on": "2026-11-07",
     }
