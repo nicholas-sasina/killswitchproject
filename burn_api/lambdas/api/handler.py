@@ -9,6 +9,7 @@ from burn_contracts import names
 
 import auth
 import burn
+import burn_scopes
 import db
 import errors
 import instances
@@ -93,6 +94,9 @@ def _swarm_route(method: str, path: str, query: dict, body: dict):
             return 200, instances.heartbeat(session_id)
         case ("POST", ["instances", session_id, "exit"]):
             return 200, instances.exit_instance(session_id)
+        case ("POST", ["burns"]):
+            return 200, burn_scopes.burn_scope(str(body.get("scope") or ""), body.get("id"),
+                                               str(body.get("reason") or "")[:200])
     return None
 
 
