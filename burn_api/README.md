@@ -42,9 +42,12 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
   `exited_at`. `tools` comes from the (narrowed) role, so the Gateway enforces it unchanged. `send_to` is
   `[]` for role instances.
 - **Idle instances.** There is no scheduler. `GET /instances` first exits active role instances whose
-  `last_seen` is older than `BURN_INSTANCE_IDLE_SECONDS` (default 600), at most 25 per call, the same
-  way as a clean exit. Scenario sessions never heartbeat and are never swept. Clients that keep an
-  instance alive call heartbeat more often than that.
+  `last_seen` is older than `BURN_INSTANCE_IDLE_SECONDS` (default 600). The sweep is bounded so the poll
+  stays fast: at most 10 instances or about 2 s per call, the rest on later calls. The status flip, badge
+  revoke and `instance/exited` event happen inline; deleting the instance's credentials (a slow IAM call)
+  is queued on the minter with an asynchronous invoke, not awaited. If queuing fails, calling
+  `POST /instances/{id}/exit` again deletes them. Scenario sessions never heartbeat and are never swept.
+  Clients that keep an instance alive call heartbeat more often than the idle window.
 - **Scoped burns.** Every target session is revoked first, so they are stopped even if the rest is slow.
   Then each distinct agent id goes through `POST /burn` in a pool of 10 threads. One failing burn lands in
   `failed` and does not stop the others. A failed instance is already revoked; finish it with

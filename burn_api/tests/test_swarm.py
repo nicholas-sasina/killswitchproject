@@ -460,3 +460,83 @@ def test_failure_after_the_badge_exists_deletes_the_badge_too(env, monkeypatch):
     assert [c[0] for c in env.minter.calls] == ["POST", "DELETE"]
     monkeypatch.setattr(sessions, "_store_badge", real_store)
     assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201
+
+
+# --- the idle sweep must not slow GET /instances down -------------------------------------------
+
+import minter_client  # noqa: E402
+
+REAL_CALL_ASYNC = minter_client.call_async  # the fixture swaps the module attribute for a fake
+
+
+def make_stale(env, count):
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": count})[1]["token"]
+    sids = [call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[1]["session_id"]
+            for _ in range(count)]
+    for sid in sids:
+        env.ddb.Table("burn-sessions").update_item(
+            Key={"session_id": sid}, UpdateExpression="SET last_seen = :t",
+            ExpressionAttributeValues={":t": "2020-01-01T00:00:00.000Z"})
+    return sids
+
+
+def test_sweep_queues_slow_credential_deletes_instead_of_waiting(env):
+    import time
+    sids = make_stale(env, 8)
+    env.minter.delay = 1.0  # every awaited minter call now takes a second
+    started = time.monotonic()
+    status, body = call(env, "GET", "/instances")
+    assert status == 200 and time.monotonic() - started < 1.0
+    assert {i["status"] for i in body["instances"]} == {"exited"} and len(body["instances"]) == 8
+    assert sorted(q[1] for q in env.minter.queued) == sorted(
+        f"/agents/{i['agent_id']}/credentials" for i in body["instances"])
+    assert all(q[0] == "DELETE" for q in env.minter.queued) and len(sids) == 8
+
+
+def test_sweep_stops_at_its_time_budget_and_finishes_on_later_calls(env):
+    import time, instances
+    make_stale(env, 6)
+    env.badges.deleted.clear()
+    real = env.badges.delete_badge
+    env.badges.delete_badge = lambda client_id: (time.sleep(0.3), real(client_id))
+    try:
+        started = time.monotonic()
+        first = instances.sweep_idle(limit=10, budget=0.5)
+        assert 0 < len(first) < 6 and time.monotonic() - started < 1.5
+        second = instances.sweep_idle(limit=10, budget=30)
+        assert len(first) + len(second) == 6
+    finally:
+        env.badges.delete_badge = real
+
+
+def test_a_credential_delete_that_could_not_be_queued_is_retried_by_exit(env, monkeypatch):
+    sids = make_stale(env, 1)
+
+    def cannot_queue(method, path, body=None):
+        raise minter_client.MinterError("not queued")
+
+    monkeypatch.setattr(minter_client, "call_async", cannot_queue)
+    assert call(env, "GET", "/instances")[0] == 200
+    assert session_row(env, sids[0])["status"] == "exited"
+    agent_id = session_row(env, sids[0])["agent_id"]
+    assert ("DELETE", f"/agents/{agent_id}/credentials", None) not in env.minter.calls
+    assert call(env, "POST", f"/instances/{sids[0]}/exit")[0] == 200  # awaits the delete
+    assert ("DELETE", f"/agents/{agent_id}/credentials", None) in env.minter.calls
+
+
+def test_call_async_uses_an_event_invoke():
+    sent = {}
+
+    class Stub:
+        def invoke(self, **kwargs):
+            sent.update(kwargs)
+            return {"StatusCode": 202}
+
+    minter_client._lambda = Stub()
+    try:
+        REAL_CALL_ASYNC("DELETE", "/agents/agent-x/credentials")
+    finally:
+        minter_client._lambda = None
+    assert sent["InvocationType"] == "Event" and sent["FunctionName"] == "burn-minter"
+    assert b'"DELETE"' in sent["Payload"]

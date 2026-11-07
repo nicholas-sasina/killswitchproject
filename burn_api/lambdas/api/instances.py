@@ -4,12 +4,15 @@ An instance is a burn-sessions row. Role instances carry `role`; a scenario agen
 no `role` column and its role is derived from the agent id (agent-reader -> reader).
 
 Idle sweep: an active role instance whose `last_seen` is older than BURN_INSTANCE_IDLE_SECONDS
-(default 600) is exited exactly like a clean exit. There is no scheduler; GET /instances runs the
-sweep first, capped at SWEEP_LIMIT instances per call, so a long-dead swarm is cleaned up over a
-few calls and the dashboard (which polls /instances) is what keeps it tidy. Scenario sessions
-have no `last_seen` and are never swept.
+(default 600) is exited like a clean exit. There is no scheduler; GET /instances runs the sweep
+first, so the dashboard (which polls /instances) is what keeps it tidy. The sweep must not slow
+the poll down: it stops after SWEEP_BUDGET_SECONDS or SWEEP_LIMIT instances, and a long-dead swarm
+is cleaned up over a few calls. The status flip, badge revoke and event happen inline; deleting the
+instance's credentials (a slow IAM call) is queued on the minter instead of awaited. Scenario
+sessions have no `last_seen` and are never swept.
 """
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from boto3.dynamodb.conditions import Attr, Key
@@ -23,7 +26,8 @@ import minter_client
 import sessions
 
 DEFAULT_IDLE_SECONDS = 600
-SWEEP_LIMIT = 25
+SWEEP_LIMIT = 10
+SWEEP_BUDGET_SECONDS = 2.0
 
 
 def idle_seconds() -> int:
@@ -101,18 +105,19 @@ def heartbeat(session_id: str) -> dict:
     return view(row)
 
 
-def _delete_credentials(session: dict):
+def _delete_credentials(session: dict, wait: bool):
     # Only a role instance owns its credentials. A scenario agent keeps them for its next session.
     if session.get("role"):
-        minter_client.call("DELETE", f"/agents/{session['agent_id']}/credentials")
+        send = minter_client.call if wait else minter_client.call_async
+        send("DELETE", f"/agents/{session['agent_id']}/credentials")
 
 
-def exit_instance(session_id: str) -> dict:
+def exit_instance(session_id: str, wait_for_credentials: bool = True) -> dict:
     """Clean exit: end the session, then delete the instance's own credentials.
 
     The badge goes first (it is the kill switch). If the minter then fails, the error is raised
     after the session is already exited; calling exit again retries the credential deletion,
-    which is idempotent.
+    which is idempotent. With wait_for_credentials=False the deletion is queued, not awaited.
     """
     session = get_session(session_id)
     if session["status"] == "active" and sessions.end_session(session, "exited"):
@@ -120,21 +125,24 @@ def exit_instance(session_id: str) -> dict:
         db.write_event(agent_id=session["agent_id"], source="instance", action="exited",
                        session_id=session_id, role=role_of(session),
                        parent_session=session.get("parent_session"), detail="instance exited")
-        _delete_credentials(session)
+        _delete_credentials(session, wait_for_credentials)
     elif session["status"] == "exited":
-        _delete_credentials(session)
+        _delete_credentials(session, wait_for_credentials)
     return view(get_session(session_id))
 
 
-def sweep_idle(limit: int = SWEEP_LIMIT) -> list[str]:
+def sweep_idle(limit: int = SWEEP_LIMIT, budget: float = SWEEP_BUDGET_SECONDS) -> list[str]:
     """Exit active role instances that have not been seen for BURN_INSTANCE_IDLE_SECONDS."""
+    deadline = time.monotonic() + budget
     cutoff = _iso(datetime.now(timezone.utc) - timedelta(seconds=idle_seconds()))
     stale = db.scan_all(db.table(names.SESSIONS_TABLE), FilterExpression=(
         Attr("status").eq("active") & Attr("role").exists() & Attr("last_seen").lt(cutoff)))
     exited = []
     for session in sorted(stale, key=lambda s: s["last_seen"])[:limit]:
+        if time.monotonic() >= deadline:
+            break
         try:
-            exit_instance(session["session_id"])
+            exit_instance(session["session_id"], wait_for_credentials=False)
             exited.append(session["session_id"])
         except Exception as exc:  # one stuck instance must not stop the listing or the sweep
             print(f"idle sweep: exit failed for {session['session_id']}: {type(exc).__name__}")
