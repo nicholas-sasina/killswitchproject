@@ -20,6 +20,16 @@ def host_of(url: str) -> str:
     return (urlsplit(url).hostname or "").rstrip(".").lower()
 
 
+def _valid_host(value) -> bool:
+    if not isinstance(value, str):
+        return False
+    value = value[:-1] if value.endswith(".") else value
+    return bool(value) and len(value) <= 253 and all(
+        re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+        for label in value.split(".")
+    )
+
+
 def public_ip(value: str) -> bool:
     try:
         address = ipaddress.ip_address(value)
@@ -72,9 +82,37 @@ class Settings:
         return scheme == "https" and (host == "bedrock-runtime.us-east-1.amazonaws.com"
                                      or bool(self.gateway_url) and host == host_of(self.gateway_url))
 
-    def request_reason(self, url: str, method: str, has_body: bool) -> str | None:
+    def request_reason(self, url: str, method: str, has_body: bool,
+                       headers: list[tuple[str, str]] = ()) -> str | None:
         """The demo needs only ListBuckets, never object reads or writes."""
         parts = urlsplit(url)
+        sink = urlsplit(self.sink_url)
+        sink_request = self.is_sink(host_of(url), parts.port or (443 if parts.scheme == "https" else 80))
+        if parts.scheme != "https" and not (sink_request and parts.scheme == sink.scheme):
+            return "destination_scheme_not_allowed"
+        if sink_request and parts.scheme != sink.scheme:
+            return "destination_scheme_not_allowed"
+        # The URL's allowlisted host must also be the HTTP authority sent upstream.
+        # Otherwise GET / on the global S3 endpoint could select a bucket through
+        # Host, and other virtual-host services could route to an unapproved app.
+        authorities = [v for k, v in headers if k.lower() == "host"]
+        if parts.username is not None or parts.password is not None or len(authorities) > 1:
+            return "destination_authority_mismatch"
+        if authorities:
+            try:
+                if not authorities[0] or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in authorities[0]):
+                    return "destination_authority_mismatch"
+                authority = urlsplit("//" + authorities[0])
+                port = authority.port if authority.port is not None else (443 if parts.scheme == "https" else 80)
+                expected_port = parts.port if parts.port is not None else (443 if parts.scheme == "https" else 80)
+                if (authority.username is not None or authority.password is not None
+                    or authority.path or authority.query or authority.fragment
+                    or not authority.hostname
+                    or authority.hostname.rstrip(".").lower() != host_of(url)
+                    or port != expected_port):
+                    return "destination_authority_mismatch"
+            except ValueError:
+                return "destination_authority_mismatch"
         if host_of(url) in S3_HOSTS and (
             parts.scheme != "https" or method != "GET" or parts.path != "/"
             or parts.query or parts.fragment or has_body
@@ -91,9 +129,7 @@ class Settings:
         hosts = session.get("egress")
         if hosts is None:
             return None
-        if not isinstance(hosts, list) or any(
-            not isinstance(h, str) or not re.fullmatch(r"[a-zA-Z0-9.-]+", h) for h in hosts
-        ):
+        if not isinstance(hosts, list) or any(not _valid_host(h) for h in hosts):
             return "role_policy_invalid"
         return None if host in {h.rstrip('.').lower() for h in hosts} else "role_destination_not_allowed"
 
@@ -130,10 +166,14 @@ class ExitCheck:
               agent_id: str, window: SessionWindow, method: str = "GET") -> Decision:
         parts = urlsplit(url)
         host = host_of(url)
-        reason = self.settings.route_reason(host, parts.port or (443 if parts.scheme == "https" else 80))
+        try:
+            port = parts.port if parts.port is not None else (443 if parts.scheme == "https" else 80)
+        except ValueError:
+            return Decision("destination_port_not_allowed")
+        reason = self.settings.route_reason(host, port)
         if reason:
             return Decision(reason)
-        reason = self.settings.request_reason(url, method, bool(body))
+        reason = self.settings.request_reason(url, method, bool(body), headers)
         if reason:
             return Decision(reason)
         text = [url]

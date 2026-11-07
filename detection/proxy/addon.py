@@ -87,7 +87,8 @@ class BurnProxy:
                         self._reply(flow, "payload_too_large", agent=agent, session=session)
                     else:
                         reason = self.settings.request_reason(flow.request.url, flow.request.method,
-                            int(length) > 0 or "transfer-encoding" in flow.request.headers)
+                            int(length) > 0 or "transfer-encoding" in flow.request.headers,
+                            list(flow.request.headers.items(multi=True)))
                         if reason:
                             self._reply(flow, reason, agent=agent, session=session)
                     return

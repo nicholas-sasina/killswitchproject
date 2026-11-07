@@ -147,6 +147,11 @@ deletes and bucket-specific requests. The proxy checks the method and body frami
 forwarding a request, then checks the full request again. Bucket subdomains are not globally
 allowlisted.
 
+The HTTP `Host` authority must match the allowlisted URL host and port. Duplicate,
+malformed or mismatched authorities are refused before forwarding, so a different S3
+bucket cannot be selected through a Host header. Non-sink destinations require HTTPS;
+a TLS-configured sink cannot be downgraded to HTTP.
+
 The swarm session's proposed `egress` field narrows the deployment allowlist: missing or
 `null` uses the legacy defaults, `[]` denies all, and a list permits only those exact hosts
 that are also globally allowed. The session owner supplies this field; the proxy does not
@@ -156,3 +161,10 @@ look up a mutable role separately. Invalid policies fail closed. This adapter fo
 The evaluation configuration audit counts the simulated-attacker sink as outsider-readable.
 Custom Gateway/provider endpoints require owner verification rather than being declared safe
 from a hostname alone. A local configuration audit does not prove remote access controls.
+
+For a configuration without the simulated-attacker endpoint, explicitly set
+`BURN_SINK_URL=''`. This removes the sink from the allowlist and removes its private-address
+exception; it does not prove that the remaining services expose no outsider-readable
+capabilities. Fixed AWS hostnames also remain unverified in the configuration audit.
+An empty session `egress` list reaches no destinations but disables all agent work, so the
+audit labels it deny-all and does not report it as a usable production configuration.

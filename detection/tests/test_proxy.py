@@ -120,6 +120,8 @@ def test_private_addresses_and_multicast_are_rejected():
 @pytest.mark.parametrize("egress,allowed", [
     (None, True), (["sink"], True), (["SINK."], True), ([], False),
     (["s3.amazonaws.com"], False), ("sink", False), (["*"], False),
+    ([None], False), (["https://sink"], False), (["sink:8081"], False),
+    ([""], False), ([".."], False), (["-sink"], False), (["sink.."], False),
 ])
 @pytest.mark.parametrize("connect", [False, True])
 def test_session_egress_narrows_global_allowlist(setup, egress, allowed, connect):
@@ -196,6 +198,50 @@ def test_s3_is_refused_before_forwarding_body(setup, method, path, headers):
     assert json.loads(flow.response.content)["reason"] == "s3_operation_not_allowed"
 
 
+@pytest.mark.parametrize("headers", [
+    [("Host", "bucket.s3.amazonaws.com")],
+    [("Host", "s3.amazonaws.com:80")],
+    [("Host", "s3.amazonaws.com:0")],
+    [("Host", "user@s3.amazonaws.com")],
+    [("Host", "s3.amazonaws.com/path")],
+    [("Host", "s3.amazonaws.com\t")],
+    [("Host", "s3.amazonaws.com"), ("HOST", "s3.amazonaws.com")],
+])
+def test_http_authority_cannot_select_another_upstream_route(setup, headers):
+    _, _, agent, _, checker = setup
+    result = request(checker, agent, url="https://s3.amazonaws.com/", headers=headers)
+    assert result.reason == "destination_authority_mismatch"
+
+
+@pytest.mark.parametrize("host", ["s3.amazonaws.com", "S3.AMAZONAWS.COM.", "s3.amazonaws.com:443"])
+def test_equivalent_s3_authorities_remain_allowed(setup, host):
+    _, _, agent, _, checker = setup
+    assert request(checker, agent, url="https://s3.amazonaws.com/", headers=[("Host", host)]).reason is None
+
+
+@pytest.mark.parametrize("url,reason", [
+    ("https://s3.amazonaws.com:0/", "destination_port_not_allowed"),
+    ("http://sts.amazonaws.com:443/", "destination_scheme_not_allowed"),
+    ("https://user@s3.amazonaws.com/", "destination_authority_mismatch"),
+])
+def test_url_transport_and_authority_are_unambiguous(setup, url, reason):
+    _, _, agent, _, checker = setup
+    assert request(checker, agent, url=url).reason == reason
+
+
+def test_s3_host_header_bypass_is_refused_at_request_headers(setup):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state, body=b"")
+    flow.request.url = "https://s3.amazonaws.com/"
+    flow.request.method = "GET"
+    flow.request.headers["Host"] = "bucket.s3.amazonaws.com"
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.231.1.1", 443))]):
+        proxy._process(flow, headers_only=True)
+    assert json.loads(flow.response.content)["reason"] == "destination_authority_mismatch"
+
+
 def flow_for(state, body=b"hello"):
     flow = tflow.tflow()
     flow.request = http.Request.make("POST", "http://sink:8081/webhook", body,
@@ -250,7 +296,16 @@ def test_host_header_cannot_skip_sink_body_check(setup):
     flow.request.headers["Host"] = "gateway.example.test"
     with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.22.0.5", 8081))]):
         proxy._process(flow)
-    assert json.loads(flow.response.content)["reason"] == "credential_detected"
+    assert json.loads(flow.response.content)["reason"] == "destination_authority_mismatch"
+    assert state.events[-1]["action"] == "blocked"
+    assert value not in json.dumps(state.events)
+
+
+def test_tls_sink_cannot_be_downgraded_to_http(setup):
+    scanner, _, agent, _, _ = setup
+    checker = ExitCheck(scanner, Settings(sink_url="https://sink:8443"))
+    assert request(checker, agent, url="http://sink:8443/webhook").reason == "destination_scheme_not_allowed"
+    assert request(checker, agent, url="https://sink:8443/webhook").reason is None
 
 
 def test_private_dns_destination_produces_blocked_event(setup):
