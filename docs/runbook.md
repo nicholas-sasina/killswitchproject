@@ -82,6 +82,7 @@ cost grows with the agent count; check the count before running one.
 
 | Symptom | Cause and fix |
 |---|---|
+| Dashboard says "API unreachable" | The API accepts browser requests only from `http://localhost:5173`. Open exactly that URL (not `127.0.0.1`). `make dashboard` refuses to start if port 5173 is taken; stop the other process using it (`lsof -iTCP:5173 -sTCP:LISTEN`). |
 | Dashboard shows a MOCK DATA banner | `dashboard/.env.local` is missing or stale. Run `make env` and restart `make dashboard`. |
 | An agent exits at start with "no AWS key of its own" | Its session has no minted AWS key. Run `make reset && make demo`. Agents never fall back to the host's credentials. |
 | An agent's first model call fails with `InvalidClientTokenId` | A new IAM key takes a few seconds to become valid. The agent retries for about 20 seconds. |

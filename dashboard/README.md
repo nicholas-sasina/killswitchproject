@@ -35,7 +35,7 @@ npm ci
 cp .env.example .env.local
 ```
 
-Set these local fields, then run `npm run dev` and open the URL Vite prints:
+Set these local fields, then run `npm run dev` and open http://localhost:5173 (the only origin the Burn API accepts; the dev server listens on localhost only and will not move to another port):
 
 | Variable               | Meaning                                     |
 | ---------------------- | ------------------------------------------- |
