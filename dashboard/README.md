@@ -2,14 +2,14 @@
 
 ## What it does
 
-Shows live agent status, credential exposure and containment activity in a high-contrast console.
+Shows live agent status, credential exposure and containment activity with agents and events side by side.
 Burn an agent, inspect its CloudTrail history, or exercise the egress proxy with the labeled test tool.
 
 ## How it works
 
 - Polls the Burn API every second with an incremental cursor; a reducer deduplicates events by `event_id`.
 - Agent selection loads its exposure ledger, refreshed every five seconds.
-- Confirming Burn posts the agent and optional reason, then shows returned rotated and flagged references.
+- Confirming Burn highlights the card with returned rotation/flag counts for ten seconds; full references remain below the ledger.
 - A revoked agent's CloudTrail timeline refreshes every ten seconds; the test tool uses its own configured URL.
 - Every response is checked for `x-burn-mock: true`; once detected, a full-width red banner stays until reload.
 
@@ -53,7 +53,7 @@ npm run build
 ```
 
 Tests cover reducer updates and cursor preservation, request headers and routes, persistent mock detection,
-Burn confirmation and result display, and custom leak-test submission. `npm run preview` serves the production build.
+Burn confirmation and timed card feedback, and custom leak-test submission. `npm run preview` serves the production build.
 The APIs must allow the dashboard's origin, accept `x-burn-demo-token` and `Content-Type`, and expose
 `x-burn-mock` in `Access-Control-Expose-Headers` so the browser can read it.
 

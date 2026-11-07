@@ -1,6 +1,28 @@
 import type { BurnResult } from "../contracts";
 
-export function BurnOutcome({ result }: { result: BurnResult }) {
+export function BurnOutcome({
+  result,
+  compact = false,
+}: {
+  result: BurnResult;
+  compact?: boolean;
+}) {
+  if (compact)
+    return (
+      <div
+        className="burn-summary"
+        role="status"
+        aria-label={`Burn summary for ${result.agent_id}`}
+      >
+        <strong>
+          {result.revoked ? "Contained" : "Revocation unconfirmed"}
+        </strong>
+        <span>
+          Rotated <b>{result.rotated.length}</b> · Flagged{" "}
+          <b>{result.flagged.length}</b>
+        </span>
+      </div>
+    );
   return (
     <section className="burn-outcome" aria-label="Burn result" role="status">
       <div>
