@@ -12,6 +12,7 @@ AWS_HOSTS = frozenset({
     "bedrock-runtime.us-east-1.amazonaws.com", "sts.amazonaws.com",
     "sts.us-east-1.amazonaws.com", "s3.amazonaws.com", "s3.us-east-1.amazonaws.com",
 })
+S3_HOSTS = frozenset({"s3.amazonaws.com", "s3.us-east-1.amazonaws.com"})
 _SIGV4 = re.compile(r"^AWS4-HMAC-SHA256 Credential=([A-Z0-9]+)/[^,\s]+, SignedHeaders=[a-z0-9;-]+, Signature=[a-f0-9]{64}$")
 
 
@@ -71,6 +72,31 @@ class Settings:
         return scheme == "https" and (host == "bedrock-runtime.us-east-1.amazonaws.com"
                                      or bool(self.gateway_url) and host == host_of(self.gateway_url))
 
+    def request_reason(self, url: str, method: str, has_body: bool) -> str | None:
+        """The demo needs only ListBuckets, never object reads or writes."""
+        parts = urlsplit(url)
+        if host_of(url) in S3_HOSTS and (
+            parts.scheme != "https" or method != "GET" or parts.path != "/"
+            or parts.query or parts.fragment or has_body
+        ):
+            return "s3_operation_not_allowed"
+        return None
+
+    def role_reason(self, host: str, session: dict) -> str | None:
+        """The swarm session's egress field can narrow, never expand, global hosts.
+
+        Missing/null preserves legacy sessions. An explicit empty list denies all.
+        Matches the proposed ws/swarms-contracts session/role field.
+        """
+        hosts = session.get("egress")
+        if hosts is None:
+            return None
+        if not isinstance(hosts, list) or any(
+            not isinstance(h, str) or not re.fullmatch(r"[a-zA-Z0-9.-]+", h) for h in hosts
+        ):
+            return "role_policy_invalid"
+        return None if host in {h.rstrip('.').lower() for h in hosts} else "role_destination_not_allowed"
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -101,10 +127,13 @@ class ExitCheck:
         return value
 
     def check(self, *, url: str, headers: list[tuple[str, str]], body: str,
-              agent_id: str, window: SessionWindow) -> Decision:
+              agent_id: str, window: SessionWindow, method: str = "GET") -> Decision:
         parts = urlsplit(url)
         host = host_of(url)
         reason = self.settings.route_reason(host, parts.port or (443 if parts.scheme == "https" else 80))
+        if reason:
+            return Decision(reason)
+        reason = self.settings.request_reason(url, method, bool(body))
         if reason:
             return Decision(reason)
         text = [url]

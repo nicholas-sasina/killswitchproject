@@ -117,6 +117,85 @@ def test_private_addresses_and_multicast_are_rejected():
     assert not public_ip("::ffff:169.254.169.254")
 
 
+@pytest.mark.parametrize("egress,allowed", [
+    (None, True), (["sink"], True), (["SINK."], True), ([], False),
+    (["s3.amazonaws.com"], False), ("sink", False), (["*"], False),
+])
+@pytest.mark.parametrize("connect", [False, True])
+def test_session_egress_narrows_global_allowlist(setup, egress, allowed, connect):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    state.session = lambda *_: {"status": "active", "egress": egress}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.22.0.5", 8081))]):
+        proxy._process(flow, connect=connect)
+    assert (flow.response is None) == allowed
+
+
+def test_role_cannot_expand_global_destinations(setup):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    state.session = lambda *_: {"status": "active", "egress": ["outsider.example.test"]}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = "https://outsider.example.test/"
+    proxy._process(flow)
+    assert json.loads(flow.response.content)["reason"] == "destination_not_allowed"
+
+
+def test_sdk_list_buckets_request_remains_allowed_without_sending_it(setup):
+    import boto3
+    scanner, _, agent, _, checker = setup
+    client = boto3.client("s3", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing")
+    class Captured(Exception):
+        pass
+    captured = []
+    def stop(request, **kwargs):
+        captured.append(request)
+        raise Captured()
+    client.meta.events.register("before-send.s3.ListBuckets", stop)
+    with pytest.raises(Captured):
+        client.list_buckets()
+    req = captured[0]
+    assert checker.check(url=req.url, method=req.method, body="", headers=[],
+                         agent_id=agent, window=SessionWindow()).reason is None
+
+
+@pytest.mark.parametrize("host", ["s3.amazonaws.com", "s3.us-east-1.amazonaws.com"])
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/", ""), ("PUT", "/bucket/key", "data"),
+    ("GET", "/bucket/key", ""), ("DELETE", "/bucket/key", ""),
+    ("POST", "/", ""), ("HEAD", "/", ""),
+    ("GET", "/?list-type=2", ""), ("GET", "/", "data"),
+    ("GET", "/%2f", ""), ("GET", "//", ""),
+])
+def test_s3_only_allows_list_buckets(setup, host, method, path, body):
+    _, _, agent, _, checker = setup
+    result = checker.check(url=f"https://{host}{path}", headers=[], body=body,
+                           method=method, agent_id=agent, window=SessionWindow())
+    assert result.reason == (None if (method, path, body) == ("GET", "/", "") else "s3_operation_not_allowed")
+
+
+@pytest.mark.parametrize("method,path,headers", [
+    ("PUT", "/bucket/key", {}), ("GET", "/", {"Content-Length": "1"}),
+    ("GET", "/", {"Transfer-Encoding": "chunked"}),
+])
+def test_s3_is_refused_before_forwarding_body(setup, method, path, headers):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = "https://s3.amazonaws.com" + path
+    flow.request.method = method
+    flow.request.headers.pop("content-length", None)
+    flow.request.headers.update(headers)
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.231.1.1", 443))]):
+        proxy._process(flow, headers_only=True)
+    assert flow.response.status_code == 403
+    assert json.loads(flow.response.content)["reason"] == "s3_operation_not_allowed"
+
+
 def flow_for(state, body=b"hello"):
     flow = tflow.tflow()
     flow.request = http.Request.make("POST", "http://sink:8081/webhook", body,

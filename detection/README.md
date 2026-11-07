@@ -138,3 +138,21 @@ and attribution. Unknown-format credentials have `secret_ref=None` and `owner=un
 The sink stores only byte counts and SHA-256 digests, never paths, headers or bodies. The proxy
 does not log payloads, and dependency errors return a constant reason without exception details.
 `burn_detect` itself has only stdlib and shared `burn_contracts` imports and can be bundled in Lambda.
+
+## Destination restrictions
+
+Both S3 endpoints accept only HTTPS `GET /`, without a query string or request body.
+This permits the demo's signed `ListBuckets` request and refuses object reads, uploads,
+deletes and bucket-specific requests. The proxy checks the method and body framing before
+forwarding a request, then checks the full request again. Bucket subdomains are not globally
+allowlisted.
+
+The swarm session's proposed `egress` field narrows the deployment allowlist: missing or
+`null` uses the legacy defaults, `[]` denies all, and a list permits only those exact hosts
+that are also globally allowed. The session owner supplies this field; the proxy does not
+look up a mutable role separately. Invalid policies fail closed. This adapter follows
+`ws/swarms-contracts`; it takes effect when the session writer supplies the field.
+
+The evaluation configuration audit counts the simulated-attacker sink as outsider-readable.
+Custom Gateway/provider endpoints require owner verification rather than being declared safe
+from a hostname alone. A local configuration audit does not prove remote access controls.

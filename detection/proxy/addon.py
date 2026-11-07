@@ -64,13 +64,14 @@ class BurnProxy:
                     self._reply(flow, "session_required", action="refused")
                     return
                 agent, session = identity
-                if not self.state.session(agent, session):
+                session_row = self.state.session(agent, session)
+                if not session_row:
                     # An unrecognized auth password is never written to the event stream.
                     self._reply(flow, "session_inactive", agent=agent, action="refused")
                     return
                 self.connections[flow.client_conn.id] = identity
                 host, port = flow.request.host.rstrip(".").lower(), flow.request.port
-                reason = self.settings.route_reason(host, port)
+                reason = self.settings.route_reason(host, port) or self.settings.role_reason(host, session_row)
                 if reason:
                     self._reply(flow, reason, agent=agent, session=session)
                     return
@@ -84,6 +85,11 @@ class BurnProxy:
                     length = flow.request.headers.get("content-length", "0")
                     if not length.isdecimal() or int(length) > 262_144:
                         self._reply(flow, "payload_too_large", agent=agent, session=session)
+                    else:
+                        reason = self.settings.request_reason(flow.request.url, flow.request.method,
+                            int(length) > 0 or "transfer-encoding" in flow.request.headers)
+                        if reason:
+                            self._reply(flow, reason, agent=agent, session=session)
                     return
                 if session not in self.windows:
                     self.windows[session] = SessionWindow()
@@ -95,7 +101,7 @@ class BurnProxy:
                     body = flow.request.get_content().decode("utf-8")
                 decision = self.checker.check(url=flow.request.url,
                     headers=list(flow.request.headers.items(multi=True)), body=body,
-                    agent_id=agent, window=self.windows[session])
+                    agent_id=agent, window=self.windows[session], method=flow.request.method)
                 if decision.reason:
                     self._reply(flow, decision.reason, agent=agent, session=session, finding=decision.finding)
             except Exception:
