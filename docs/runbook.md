@@ -45,7 +45,7 @@ several minutes late, and the blast-radius view only shows what CloudTrail has r
 |---|---|---|
 | Burn an agent | **Burn** on the agent's card | `make burn ARGS="kill agent-analyst --yes"` |
 | Show the old key is dead | `rejected` event in the stream | `make replay-old-key AGENT=agent-analyst` |
-| Exit check | Blocked events from real traffic appear in the stream | Verify on demand with `make exit-check-test AGENT=agent-...` |
+| Exit check | Blocked handoffs (an agent passing a credential to another) appear in the stream from real traffic | Verify the outbound proxy on demand with `make exit-check-test AGENT=agent-...` |
 | Blast radius | **Blast radius** panel | `make burn ARGS="blast-radius agent-analyst"` |
 
 Other commands: `make burn ARGS="agents"`, `"events --follow"`, `"ledger agent-analyst"`. The CLI reads `BURN_API_URL` and `BURN_DEMO_TOKEN` from `.env` (written by `make env`).

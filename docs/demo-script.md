@@ -31,10 +31,10 @@ shows the provider's `rejected` event.
 ## 2:05 - Moment 3: exit check (60 s)
 1. Point at the real `blocked` event with source `handoff`: the reader tried to send its API key to the
    analyst through `send_message`. Show the explanation, such as `send_message blocked: known credential`.
-2. Point at the `blocked` events with source `egress`. The proxy stopped credentials from leaving through
-   outbound requests while the agents were working. These events come from real traffic.
-3. Optionally verify the exit check from the operator terminal:
-   `make exit-check-test AGENT=agent-notifier ENCODING=base64`. Show the blocked/allowed result and reason.
+2. Show the outbound side from the operator terminal: `make exit-check-test AGENT=agent-notifier ENCODING=base64`.
+   The notifier was never burned, but it inherited the reader's keys through the analyst; the proxy refuses to let
+   them leave (`blocked: credential_detected`) and a `blocked` event with source `egress` appears in the stream.
+3. Run it for the burned agent: the proxy refuses it outright (`session_inactive`).
 4. Say honestly: a novel transformation can slip past; the egress allowlist is the backstop. Quote the eval catch rate.
 
 ## 3:05 - Blast radius (55 s)
