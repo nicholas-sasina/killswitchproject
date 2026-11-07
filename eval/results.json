@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-11-07T21:04:42+00:00",
-  "git_sha": "d3aa889",
+  "timestamp": "2026-11-07T21:21:29+00:00",
+  "git_sha": "0dfbeb8",
   "catch_rate": {
     "trials_per_cell": 10,
     "forms": 31,
@@ -11,8 +11,8 @@
       "conn_string"
     ],
     "total_payload_runs": 1240,
-    "blocked_rate": 0.7903225806451613,
-    "attributed_rate": 0.7580645161290323,
+    "blocked_rate": 0.7935483870967742,
+    "attributed_rate": 0.7629032258064516,
     "per_form": {
       "plain": {
         "describe": "value pasted as-is in prose",
@@ -633,8 +633,8 @@
       "homoglyph": {
         "describe": "Latin letters swapped for Cyrillic look-alikes",
         "n": 40,
-        "blocked": 28,
-        "attributed": 18,
+        "blocked": 26,
+        "attributed": 17,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -648,21 +648,21 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 4,
-            "attributed": 4
+            "blocked": 2,
+            "attributed": 2
           },
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 0
+            "attributed": 1
           }
         }
       },
       "junk_interleaved": {
         "describe": "random junk character after each character",
         "n": 40,
-        "blocked": 36,
-        "attributed": 36,
+        "blocked": 39,
+        "attributed": 39,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -676,8 +676,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 6,
-            "attributed": 6
+            "blocked": 9,
+            "attributed": 9
           },
           "conn_string": {
             "n": 10,
@@ -717,8 +717,8 @@
       "zero_width": {
         "describe": "zero-width spaces between characters",
         "n": 40,
-        "blocked": 36,
-        "attributed": 36,
+        "blocked": 39,
+        "attributed": 39,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -732,8 +732,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 6,
-            "attributed": 6
+            "blocked": 9,
+            "attributed": 9
           },
           "conn_string": {
             "n": 10,
@@ -830,7 +830,7 @@
         "describe": "two halves in two query params of one URL",
         "n": 40,
         "blocked": 30,
-        "attributed": 20,
+        "attributed": 21,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -850,7 +850,7 @@
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 0
+            "attributed": 1
           }
         }
       },
@@ -1175,6 +1175,36 @@
         "calls_after_revoke_from_others": 185,
         "succeeded_of_those": 185,
         "revoked_calls_before_revoke_succeeded": 0
+      }
+    },
+    "load_1000": {
+      "simulated_agents": 1000,
+      "calls_per_agent": 5,
+      "concurrency": 50,
+      "real_badges_and_sessions": 100,
+      "token_fetch_seconds_total": 2.3,
+      "tool_calls_ok": 4593,
+      "tool_calls_refused": 262,
+      "tool_calls_attempted": 5000,
+      "errors": {
+        "429": 145
+      },
+      "wall_seconds": 41.8,
+      "throughput_calls_per_s": 119.8,
+      "latency": {
+        "n": 4738,
+        "p50_ms": 226.5,
+        "p95_ms": 810.1,
+        "mean_ms": 309.0
+      },
+      "revocation": {
+        "revoked_badges": 10,
+        "revoked_agents": 100,
+        "calls_after_revoke_from_revoked": 281,
+        "refused_of_those": 262,
+        "calls_after_revoke_from_others": 2364,
+        "succeeded_of_those": 2238,
+        "revoked_calls_before_revoke_succeeded": 219
       }
     }
   }

@@ -34,6 +34,7 @@ class Run:
         self.started = 0
         self.revoked_at = None
         self.revoked = set()
+        self.revoked_badges = 0
 
 
 async def one_agent(index, sem, http, url, token, calls, think, run):
@@ -58,15 +59,23 @@ async def one_agent(index, sem, http, url, token, calls, think, run):
 
 
 async def revoke_midway(run, throwaway, count, agents):
-    """When half the agents have started, revoke `count` agents that are still mid-task."""
+    """When half the agents have started, revoke `count` badges that are in use right now.
+
+    Agents share badges (agent i uses badge i % badges), so revoking a badge's session
+    revokes every agent on it; `run.revoked` holds those agent indices.
+    """
+    badges = len(throwaway.items)
     while run.started < agents // 2:
         await asyncio.sleep(0.05)
-    victims = random.sample(sorted(run.active), min(count, len(run.active)))
-    for index in victims:
+    in_use = sorted({i % badges for i in run.active})
+    victims = random.sample(in_use, min(count, len(in_use)))
+    for badge in victims:
         throwaway.sessions.update_item(
-            Key={"session_id": throwaway.items[index]["session_id"]}, UpdateExpression="SET #s = :r",
+            Key={"session_id": throwaway.items[badge]["session_id"]}, UpdateExpression="SET #s = :r",
             ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":r": "revoked"})
-    run.revoked, run.revoked_at = set(victims), time.perf_counter()
+    run.revoked_badges = len(victims)
+    run.revoked = {i for i in range(agents) if i % badges in set(victims)}
+    run.revoked_at = time.perf_counter()
 
 
 def revocation_report(run) -> dict:
@@ -75,6 +84,7 @@ def revocation_report(run) -> dict:
     gone = [c for c in after if c[0] in run.revoked]
     kept = [c for c in after if c[0] not in run.revoked]
     return {
+        "revoked_badges": run.revoked_badges,
         "revoked_agents": len(run.revoked),
         "calls_after_revoke_from_revoked": len(gone),
         "refused_of_those": sum(c[2] for c in gone),
@@ -126,7 +136,7 @@ def main():
     ap.add_argument("--concurrency", type=int, default=25)
     ap.add_argument("--badges", type=int, default=0, help="real badges to create (default: one per agent)")
     ap.add_argument("--think", type=float, default=0.0, help="seconds an agent waits between calls")
-    ap.add_argument("--revoke", type=int, default=0, help="revoke this many sessions mid-load")
+    ap.add_argument("--revoke", type=int, default=0, help="revoke this many badges (sessions) mid-load")
     ap.add_argument("--max-calls", type=int, default=MAX_CALLS_DEFAULT)
     args = ap.parse_args()
     if args.agents * args.calls > args.max_calls:

@@ -35,14 +35,18 @@ uv run python run_offline.py   # fold the results in
 ```
 
 ## Results so far
-Details and the full tables are in `RESULTS.md` and `results.json`. Scale numbers come only from two small runs against the deployed Gateway, each agent with its own badge:
+Details and the full tables are in `RESULTS.md` and `results.json`. Scale numbers come from three runs against the deployed Gateway. The first two give each agent its own badge:
 - 50 agents x 5 calls: 250 calls, 0 errors, about 62 calls/s, p50 253 ms, p95 360 ms.
 - 40 agents x 5 calls with 3 sessions revoked mid-run: every one of the 15 calls the revoked agents made after the revoke was refused, and all 185 calls from the other agents succeeded.
 
-A 1,000-agent run has not been done, so no 1,000-agent figure is reported.
+- 1,000 simulated agents x 5 calls sharing 100 badges (agent i uses badge i % 100), concurrency 50, 10 of the 100 badges revoked mid-run (about 100 agents lose access). Command: `uv run python loadtest.py --agents 1000 --calls 5 --badges 100 --concurrency 50 --revoke 10`.
+  5,000 tool calls in 41.8 s (about 120 calls/s); calls that were served had p50 227 ms and p95 810 ms.
+  4,593 succeeded, 262 were refused after the revoke, and 145 got HTTP 429 (the Gateway throttled at concurrency 50). No other errors.
+  After the revoke, 262 of 281 calls from revoked agents were refused (the other 19 were throttled with 429, none succeeded) and 2,238 of 2,364 calls from the other agents succeeded (the rest were 429).
+  All 100 badges, sessions and test events were deleted afterwards and checked.
 
 ## Cost warning
-Every badge is one Cognito app client and one token request, billed at $0.00225 each, and every call also costs Gateway, Lambda and DynamoDB usage. `loadtest.py` defaults to 50 agents x 5 calls and refuses more than 20,000 calls, but a large run still costs real money (1,000 badges is about $2.25 in token requests alone). Run big tests only deliberately.
+Every badge is one Cognito app client and one token request, billed at $0.00225 each, and every call also costs Gateway, Lambda and DynamoDB usage. `loadtest.py` defaults to 50 agents x 5 calls and refuses more than 20,000 calls, but a large run still costs real money (1,000 badges is about $2.25 in token requests alone; the 1,000-agent run above used 100 badges). Run big tests only deliberately.
 
 ## FAQ
 **Why not just report one catch-rate number?** One number hides the shape. Some forms (plain, any base64, hex, URL-encoding) are always caught; others (gzip, base32, rot13, junk characters, partial leaks) are not. `RESULTS.md` lists every form so the limits are visible.
