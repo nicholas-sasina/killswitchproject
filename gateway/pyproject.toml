@@ -23,5 +23,6 @@ burn-contracts = { path = "../contracts", editable = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Each Lambda folder is its own top-level package at runtime, so tests import
-# them the same way. badges.py is imported from this folder.
-pythonpath = [".", "lambdas/interceptor", "lambdas/tools"]
+# them the same way. badges.py is imported from this folder, and the shared
+# burn_detect library from ../detection (bundled into the Lambda at deploy).
+pythonpath = [".", "lambdas/interceptor", "lambdas/tools", "../detection"]

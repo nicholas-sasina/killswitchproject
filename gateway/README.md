@@ -6,9 +6,9 @@ only allows the tools its scenario role lists, and refuses everything once the b
 
 ## How it works
 - A badge is one Cognito app client per agent session (`badges.py`); the agent trades it for a token.
-- The gateway checks the token's signature and `burn/tools` scope, then calls the interceptor.
-- The interceptor looks up the session in DynamoDB on every call: revoked or unknown means refused.
-- It enforces the tool allowlist and recipients, and injects the real caller id into tool arguments.
+- The gateway checks the token; the interceptor then checks the session in DynamoDB on every call.
+- Revoked or unknown badges and unlisted tools or recipients are refused; the real caller id is injected.
+- Tool output is scanned (`burn_detect`) and every credential found goes into the agent's ledger.
 - One tool Lambda serves the mock tools from scenario data; credentials are filled in at read time.
 
 ## Key files
@@ -18,6 +18,8 @@ only allows the tools its scenario role lists, and refuses everything once the b
 | `lambdas/interceptor/interceptor.py` | REQUEST/RESPONSE decisions (see `INTERCEPTOR.md`) |
 | `lambdas/interceptor/shapes.py` | Reads gateway events, builds pass-through and deny outputs |
 | `lambdas/interceptor/sessions.py` | Session lookup (the kill switch) and event writes |
+| `lambdas/interceptor/record.py` | RESPONSE: credentials in tool output -> ledger + `recorded` events |
+| `lambdas/interceptor/ledger.py`, `detection.py` | `burn-exposures` writes; `burn_detect` scanner + fingerprint lookup |
 | `lambdas/tools/tools.py` | The seven mock tools from `contracts/mcp-tools.json` |
 | `lambdas/tools/placeholders.py` | Fills `{{cred:...}}` placeholders from Secrets Manager |
 | `scripts/smoke.py` | Live check: badge, tools, revoke, refused |

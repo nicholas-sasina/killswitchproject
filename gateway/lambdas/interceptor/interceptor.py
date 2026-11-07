@@ -8,6 +8,8 @@ REQUEST (before the tool runs):
   4. Inject the real caller id as burn_caller_agent_id (tools get no identity
      from the gateway, and an agent-supplied value must not be trusted).
 RESPONSE (before the reply reaches the agent):
+  - tools/call: credentials in the tool output go into the agent's ledger
+    (record.py).
   - tools/list is filtered to the agent's allowed tools.
 Agents see the plain tool names from contracts/mcp-tools.json; the gateway's
 "<target>___" prefix is added and removed here, so it never leaks to agents.
@@ -15,6 +17,7 @@ Agents see the plain tool names from contracts/mcp-tools.json; the gateway's
 import logging
 import os
 
+import record
 import sessions
 import shapes
 from burn_contracts.events import make_event
@@ -74,18 +77,25 @@ def on_response(event: dict) -> dict:
     reply = shapes.gateway_response(event)
     status, reply_body = reply.get("statusCode", 200), reply.get("body")
 
-    if shapes.is_burn_denial(reply_body) or not isinstance(reply_body, dict):
+    if shapes.is_burn_denial(reply_body) or not isinstance(reply_body, dict) or "result" not in reply_body:
         return shapes.pass_response(status, reply_body)
 
-    if body.get("method") == "tools/list" and "result" in reply_body:
-        session = sessions.session_for_client((shapes.jwt_claims(event) or {}).get("client_id"))
-        allowed = set((session or {}).get("tools") or [])
-        result = reply_body["result"]
-        tools = [{**t, "name": shapes.short_tool_name(t.get("name", ""))} for t in result.get("tools", [])]
-        tools = [t for t in tools if t["name"] in allowed]
-        reply_body = {**reply_body, "result": {**result, "tools": tools}}
+    method = body.get("method")
+    if method not in ("tools/list", "tools/call"):
+        return shapes.pass_response(status, reply_body)
+    session = sessions.session_for_client((shapes.jwt_claims(event) or {}).get("client_id"))
+    if session is None:  # REQUEST already refused it; nothing to attribute
+        return shapes.pass_response(status, reply_body)
 
-    return shapes.pass_response(status, reply_body)
+    if method == "tools/call":
+        return record.record_tool_output(event, session, _tool_name(body), status, reply_body)
+
+    # tools/list: plain names, and only the tools this agent may call.
+    allowed = set(session.get("tools") or [])
+    result = reply_body["result"]
+    tools = [{**t, "name": shapes.short_tool_name(t.get("name", ""))} for t in result.get("tools", [])]
+    tools = [t for t in tools if t["name"] in allowed]
+    return shapes.pass_response(status, {**reply_body, "result": {**result, "tools": tools}})
 
 
 def refuse(body: dict, session: dict | None, reason: str, tool: str | None,

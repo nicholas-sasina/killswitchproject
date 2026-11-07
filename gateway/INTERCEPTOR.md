@@ -64,6 +64,31 @@ A forwarded `tools/call` is edited in two ways:
 
 - Replies that are Burn denials pass through untouched (`RESPONSE` still fires after a `REQUEST` deny).
 - `tools/list`: tools are renamed to their plain names and filtered to the session's `tools`.
+- `tools/call`: the result text is scanned with `burn_detect` before the agent sees it. Each
+  credential found (one per credential, exact matches preferred) is added to the agent's ledger
+  and announced with a `recorded` event. The reply itself is passed on unchanged: Burn records
+  exposure, it does not redact.
+- Output larger than the scanner's limit (256 KiB) is withheld: the agent gets a `BURN:` denial
+  and a `refused` event (source `tool_response`) is written. Burn does not hand over what it
+  cannot check.
+
+## Ledger row (`burn-exposures`)
+
+```json
+{"agent_id": "agent-alpha", "secret_ref_or_fp": "burn/agent-alpha/api_key",
+ "secret_ref": "burn/agent-alpha/api_key", "fingerprint": "<64 hex>", "secret_type": "api_key",
+ "owner": "agent", "owner_agent_id": "agent-alpha",
+ "source": "tool_response", "via": "read_config",
+ "first_seen": "2026-11-07T20:50:33.201Z", "last_seen": "...", "seen_in": ["<trace id>#<rpc id>", "..."]}
+```
+
+- Credentials that match only a known format (not minted by Burn) have no `secret_ref`; their sort
+  key is `fp#<fingerprint>` and `owner` is `unknown`.
+- `source`, `via` and `first_seen` keep the first sighting; later sightings only update `last_seen`
+  and `seen_in`.
+- The gateway may retry an interceptor call, so writes are keyed by the call
+  (`X-Amzn-Trace-Id` + JSON-RPC id): a write whose call is already in `seen_in` is skipped,
+  together with its event. Reading the same file again in a new call does write a new event.
 
 ## Session row (written by the Burn API at `POST /sessions`)
 
@@ -81,3 +106,7 @@ All built with `burn_contracts.events.make_event`, stored with `stream = "all"`.
 | action | source | fields |
 |---|---|---|
 | `refused` | `gateway` | `agent_id`, `session_id`, `tool`, `target_agent_id` (send_message), `detail` |
+| `recorded` | `tool_response` | `agent_id`, `session_id`, `tool`, `secret_ref`, `fingerprint`, `secret_type`, `owner`, `owner_agent_id`, `detail` (e.g. "shared credential seen in read_config output") |
+| `refused` | `tool_response` | output too large to check |
+
+No event or ledger row ever holds a credential value.
