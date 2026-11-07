@@ -646,6 +646,15 @@ td code {
   color: #adbdce;
   font-size: 0.85rem;
 }
+.service-note {
+  margin: 20px 24px 0;
+  padding: 14px 16px;
+  background: #202c39;
+  border: 1px solid #455b72;
+  border-radius: 6px;
+  color: #c6d5e6;
+  font-size: 0.85rem;
+}
 .test-panel form {
   padding: 20px 24px;
 }

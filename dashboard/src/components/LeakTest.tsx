@@ -31,12 +31,13 @@ export function LeakTest({
     ? agentId
     : (agents[0]?.agent_id ?? "");
   const encodings = data?.encodings ?? [];
+  const available = configured && encodings.length > 0 && !encodingError;
   const selectedEncoding = encodings.includes(encoding)
     ? encoding
     : (encodings[0] ?? "");
   async function send(event: FormEvent) {
     event.preventDefault();
-    if (busy || !selectedAgent || !selectedEncoding) return;
+    if (busy || !available || !selectedAgent || !selectedEncoding) return;
     const body = {
       agent_id: selectedAgent,
       encoding: selectedEncoding,
@@ -73,13 +74,19 @@ export function LeakTest({
           enable this tool.
         </p>
       )}
+      {configured && encodingError && (
+        <p className="service-note" role="status">
+          Leak-test service unavailable. This test tool will retry automatically
+          every 30 seconds.
+        </p>
+      )}
       <form onSubmit={(event) => void send(event)}>
         <div className="test-controls">
           <label>
             Agent
             <select
               value={selectedAgent}
-              disabled={busy || !configured}
+              disabled={busy || !available}
               onChange={(event) => {
                 setAgentId(event.target.value);
                 setResult(undefined);
@@ -99,7 +106,7 @@ export function LeakTest({
             Encoding
             <select
               value={selectedEncoding}
-              disabled={busy || !configured}
+              disabled={busy || !available}
               onChange={(event) => {
                 setEncoding(event.target.value);
                 setResult(undefined);
@@ -117,9 +124,7 @@ export function LeakTest({
           </label>
           <button
             className="secondary-button send-button"
-            disabled={
-              busy || !configured || !selectedAgent || !selectedEncoding
-            }
+            disabled={busy || !available || !selectedAgent || !selectedEncoding}
           >
             {busy ? "Sending…" : "Send test ↗"}
           </button>
@@ -135,13 +140,13 @@ export function LeakTest({
           rows={2}
           value={payload}
           onChange={(event) => setPayload(event.target.value)}
-          disabled={busy || !configured}
+          disabled={busy || !available}
           autoComplete="off"
           spellCheck={false}
           placeholder="Enter a test payload. It is cleared when sent."
         />
       </form>
-      <ErrorMessage message={encodingError || error} />
+      <ErrorMessage message={error} />
       {result && (
         <div
           className={`test-result ${result.blocked ? "test-blocked" : "test-delivered"}`}

@@ -180,4 +180,118 @@ describe("containment dashboard", () => {
     ).toBe("");
     expect(screen.queryByText(payload)).toBeNull();
   });
+
+  it("renders nullable live metadata while the test tool is offline, then recovers automatically", async () => {
+    const id = `agent-${crypto.randomUUID()}`;
+    const ref = `burn/${id}/aws_key#v1`;
+    let testAvailable = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      let body: unknown;
+      if (path === "/encodings") {
+        if (!testAvailable) throw new TypeError("Service unavailable");
+        body = { encodings: ["plain"] };
+      } else if (path === "/events")
+        body = {
+          agents: [
+            {
+              agent_id: id,
+              role: null,
+              status: "revoked",
+              session_id: null,
+              exposures: 1,
+            },
+          ],
+          events: [
+            {
+              event_id: `evt_${String(1).padStart(26, "0")}`,
+              ts: new Date().toISOString(),
+              agent_id: id,
+              source: "session",
+              action: "issued",
+              session_id: null,
+              secret_ref: null,
+              fingerprint: null,
+              secret_type: null,
+              owner: null,
+              owner_agent_id: null,
+              target_agent_id: null,
+              destination: null,
+              encoding: null,
+              detail: null,
+              tool: null,
+            },
+          ],
+          cursor: null,
+        };
+      else if (path.endsWith("/ledger"))
+        body = {
+          agent_id: id,
+          entries: [
+            {
+              secret_ref: null,
+              fingerprint: crypto.randomUUID().replaceAll("-", "").repeat(2),
+              secret_type: "other",
+              owner: "unknown",
+              owner_agent_id: null,
+              source: "tool_response",
+              via: null,
+              first_seen: null,
+              status: "active",
+            },
+          ],
+        };
+      else if (path.endsWith("/blast-radius"))
+        body = {
+          agent_id: id,
+          keys: [{ key_ref: ref, key_hint: null, status: "inactive" }],
+          events: [
+            {
+              ts: new Date().toISOString(),
+              key_ref: ref,
+              event_name: "ListBuckets",
+              event_source: null,
+              resource: null,
+              source_ip: null,
+              error_code: null,
+            },
+          ],
+        };
+      else throw new Error("Unexpected endpoint");
+      return new Response(JSON.stringify(body));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => {
+      render(
+        <App
+          config={{
+            burnUrl: "https://burn.example.test",
+            demoToken: crypto.randomUUID(),
+            leakTestUrl: "https://test.example.test",
+          }}
+        />,
+      );
+    });
+    expect(screen.getByText("Session or credential issued")).toBeTruthy();
+    expect(screen.getByText("Unidentified credential")).toBeTruthy();
+    expect(screen.getByText("Source unavailable")).toBeTruthy();
+    expect(screen.getByText("No active session")).toBeTruthy();
+    expect(screen.getByText(/Leak-test service unavailable/)).toBeTruthy();
+    expect(screen.getByText("Connected · polling every second")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Send test ↗" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(screen.queryByText("MOCK DATA")).toBeNull();
+    testAvailable = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.queryByText(/Leak-test service unavailable/)).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Send test ↗" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
 });

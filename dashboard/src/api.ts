@@ -32,13 +32,14 @@ export function createApi(
     base: string,
     path: string,
     init: RequestInit = {},
+    authenticated = true,
   ): Promise<T> {
     if (!base)
       throw new Error(
         "API URL is missing. Set it in dashboard/.env.local and restart Vite.",
       );
     const headers = new Headers(init.headers);
-    headers.set("x-burn-demo-token", config.demoToken);
+    if (authenticated) headers.set("x-burn-demo-token", config.demoToken);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
 
@@ -101,12 +102,22 @@ export function createApi(
         { signal },
       ),
     encodings: (signal?: AbortSignal) =>
-      request<EncodingsResponse>(config.leakTestUrl, "/encodings", { signal }),
+      request<EncodingsResponse>(
+        config.leakTestUrl,
+        "/encodings",
+        { signal },
+        false,
+      ),
     leakTest: (body: LeakTestRequest) =>
-      request<LeakTestResult>(config.leakTestUrl, "/leak-test", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      request<LeakTestResult>(
+        config.leakTestUrl,
+        "/leak-test",
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+        false,
+      ),
   };
 }
 
