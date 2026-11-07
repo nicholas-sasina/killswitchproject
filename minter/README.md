@@ -10,6 +10,8 @@ accepts only the current version of each key.
 - Rotation puts a new secret version (the old one stays at `AWSPREVIOUS`), marks the old fingerprints `rotated`, and for AWS keys sets the old access key Inactive instead of deleting it.
 - Credentials an agent merely saw (`exposed_refs` not owned by it) are marked `flagged` in `burn-credentials`.
 - `burn-provider` (API Gateway HTTP API, URL in SSM `/burn/provider/url`) looks the bearer key up by exact fingerprint: current = 200, rotated = 401 plus a `rejected` event.
+- **Canaries**: `POST /sessions/{id}/canary` gives each session its own decoy key (looks like an `api_key`, never authenticates). The provider answers it with 401, writes one `canary_used` event and hands the incident to the Burn API, which contains only that session. Interfaces for other components: [CANARIES.md](CANARIES.md).
+- **Flag levels**: `POST /flags` raises a credential the agent does not own to `seen` < `attempted` < `reported`. It never lowers the level, keeps the first evidence per level, and never rotates.
 - `GET /agents/{id}/key-activity` returns the agent's current and previous AWS key with their IAM status (active or inactive), plus their CloudTrail events.
 
 ## Key files
@@ -20,7 +22,10 @@ accepts only the current version of each key.
 | `lambdas/minter/api_key.py`, `aws_key.py`, `shared.py` | One credential type each |
 | `lambdas/minter/fingerprints.py`, `registry.py`, `vault.py` | Fingerprint rows, `burn-credentials` rows, Secrets Manager |
 | `lambdas/minter/key_activity.py` | CloudTrail lookup for the blast-radius view |
+| `lambdas/minter/canaries.py` | Per-session canaries: issue (idempotent), read metadata, reset |
+| `lambdas/minter/flags.py` | Monotonic flag levels with bounded evidence |
 | `lambdas/provider/provider_app.py` | Mock API provider |
+| `lambdas/provider/canary_trip.py`, `shared_report.py` | Canary presentations; flagged shared keys seen in use |
 | `scripts/smoke.py` | Live smoke test with a throwaway agent |
 | `scripts/replay_old_key.py` | Replays the pre-rotation keys and shows they are rejected |
 | `../infra/burn_infra/minter.py` | The `BurnMinter` stack (roles, boundary policy, API) |
@@ -46,5 +51,8 @@ Deploy: `cd infra && npx aws-cdk@2 deploy BurnMinter --require-approval never`.
 - **Why is the old AWS key kept instead of deleted?** So AWS visibly rejects it
   (`InvalidClientTokenId`) and its CloudTrail history stays easy to find. It is deleted on the
   next rotation (IAM allows two keys per user).
+- **Can a canary ever authenticate?** No. The provider checks the `canary` marker first and always
+  answers 401. The fingerprint rows also say `secret_type=other`, so even a provider build that ignores
+  the marker refuses it. Rotation skips canaries, so no real key is ever minted under a canary ref.
 - **Does the blast-radius view show model calls?** No. CloudTrail `LookupEvents` returns
   management events only (IAM, STS, S3 bucket operations), and they can lag by several minutes.
