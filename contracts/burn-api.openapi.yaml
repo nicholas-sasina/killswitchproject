@@ -1,0 +1,231 @@
+openapi: 3.0.3
+info:
+  title: Burn API
+  version: 1.0.0
+  description: |
+    Public API used by the dashboard, the scenario runner and the eval harness.
+    Real implementation: API Gateway HTTP API + Lambda (/burn_api). Mock: /mocks/burn_api_mock.py.
+
+    Every request must send `x-burn-demo-token` (value from .env, BURN_DEMO_TOKEN).
+    The mock server accepts any token and adds the response header `x-burn-mock: true`
+    so the dashboard can show a MOCK banner.
+servers:
+  - url: http://localhost:8700
+    description: mock server (development only)
+security:
+  - demoToken: []
+paths:
+  /sessions:
+    post:
+      summary: Start an agent session. Issues a badge and the agent's credentials.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { $ref: '#/components/schemas/AgentId' }
+      responses:
+        '201':
+          description: Session started
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, agent_id, badge_ref, credentials]
+                properties:
+                  session_id: { type: string }
+                  agent_id: { $ref: '#/components/schemas/AgentId' }
+                  badge_ref:
+                    type: string
+                    description: Secrets Manager name holding the badge (OAuth client id/secret, token URL, scope).
+                    example: burn/agent-reader/badge
+                  credentials:
+                    type: array
+                    items: { $ref: '#/components/schemas/CredentialRef' }
+        '404': { description: agent_id is not in the loaded scenario }
+  /burn:
+    post:
+      summary: Burn an agent. Revoke badge, rotate its own credentials, flag others it saw, start blast radius.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { $ref: '#/components/schemas/AgentId' }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Burn completed (blast radius is fetched separately)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, revoked, sessions_revoked, rotated, flagged]
+                properties:
+                  agent_id: { $ref: '#/components/schemas/AgentId' }
+                  revoked: { type: boolean }
+                  sessions_revoked: { type: array, items: { type: string } }
+                  rotated:
+                    type: array
+                    description: secret_refs owned by this agent that were rotated.
+                    items: { type: string }
+                  flagged:
+                    type: array
+                    description: secret_refs in this agent's ledger owned by someone else (shared or another agent). Not rotated, flagged for review.
+                    items: { type: string }
+        '404': { description: unknown agent }
+  /burn/{agent_id}/blast-radius:
+    get:
+      summary: CloudTrail activity of the agent's AWS keys (current and previous versions).
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { $ref: '#/components/schemas/AgentId' } }
+      responses:
+        '200':
+          description: Blast radius
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, keys, events]
+                properties:
+                  agent_id: { $ref: '#/components/schemas/AgentId' }
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key_ref: { type: string, example: 'burn/agent-reader/aws_key#v1' }
+                        key_hint: { type: string, description: 'last 4 chars of the access key id', example: '…Q7XA' }
+                        status: { type: string, enum: [active, inactive] }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required: [ts, key_ref, event_name]
+                      properties:
+                        ts: { type: string, format: date-time }
+                        key_ref: { type: string }
+                        event_name: { type: string, example: ListBuckets }
+                        event_source: { type: string, example: s3.amazonaws.com }
+                        resource: { type: string, nullable: true }
+                        source_ip: { type: string, nullable: true }
+                        error_code: { type: string, nullable: true }
+                  note:
+                    type: string
+                    example: CloudTrail event history can lag 5-15 minutes behind real activity.
+  /badge/{session_id}:
+    get:
+      summary: Badge status for one session.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Badge status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, agent_id, status]
+                properties:
+                  session_id: { type: string }
+                  agent_id: { $ref: '#/components/schemas/AgentId' }
+                  status: { type: string, enum: [active, revoked] }
+        '404': { description: unknown session }
+  /events:
+    get:
+      summary: Dashboard feed. Polled once per second.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: Return events with event_id strictly greater than this. Omit for the latest 200.
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 200, maximum: 500 }
+      responses:
+        '200':
+          description: Events in ascending event_id order, plus current agent states.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, agents]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: 'ledger-event.schema.json' }
+                  agents:
+                    type: array
+                    items: { $ref: '#/components/schemas/AgentState' }
+                  cursor:
+                    type: string
+                    nullable: true
+                    description: event_id of the last event returned; pass as `since` next time.
+  /agents/{agent_id}/ledger:
+    get:
+      summary: The agent's exposure ledger (credentials it has seen). Fingerprints only.
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { $ref: '#/components/schemas/AgentId' } }
+      responses:
+        '200':
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent_id, entries]
+                properties:
+                  agent_id: { $ref: '#/components/schemas/AgentId' }
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/LedgerEntry' }
+components:
+  securitySchemes:
+    demoToken:
+      type: apiKey
+      in: header
+      name: x-burn-demo-token
+  schemas:
+    AgentId:
+      type: string
+      pattern: '^agent-[a-z0-9-]{1,40}$'
+      example: agent-reader
+    CredentialRef:
+      type: object
+      required: [secret_ref, type]
+      properties:
+        secret_ref: { type: string, example: burn/agent-reader/api_key }
+        type: { type: string, enum: [aws_key, api_key, other] }
+        owner: { type: string, enum: [agent, shared] }
+        version: { type: integer, example: 1 }
+        expires_at: { type: string, format: date-time, nullable: true }
+    AgentState:
+      type: object
+      required: [agent_id, status]
+      properties:
+        agent_id: { $ref: '#/components/schemas/AgentId' }
+        role: { type: string, nullable: true, example: reader }
+        status: { type: string, enum: [active, revoked, idle], description: 'idle = in scenario, no active session' }
+        session_id: { type: string, nullable: true }
+        exposures: { type: integer, description: number of ledger entries }
+    LedgerEntry:
+      type: object
+      required: [secret_ref, fingerprint, secret_type, owner, source, first_seen, status]
+      properties:
+        secret_ref: { type: string, nullable: true }
+        fingerprint: { type: string }
+        secret_type: { type: string, enum: [aws_key, api_key, other] }
+        owner: { type: string, enum: [agent, shared, unknown] }
+        owner_agent_id: { type: string, nullable: true }
+        source: { type: string, enum: [tool_response, handoff] }
+        via: { type: string, nullable: true, description: 'tool name, or sender agent_id for handoff' }
+        first_seen: { type: string, format: date-time }
+        status: { type: string, enum: [active, rotated, flagged], description: 'status of the credential itself' }
