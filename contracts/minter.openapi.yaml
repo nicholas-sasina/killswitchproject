@@ -83,7 +83,13 @@ paths:
                   description: secret_refs from the agent's ledger (the Burn API passes these in).
                   items: { type: string }
                 evidence:
-                  $ref: '#/components/schemas/FlagEvidence'
+                  type: object
+                  description: Optional safe ids of what caused the burn (event_id, session_id, instance_id). The minter sets source=burn and agent_id itself.
+                  additionalProperties: false
+                  properties:
+                    event_id: { type: string, pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$' }
+                    session_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
+                    instance_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
       responses:
         '200':
           description: Rotation result. Canaries the agent owns are never rotated (they never authenticate).
@@ -199,7 +205,9 @@ paths:
         For shared / other-owner credentials. Flagging never rotates anything. Each level keeps the first
         evidence that reached it. Which sources may claim which level:
         seen = tool_response, handoff, burn; attempted = egress, gateway, handoff (a blocked send);
-        reported = provider (presented at a monitored service). Canaries are never flagged.
+        reported = provider (presented at a monitored service), and only for a credential that is
+        already flagged: shared keys are presented by their legitimate users all the time.
+        Canaries are never flagged.
       requestBody:
         required: true
         content:
