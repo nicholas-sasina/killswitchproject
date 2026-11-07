@@ -44,12 +44,12 @@ several minutes late, and the blast-radius view only shows what CloudTrail has r
 
 | Action | Dashboard | Command line |
 |---|---|---|
-| Burn an agent | **Burn** on the agent's card | `curl -X POST "$BURN_API_URL/burn" -H "x-burn-demo-token: $BURN_DEMO_TOKEN" -H 'content-type: application/json' -d '{"agent_id":"agent-analyst"}'` |
+| Burn an agent | **Burn** on the agent's card | `make burn ARGS="kill agent-analyst --yes"` |
 | Show the old key is dead | `rejected` event in the stream | `make replay-old-key AGENT=agent-analyst` |
 | Leak test | **Leak test** panel | `POST http://localhost:8787/leak-test` (see `contracts/leaktest.openapi.yaml`) |
-| Blast radius | **Blast radius** panel | `GET $BURN_API_URL/burn/agent-analyst/blast-radius` |
+| Blast radius | **Blast radius** panel | `make burn ARGS="blast-radius agent-analyst"` |
 
-(`set -a; . ./.env; set +a` loads `BURN_API_URL` and `BURN_DEMO_TOKEN` into the shell.)
+Other commands: `make burn ARGS="agents"`, `"events --follow"`, `"ledger agent-analyst"`. The CLI reads `BURN_API_URL` and `BURN_DEMO_TOKEN` from `.env` (written by `make env`).
 
 The step-by-step script for a four-minute demo is in [demo-script.md](demo-script.md).
 
