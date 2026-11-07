@@ -1,0 +1,67 @@
+{
+  "description": "MCP tools exposed through the AgentCore Gateway (real: /gateway tool Lambda; mock: /mocks/mcp_tools_mock.py). Both load this file so names and input schemas cannot drift. Tool data comes from the loaded scenario (contracts/scenario.schema.json), never from code. The pre-call interceptor injects the caller's identity as the argument `burn_caller_agent_id`; it is NOT part of the public input schemas below, and a value sent by the agent is overwritten.",
+  "injected_arguments": ["burn_caller_agent_id"],
+  "tools": [
+    {
+      "name": "list_tickets",
+      "description": "List open support tickets (id and subject).",
+      "inputSchema": { "type": "object", "properties": {}, "required": [] }
+    },
+    {
+      "name": "read_ticket",
+      "description": "Read one support ticket by id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "ticket_id": { "type": "string", "description": "Ticket id, e.g. from list_tickets." } },
+        "required": ["ticket_id"]
+      }
+    },
+    {
+      "name": "read_config",
+      "description": "Read a configuration or log file by path.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "path": { "type": "string", "description": "File path, e.g. from a ticket." } },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "query_customers",
+      "description": "Look up customer records by name, email or customer id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "send_message",
+      "description": "Send a message to another agent. Only allowed recipients (from the scenario graph) are accepted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "description": "Recipient agent id." },
+          "text": { "type": "string" }
+        },
+        "required": ["to", "text"]
+      }
+    },
+    {
+      "name": "read_inbox",
+      "description": "Read and clear messages other agents sent to you.",
+      "inputSchema": { "type": "object", "properties": {}, "required": [] }
+    },
+    {
+      "name": "notify",
+      "description": "Send a notification to a customer or internal channel.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "channel": { "type": "string", "description": "e.g. email:<customer email> or slack:#support" },
+          "text": { "type": "string" }
+        },
+        "required": ["channel", "text"]
+      }
+    }
+  ]
+}

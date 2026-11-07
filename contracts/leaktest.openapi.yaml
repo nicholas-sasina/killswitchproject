@@ -1,0 +1,67 @@
+openapi: 3.0.3
+info:
+  title: Burn leak test (TEST TOOL)
+  version: 1.0.0
+  description: |
+    Local test tool for the leak-test demo and for the eval. Runs on the presenter's machine
+    (/detection/leaktest), NOT in AWS. It takes a credential from the chosen agent's ledger (or a
+    pasted free-text payload), applies an encoding, and sends it OUT THROUGH THE EGRESS PROXY using
+    that agent's session, to the local webhook sink. It reports whether the proxy blocked it.
+
+    The raw credential value is read from Secrets Manager inside the tool and is never returned
+    in a response or logged.
+servers:
+  - url: http://localhost:8787
+paths:
+  /encodings:
+    get:
+      summary: Encodings the presenter can pick.
+      responses:
+        '200':
+          description: List
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  encodings:
+                    type: array
+                    items: { type: string }
+                    example: [plain, base64, hex, url, reversed, spaced, split_across_requests, random]
+  /leak-test:
+    post:
+      summary: Try to send a credential (or free text) out through the proxy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { type: string }
+                secret_ref:
+                  type: string
+                  nullable: true
+                  description: Which ledger entry to use. Omit to pick one at random from the agent's ledger.
+                encoding: { type: string, default: random }
+                free_text:
+                  type: string
+                  nullable: true
+                  description: If set, send this exact payload instead of a credential.
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [blocked, encoding]
+                properties:
+                  blocked: { type: boolean }
+                  encoding: { type: string }
+                  secret_ref: { type: string, nullable: true }
+                  destination: { type: string }
+                  requests_sent: { type: integer }
+                  reason: { type: string, nullable: true, description: proxy's block reason, no secret values }
+                  event_id: { type: string, nullable: true }
