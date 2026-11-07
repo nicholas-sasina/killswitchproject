@@ -6,7 +6,8 @@ scenario format, and the shared naming/fingerprint rules below.
 A contract change updates this folder and the mocks together.
 
 ## How it works
-- JSON Schema for data (`ledger-event.schema.json`, `scenario.schema.json`), OpenAPI for APIs.
+- JSON Schema for data (`ledger-event.schema.json`, `scenario.schema.json`, `burn.schema.json`),
+  OpenAPI for APIs.
 - `python/burn_contracts/` is a tiny stdlib-only helper (event ids, event builder, fingerprints,
   resource names) so every component builds events and fingerprints the same way.
 - Lambdas get `burn_contracts` bundled in by `infra/build_assets.py`.
@@ -20,6 +21,7 @@ A contract change updates this folder and the mocks together.
 | `leaktest.openapi.yaml` | Local leak-test tool |
 | `mcp-tools.json` | MCP tools behind the Gateway |
 | `scenario.schema.json` | `/agents/scenarios/*.yaml` format |
+| `burn.schema.json` | `burn.yaml` format (roles defined in code); example in `examples/burn.yaml` |
 | `python/burn_contracts/` | Shared helpers: `ids.py`, `events.py`, `fingerprint.py`, `names.py` |
 
 ## How to test it
@@ -39,7 +41,12 @@ cd contracts && uv run --with pytest --with jsonschema --with pyyaml pytest -q
 
 ### Names
 - Agent ids: `^agent-[a-z0-9-]{1,40}$`. They come from the scenario file, never from code.
-- Session ids are opaque strings issued by `POST /sessions`.
+- Session ids are opaque strings issued by `POST /sessions`. A session is one **instance**; the
+  session id is the instance's identity.
+- Role names: `^[a-z0-9][a-z0-9-]{0,31}$`. Each instance of a role gets its own agent id
+  `agent-<role>-<6 hex>` (`names.instance_agent_id`), so its credentials, ledger and burn are its own.
+  A scenario agent is a role with one instance: `agent-reader` is role `reader`
+  (`names.scenario_role_name`), managed_by `scenario`.
 - Region: `us-east-1` only. All resource names are fixed (below) so stacks reference each other by
   name instead of CloudFormation exports. See `python/burn_contracts/names.py`.
 
@@ -60,6 +67,7 @@ replays the pre-rotation key without anyone having stored a copy.
 | type | Format | Notes |
 |---|---|---|
 | `api_key` | `mpk_live_` + 32 chars `[A-Za-z0-9]` (`secrets.choice`) | accepted by the mock API provider only while current |
+| join token | `bjt_` + 16 hex token id + `.` + 43 chars `[A-Za-z0-9_-]` (`secrets.token_urlsafe(32)`) | shown once at creation; only sha256 of the secret part is stored. `names.parse_join_token` |
 | `aws_key` | a real IAM access key on IAM user `burn-agent-<agent_id>` (path `/burn-agents/`) | narrow policy: invoke the allowlisted Bedrock model + `s3:ListAllMyBuckets`. Rotation = new key, old key Inactive |
 | `other` | rendered scenario template, e.g. a connection string | shared credentials |
 
@@ -95,13 +103,38 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 | `burn-sessions` | PK `session_id` | `by_agent` (PK `agent_id`), `by_client` (PK `client_id`) | burn_api |
 | `burn-scenario` | PK `pk` (`meta`, `agent#<id>`, `ticket#<id>`, `file#<path>`, `customer#<id>`) | none | scenario loader |
 | `burn-messages` | PK `to_agent`, SK `msg_id` | none | gateway tools (send_message / read_inbox) |
+| `burn-roles` | PK `name` | none | burn_api (roles) |
+| `burn-enroll-tokens` | PK `token_id` | `by_role` (PK `role`) | burn_api (tokens) |
 
 `burn-exposures` SK is the `secret_ref`, or `fp#<fingerprint>` for unknown-format credentials
 (those have no `secret_ref`).
 
+`burn-sessions` rows keep their existing fields (`session_id`, `agent_id`, `client_id`, `status`,
+`tools`, `send_to`, `created_at`). Instances add optional fields, never renaming or removing one:
+`role`, `parent_session`, `token_id`, `owner`, `egress`, `last_seen`, `exited_at`.
+`status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
+
+`burn-enroll-tokens` rows: `token_id`, `role`, `secret_sha256`, `uses`, `uses_left`, `expires_at`,
+`revoked`, `created_at`. The token itself is never stored.
+
+### Roles and instances
+- A role (`burn-roles`) has `tools`, `credentials`, `may_message` (roles), `may_spawn` (roles),
+  `egress` (hosts, or null for the default allowlist), `owner` and `managed_by`: `code` (burn.yaml via
+  `burn apply`, read-only in the dashboard), `ui` (made in the dashboard) or `scenario`.
+- An instance starts with a join token (`{role, enroll_token}`) or from a running parent
+  (`{role, parent_session}`). A child's role must be in the parent role's `may_spawn`. Its tools and
+  credentials are the role's intersected with the parent's; its egress is the role's list
+  intersected with the parent's (null on one side means take the other side's list).
+- The session row's `tools` comes from the role, so the Gateway enforces it as before.
+- Burn scopes (`POST /burns`): `instance`, `role`, `lineage` (an instance and every descendant),
+  `token` (every instance that joined with it; the token is revoked too).
+
 ### Events
 - Build every event with `burn_contracts.events.make_event(...)`. It fills `event_id` and `ts`
   and rejects unknown enum values, so all writers stay schema-valid.
+- Instance lifecycle: source `instance`, actions `started` / `exited`, with `session_id`, `role`
+  and `parent_session` set. A call carrying a badge Burn never issued is `agent_id: system`,
+  source `gateway`, action `unregistered`.
 - `detail` is for humans. Never put a credential value, a full URL with a query string, or a
   request body in it.
 

@@ -16,6 +16,7 @@ All state and freshly generated fake credentials stay in memory; no AWS resource
 |---|---|
 | `burn_api_mock.py` | All Burn and leak-test HTTP routes on port 8700 |
 | `burn_state.py` | Simulated activity, sessions, and exposure ledger |
+| `swarm_state.py` | Roles, join tokens, instances, spawning and scoped burns |
 | `mcp_tools_mock.py` | Official FastMCP server at `http://localhost:8701/mcp` |
 | `minter_mock.py` | `handle(event)` direct-invoke contract and fake key activity |
 | `mock_data.py` | Scenario validation, random fake values, and placeholder rendering |
@@ -43,6 +44,9 @@ Point the dashboard's Burn and leak-test URLs to `http://localhost:8700` and the
 `http://localhost:5173`, exposing the mock header to the browser.
 
 Start sessions with `POST /sessions` and an `agent_id` from the loaded scenario; agents start idle.
+For a swarm, create a role (`POST /roles`), a join token (`POST /roles/<name>/tokens`), then start
+instances with `POST /sessions {role, enroll_token}` or spawn children with `{role, parent_session}`.
+Scenario agents appear in `GET /roles` as read-only roles with one instance.
 Use `Authorization: Bearer mock-<agent_id>` for MCP calls. Tool and `send_to` permissions come from
 the scenario. `POST /mock/revoke/<agent_id>` makes later MCP calls return an MCP error.
 

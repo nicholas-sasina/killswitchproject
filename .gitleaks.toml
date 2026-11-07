@@ -18,6 +18,12 @@ description = "URL-style connection string with an inline password"
 regex = '''[a-z][a-z0-9+.-]{1,20}://[^:\s/@'"<>]+:[^@\s'"{}<>]{6,}@[^\s'"]+'''
 keywords = ["://"]
 
+[[rules]]
+id = "burn-join-token"
+description = "Burn join token (lets a new agent instance start a session for a role)"
+regex = '''bjt_[0-9a-f]{16}\.[A-Za-z0-9_-]{43}'''
+keywords = ["bjt_"]
+
 [allowlist]
 description = "Template placeholders are not secrets"
 regexes = ['''\{\{[^}]+\}\}''']

@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import re
 import time
 
 import jsonschema
@@ -110,3 +111,84 @@ def test_scenario_tools_exist_in_mcp_tools():
 def test_openapi_files_parse(spec):
     doc = yaml.safe_load((ROOT / spec).read_text())
     assert doc["openapi"].startswith("3.") and doc["paths"]
+
+
+# --- roles, instances and join tokens ---------------------------------------------------------
+
+BURN_YAML_SCHEMA = json.loads((ROOT / "burn.schema.json").read_text())
+
+
+def _new_join_token() -> str:
+    import secrets
+    return f"{names.JOIN_TOKEN_PREFIX}{secrets.token_hex(8)}.{secrets.token_urlsafe(32)}"
+
+
+def test_role_names_and_instance_agent_ids():
+    assert names.is_role_name("worker") and names.is_role_name("a") and names.is_role_name("3d-render")
+    for bad in ["", "Worker", "-worker", "w" * 33, "work_er"]:
+        assert not names.is_role_name(bad)
+    longest = names.instance_agent_id("w" * 32, "3fa91c")
+    assert names.is_agent_id(longest)
+    assert names.instance_agent_id("worker", "3fa91c") == "agent-worker-3fa91c"
+    with pytest.raises(ValueError):
+        names.instance_agent_id("worker", "XYZ")
+
+
+def test_scenario_agents_map_to_singleton_roles():
+    assert names.scenario_role_name("agent-reader") == "reader"
+    with pytest.raises(ValueError):
+        names.scenario_role_name("system")
+
+
+def test_join_tokens_parse_and_are_caught_by_gitleaks():
+    import tomllib
+    token = _new_join_token()
+    token_id, secret = names.parse_join_token(token)
+    assert token == f"bjt_{token_id}.{secret}"
+    assert names.parse_join_token("bjt_nothex.x") is None and names.parse_join_token(None) is None
+    rules = tomllib.loads((ROOT.parent / ".gitleaks.toml").read_text())["rules"]
+    rule = next(r for r in rules if r["id"] == "burn-join-token")
+    assert re.search(rule["regex"], f"export BURN_JOIN_TOKEN={token}")
+
+
+def test_instance_events_are_schema_valid():
+    started = events.make_event(
+        agent_id="agent-worker-3fa91c", source="instance", action="started",
+        session_id="sess-1", role="worker", parent_session="sess-0",
+    )
+    jsonschema.validate(started, EVENT_SCHEMA)
+    jsonschema.validate(events.make_event(agent_id="system", source="gateway", action="unregistered"), EVENT_SCHEMA)
+    with pytest.raises(ValueError):
+        events.make_event(agent_id="agent-worker-3fa91c", source="instance", action="started", role="Bad Role")
+
+
+def test_example_burn_yaml_is_valid_and_consistent():
+    doc = yaml.safe_load((ROOT / "examples" / "burn.yaml").read_text())
+    jsonschema.validate(doc, BURN_YAML_SCHEMA)
+    tools = {t["name"] for t in json.loads((ROOT / "mcp-tools.json").read_text())["tools"]}
+    roles = {r["name"]: r for r in doc["roles"]}
+    for role in roles.values():
+        assert set(role["tools"]) <= tools
+        assert set(role.get("may_message", [])) <= set(roles)
+        assert set(role.get("may_spawn", [])) <= set(roles)
+
+
+def test_role_name_pattern_is_the_same_everywhere():
+    api = yaml.safe_load((ROOT / "burn-api.openapi.yaml").read_text())
+    patterns = {
+        names.ROLE_NAME_RE.pattern,
+        events._ROLE_RE.pattern,
+        BURN_YAML_SCHEMA["$defs"]["roleName"]["pattern"],
+        api["components"]["schemas"]["RoleName"]["pattern"],
+        EVENT_SCHEMA["properties"]["role"]["pattern"],
+    }
+    assert len(patterns) == 1, patterns
+
+
+def test_burn_api_refs_resolve():
+    api = yaml.safe_load((ROOT / "burn-api.openapi.yaml").read_text())
+    text = (ROOT / "burn-api.openapi.yaml").read_text()
+    for ref in set(re.findall(r"#/components/schemas/(\w+)", text)):
+        assert ref in api["components"]["schemas"], ref
+    for path in ["/roles", "/roles/{name}", "/roles/{name}/tokens", "/tokens/{token_id}", "/instances", "/burns"]:
+        assert path in api["paths"], path

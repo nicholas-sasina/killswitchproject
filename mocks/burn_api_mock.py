@@ -5,20 +5,25 @@ import asyncio
 import re
 import secrets
 from contextlib import asynccontextmanager, suppress
+from typing import Literal
 
-from burn_contracts.names import MOCK_HEADER, agent_secret_ref
+from burn_contracts.events import utc_now_iso
+from burn_contracts.names import MOCK_HEADER, ROLE_NAME_RE, agent_secret_ref
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 if __package__:
     from .burn_state import ENCODINGS, BurnState
     from .minter_mock import key_activity
     from .mock_data import DEFAULT_SCENARIO, load_scenario
+    from .swarm_state import Swarm, SwarmError
 else:
     from burn_state import ENCODINGS, BurnState
     from minter_mock import key_activity
     from mock_data import DEFAULT_SCENARIO, load_scenario
+    from swarm_state import Swarm, SwarmError
 
 
 class AgentRequest(BaseModel):
@@ -26,6 +31,35 @@ class AgentRequest(BaseModel):
 
 
 class BurnRequest(AgentRequest):
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class SessionRequest(BaseModel):
+    agent_id: str | None = None
+    role: str | None = Field(default=None, pattern=ROLE_NAME_RE.pattern)
+    enroll_token: str | None = None
+    parent_session: str | None = None
+
+
+class RoleSpec(BaseModel):
+    name: str = Field(pattern=ROLE_NAME_RE.pattern)
+    tools: list[str]
+    credentials: list[Literal["api_key", "aws_key"]] = []
+    may_message: list[str] = []
+    may_spawn: list[str] = []
+    egress: list[str] | None = None
+    owner: str | None = None
+    managed_by: Literal["code", "ui"] = "ui"
+
+
+class TokenRequest(BaseModel):
+    uses: int = Field(default=1, ge=1, le=10000)
+    ttl: int = Field(default=3600, ge=60, le=2_592_000)
+
+
+class BurnsRequest(BaseModel):
+    scope: Literal["instance", "role", "lineage", "token"]
+    id: str
     reason: str | None = Field(default=None, max_length=200)
 
 
@@ -37,6 +71,7 @@ class LeakRequest(AgentRequest):
 
 def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
     state = BurnState(load_scenario(scenario_path))
+    swarm = Swarm(state)
 
     async def activity():
         while True:
@@ -56,8 +91,9 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
 
     app = FastAPI(title="Burn development mock", lifespan=lifespan)
     app.state.mock = state
+    app.state.swarm = swarm
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
-                       allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"],
+                       allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["*"],
                        expose_headers=[MOCK_HEADER])
 
     @app.middleware("http")
@@ -66,15 +102,24 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
         response.headers[MOCK_HEADER] = "true"
         return response
 
+    @app.exception_handler(SwarmError)
+    async def swarm_error(request, error):
+        return JSONResponse({"detail": str(error)}, status_code=error.status)
+
     def require_agent(agent_id):
         if agent_id not in state.agents:
             raise HTTPException(404, "Unknown scenario agent")
 
     @app.post("/sessions", status_code=201)
-    async def session(body: AgentRequest):
+    async def session(body: SessionRequest):
+        if body.agent_id is None:
+            if body.role is None or (body.enroll_token is None) == (body.parent_session is None):
+                raise HTTPException(400, "Send agent_id, or role with exactly one of enroll_token or parent_session")
+            return swarm.start(body.role, enroll_token=body.enroll_token, parent_session=body.parent_session)
         require_agent(body.agent_id)
         session_id = "session_" + secrets.token_hex(12)
-        state.sessions[session_id] = {"session_id": session_id, "agent_id": body.agent_id, "status": "active"}
+        state.sessions[session_id] = {"session_id": session_id, "agent_id": body.agent_id, "status": "active",
+                                      "tools": state.agents[body.agent_id]["tools"], "created_at": utc_now_iso()}
         result = state.minter.handle({"method": "POST", "path": f"/agents/{body.agent_id}/credentials",
                                       "body": {"types": state.agents[body.agent_id]["credentials"]}})["body"]
         state.emit(body.agent_id, "session", "issued", session_id=session_id, detail="Mock session issued.")
@@ -103,7 +148,7 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
         ordered = sorted(state.events, key=lambda event: event["event_id"])
         selected = ([event for event in ordered if event["event_id"] > since][:limit]
                     if since is not None else ordered[-limit:])
-        return {"events": selected, "agents": [state.agent_state(agent_id) for agent_id in state.agents],
+        return {"events": selected, "agents": [state.agent_state(agent_id) for agent_id in swarm.scenario_ids],
                 "cursor": selected[-1]["event_id"] if selected else since}
 
     @app.get("/agents/{agent_id}/ledger")
@@ -141,6 +186,50 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
                 "destination": "webhook.localhost", "requests_sent": 2 if encoding == "split_across_requests" else 1,
                 "reason": "Mock rule matched; no network request was sent." if blocked else "Mock rule did not match.",
                 "event_id": event["event_id"] if event else None}
+
+    @app.get("/roles")
+    async def roles():
+        return {"roles": swarm.list_roles()}
+
+    @app.post("/roles", status_code=201)
+    async def create_role(body: RoleSpec):
+        return swarm.save_role(body.model_dump(), create=True)
+
+    @app.get("/roles/{name}")
+    async def get_role(name: str):
+        return swarm.get_role(name)
+
+    @app.put("/roles/{name}")
+    async def put_role(name: str, body: RoleSpec):
+        if body.name != name:
+            raise HTTPException(400, "Body name must match the path")
+        return swarm.save_role(body.model_dump(), create=False)
+
+    @app.post("/roles/{name}/tokens", status_code=201)
+    async def create_token(name: str, body: TokenRequest):
+        return swarm.create_token(name, body.uses, body.ttl)
+
+    @app.delete("/tokens/{token_id}")
+    async def revoke_token(token_id: str):
+        return swarm.revoke_token(token_id)
+
+    @app.get("/instances")
+    async def instances(role: str | None = None,
+                        status: Literal["active", "revoked", "exited"] | None = None):
+        return {"instances": swarm.list_instances(role, status)}
+
+    @app.post("/instances/{session_id}/heartbeat")
+    async def heartbeat(session_id: str):
+        return swarm.heartbeat(session_id)
+
+    @app.post("/instances/{session_id}/exit")
+    async def exit_instance(session_id: str):
+        return swarm.exit(session_id)
+
+    @app.post("/burns")
+    async def burns(body: BurnsRequest):
+        # Like /burn, the reason is never echoed into the event feed.
+        return swarm.burn(body.scope, body.id)
 
     return app
 

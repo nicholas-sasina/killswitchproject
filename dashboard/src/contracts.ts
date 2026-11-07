@@ -10,7 +10,10 @@ export type EventAction =
   | "rotated"
   | "flagged"
   | "rejected"
-  | "issued";
+  | "issued"
+  | "started"
+  | "exited"
+  | "unregistered";
 
 export interface LedgerEvent {
   event_id: string;
@@ -24,7 +27,8 @@ export interface LedgerEvent {
     | "burn"
     | "gateway"
     | "session"
-    | "provider";
+    | "provider"
+    | "instance";
   action: EventAction;
   tool?: string | null;
   secret_ref?: string | null;
@@ -36,6 +40,8 @@ export interface LedgerEvent {
   destination?: string | null;
   encoding?: string | null;
   detail?: string | null;
+  role?: string | null;
+  parent_session?: string | null;
 }
 
 export interface AgentState {

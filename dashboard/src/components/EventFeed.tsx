@@ -11,6 +11,9 @@ const actions: Record<EventAction, { icon: string; text: string }> = {
   flagged: { icon: "⚑", text: "Credential flagged for review" },
   rejected: { icon: "!", text: "Provider request rejected" },
   issued: { icon: "✓", text: "Session or credential issued" },
+  started: { icon: "▶", text: "Agent instance started" },
+  exited: { icon: "◼", text: "Agent instance exited" },
+  unregistered: { icon: "?", text: "Unregistered agent refused" },
 };
 
 export function EventFeed({ events }: { events: LedgerEvent[] }) {
