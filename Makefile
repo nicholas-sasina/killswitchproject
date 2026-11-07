@@ -8,13 +8,13 @@ export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
 
 # Folders with a Python test suite (each has its own uv project).
-PY_COMPONENTS := contracts detection minter burn_api agents
+PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval
 
 .DEFAULT_GOAL := help
-.PHONY: help hooks deploy env test demo demo-step reset replay-old-key teardown
+.PHONY: help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks leak-test proxy-env eval teardown
 
 help: ## List targets
-	@grep -E '^[a-zA-Z%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
 
 hooks: ## Install the gitleaks pre-commit secret gate
 	./scripts/install-hooks.sh
@@ -31,9 +31,15 @@ env: ## Write .env and dashboard/.env.local from the deployed stacks
 test: ## Run every component's tests
 	@set -e; for d in $(PY_COMPONENTS); do \
 	  echo "== $$d"; \
-	  if [ $$d = contracts ]; then (cd $$d && uv run -q --extra test pytest -q); \
-	  else (cd $$d && uv run -q pytest -q); fi; \
+	  case $$d in \
+	    contracts) (cd $$d && uv run -q --extra test pytest -q) ;; \
+	    detection) (cd $$d && uv run -q --python 3.12 --extra proxy --extra leaktest pytest -q) ;; \
+	    *) (cd $$d && uv run -q pytest -q) ;; \
+	  esac; \
 	done
+
+test-dashboard: ## Run the dashboard's tests and production build
+	cd dashboard && npm ci --silent && npm test && npm run build
 
 demo: ## Reset, mint fresh credentials and start the agents (SCENARIO=...)
 	cd agents && uv run python scripts/run_demo.py --scenario $(SCENARIO)
@@ -47,6 +53,24 @@ reset: ## Clear demo state and delete the scenario's minted credentials
 replay-old-key: ## Replay a burned agent's pre-rotation keys (AGENT=agent-...)
 	@test -n "$(AGENT)" || (echo "usage: make replay-old-key AGENT=agent-..." && exit 1)
 	cd minter && uv run python scripts/replay_old_key.py --agent $(AGENT)
+
+e2e: ## Live containment check against the deployed stack (AGENT=agent-... optional)
+	cd burn_api && uv run python scripts/e2e.py $(AGENT)
+
+dashboard: ## Start the dashboard on http://localhost:5173 (run make env first)
+	cd dashboard && npm ci --silent && npm run dev
+
+mocks: ## Start the mock Burn API (:8700) and mock MCP tools (:8701), development only
+	cd mocks && (uv run python burn_api_mock.py & uv run python mcp_tools_mock.py & wait)
+
+proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
+	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
+
+leak-test: ## Start the leak-test tool on http://localhost:8787 (a TEST TOOL)
+	cd detection && uv run --python 3.12 --extra leaktest uvicorn leaktest.app:app --host 127.0.0.1 --port 8787 --no-access-log
+
+eval: ## Rerun the offline eval and rewrite eval/results.json and eval/RESULTS.md
+	cd eval && uv run python run_offline.py --trials 10
 
 teardown: ## Destroy every stack and force-delete the system secrets (asks first)
 	@read -p "Destroy all Burn stacks in this account? [y/N] " ok && [ "$$ok" = y ]
