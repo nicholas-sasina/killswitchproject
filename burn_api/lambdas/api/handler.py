@@ -61,9 +61,26 @@ def route(method: str, path: str, query: dict, body: dict):
     return 404, {"error": "no such route"}
 
 
+# Must match the CORS settings of the HTTP API in infra/burn_infra/burn_api.py.
+ALLOWED_ORIGIN = "http://localhost:5173"
+ALLOWED_HEADERS = f"content-type,{names.DEMO_TOKEN_HEADER}"
+
+
+def _preflight(headers: dict):
+    """Answer a browser CORS preflight. Browsers never attach custom headers to it,
+    so it cannot carry the demo token; it reveals nothing, and the real request is still checked."""
+    cors = {"access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": ALLOWED_HEADERS,
+            "access-control-max-age": "600"}
+    if headers.get("origin") == ALLOWED_ORIGIN:
+        cors["access-control-allow-origin"] = ALLOWED_ORIGIN
+    return {"statusCode": 204, "headers": cors, "body": ""}
+
+
 def handler(event, context=None):
     http = event["requestContext"]["http"]
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    if http["method"] == "OPTIONS":
+        return _preflight(headers)
     if not auth.is_authorized(headers):
         return _resp(401, {"error": "missing or invalid x-burn-demo-token"})
     try:
