@@ -3,27 +3,33 @@
 #
 #   agents_internal: no route to the internet; agents can only reach the proxy.
 #   egress:          the proxy's way out, and where the sink listens.
+#
+# run_demo.py first writes the two inputs referenced below:
+#   ../.run/detection-build  product files only (scripts/prepare_build.py)
+#   ../.run/proxy.env        the proxy's OWN AWS identity (make proxy-env)
+#   ../.run/proxy-certs      the proxy's CA certificate, shared with agents and the host
+# No host AWS credentials are passed to any container.
+name: burn-demo
+
 services:
   proxy:
-    build: ../detection/proxy
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/proxy/Dockerfile
+    env_file: ../.run/proxy.env
+    ports:
+      - "127.0.0.1:8080:8080"   # the host leak-test tool sends its payloads through here
     networks: [agents_internal, egress]
     volumes:
-      - certs:/certs
-    environment:
-      # The proxy looks up fingerprints and sessions; it uses your AWS credentials.
-      - AWS_REGION=us-east-1
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_SESSION_TOKEN
-      - BURN_API_URL
+      # A host directory, not a named volume: the host leak-test tool trusts the same CA.
+      - ../.run/proxy-certs:/certs
   sink:
-    build: ../detection/sink
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/sink/Dockerfile
     networks: [egress]
 
 networks:
   agents_internal:
     internal: true
   egress: {}
-
-volumes:
-  certs: {}

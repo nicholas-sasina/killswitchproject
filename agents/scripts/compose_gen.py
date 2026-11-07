@@ -23,7 +23,7 @@ def agent_service(agent_id: str, session_id: str, scenario_file: str, step: bool
         "environment": env,
         "networks": ["agents_internal"],
         "depends_on": ["proxy"],
-        "volumes": ["./scenarios:/scenarios:ro", "certs:/certs:ro", "./.run/step:/step"],
+        "volumes": ["./scenarios:/scenarios:ro", "../.run/proxy-certs:/certs:ro", "./.run/step:/step"],
         "restart": "no",
     }
 

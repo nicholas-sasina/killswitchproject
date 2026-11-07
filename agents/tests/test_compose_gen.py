@@ -28,3 +28,10 @@ def test_step_mode_gates_only_the_ticket_reader():
     services = build_compose(scenario, SCENARIOS[0].name, sessions, step=True)["services"]
     gated = [i for i, s in services.items() if "BURN_STEP_FILE" in s["environment"]]
     assert gated == [a["id"] for a in scenario["agents"] if "list_tickets" in a["tools"]]
+
+
+def test_agents_trust_the_proxy_ca_from_the_shared_host_directory():
+    scenario = yaml.safe_load(SCENARIOS[0].read_text())
+    sessions = {a["id"]: "s" for a in scenario["agents"]}
+    for svc in build_compose(scenario, SCENARIOS[0].name, sessions, step=False)["services"].values():
+        assert "../.run/proxy-certs:/certs:ro" in svc["volumes"]

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from common import AGENTS_DIR, RUN_DIR, burn_api, names, secret_value, setting
+from common import AGENTS_DIR, REPO_ROOT, RUN_DIR, burn_api, names, secret_value, setting
 from compose_gen import build_compose
 from load_scenario import load
 from reset import reset
@@ -54,9 +54,22 @@ def write_env_file(path: Path, env: dict) -> None:
     os.chmod(path, 0o600)
 
 
+def prepare_proxy_inputs() -> None:
+    """Build context and credentials for the proxy container (see docker-compose.yml)."""
+    subprocess.run([sys.executable, "detection/scripts/prepare_build.py"], cwd=REPO_ROOT, check=True)
+    subprocess.run(["make", "proxy-env"], cwd=REPO_ROOT, check=True)
+    (REPO_ROOT / ".run" / "proxy-certs").mkdir(parents=True, exist_ok=True)
+
+
+def compose_command() -> list[str]:
+    """`docker compose` (plugin) if installed, else the standalone docker-compose."""
+    plugin = subprocess.run(["docker", "compose", "version"], capture_output=True)
+    return ["docker", "compose"] if plugin.returncode == 0 else ["docker-compose"]
+
+
 def compose(*args: str, check: bool = True) -> None:
     files = ["-f", "docker-compose.yml", "-f", ".run/compose.agents.yml"]
-    subprocess.run(["docker", "compose", *files, *args], cwd=AGENTS_DIR, check=check)
+    subprocess.run([*compose_command(), *files, *args], cwd=AGENTS_DIR, check=check)
 
 
 def step_prompt(reader_ids: list[str]) -> None:
@@ -120,6 +133,7 @@ def main() -> None:
     if args.no_proxy:
         run_on_host(scenario, scenario_path, args.step)
         return
+    prepare_proxy_inputs()
     generated = build_compose(scenario, scenario_path.name, sessions, args.step)
     (RUN_DIR / "compose.agents.yml").write_text(yaml.safe_dump(generated))
 
