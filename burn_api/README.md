@@ -21,12 +21,14 @@ sessions (badge + credentials), burns an agent in one call, and feeds the dashbo
 | `lambdas/api/minter_client.py` | Invokes the credential minter Lambda |
 | `scripts/make_env.py` | Writes `.env` and `dashboard/.env.local` from the deployed stacks |
 | `scripts/smoke.py` | Live check: session, burn, badge, blast radius |
+| `scripts/e2e.py` | Live containment check: burn, gateway refuses the same token, old keys rejected |
 | `../infra/burn_infra/burn_api.py` | The BurnApi CDK stack |
 
 ## How to test it
 ```bash
 cd burn_api && uv run pytest -q          # unit tests (moto, fake minter)
 python burn_api/scripts/smoke.py         # against the deployed API; skips if it is not deployed
+cd burn_api && uv run python scripts/e2e.py   # full burn flow incl. gateway and provider (scenario must be loaded)
 ```
 
 ## FAQ

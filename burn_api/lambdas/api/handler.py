@@ -52,7 +52,7 @@ def route(method: str, path: str, query: dict, body: dict):
     if method == "GET":
         if m := re.fullmatch(r"/burn/([^/]+)/blast-radius", path):
             agent_id = _agent_id(m[1])
-            return (200, reads.blast_radius(agent_id)) if agent_id else (400, {"error": "bad agent id"})
+            return (200, reads.blast_radius(agent_id, query.get("since"))) if agent_id else (400, {"error": "bad agent id"})
         if m := re.fullmatch(r"/agents/([^/]+)/ledger", path):
             agent_id = _agent_id(m[1])
             return (200, reads.ledger(agent_id)) if agent_id else (400, {"error": "bad agent id"})

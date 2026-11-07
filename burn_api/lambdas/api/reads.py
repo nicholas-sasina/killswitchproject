@@ -86,8 +86,8 @@ def badge(session_id: str) -> dict:
     return {"session_id": session_id, "agent_id": item["agent_id"], "status": item["status"]}
 
 
-def blast_radius(agent_id: str) -> dict:
-    result = minter_client.call("GET", f"/agents/{agent_id}/key-activity")
+def blast_radius(agent_id: str, since: str | None = None) -> dict:
+    result = minter_client.call("GET", f"/agents/{agent_id}/key-activity", query={"since": since} if since else None)
     # The minter may return a bare list of events or {"keys": [...], "events": [...]}.
     events = result if isinstance(result, list) else result.get("events", [])
     keys = [] if isinstance(result, list) else result.get("keys", [])

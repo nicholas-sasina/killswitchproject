@@ -9,7 +9,7 @@ class FakeMinter:
         self.calls = []
         self.fail = False
 
-    def __call__(self, method, path, body=None):
+    def __call__(self, method, path, body=None, query=None):
         from minter_client import MinterError
         self.calls.append((method, path, body))
         if self.fail:
