@@ -19,7 +19,7 @@ events streaming, the exposure ledger filling as the reader reads config files.
 2. Click **Burn** on that agent in the dashboard (any agent can be chosen, including by a judge).
 3. Show the event stream: badge revoked, credentials rotated, shared credentials flagged.
 4. Show the agent's container log: `badge revoked/credentials rotated - stopping`
-   (`docker compose -f docker-compose.yml -f .run/compose.agents.yml logs <agent-id>`, run in `agents/`).
+   (`docker logs burn-demo-<agent-id>-1`).
 5. Show the other two agents still working.
 
 ## 1:20 - Moment 2: the old key is dead (45 s)
