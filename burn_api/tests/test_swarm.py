@@ -423,3 +423,40 @@ def test_new_routes_need_the_token_and_preflight_allows_put_and_delete(env):
                            "headers": {"origin": "http://localhost:5173"}})
     assert out["statusCode"] == 204
     assert {"PUT", "DELETE"} <= set(out["headers"]["access-control-allow-methods"].split(","))
+
+
+def test_failed_join_cleans_up_what_it_created_and_refunds_the_token(env, monkeypatch):
+    from botocore.exceptions import ClientError
+    import badges
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 1})[1]["token"]
+    err = ClientError({"Error": {"Code": "TooManyRequestsException", "Message": "x"}}, "CreateUserPoolClient")
+    real_create = badges.create_badge
+    monkeypatch.setattr(badges, "create_badge", lambda *a: (_ for _ in ()).throw(err))
+    status, _ = call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
+    assert status == 429
+    deletes = [c for c in env.minter.calls if c[0] == "DELETE"]
+    assert len(deletes) == 1 and deletes[0][1].startswith("/agents/agent-worker-")
+    minted = [c for c in env.minter.calls if c[0] == "POST"][0][1]
+    assert deletes[0][1] == minted  # same agent id that was issued credentials
+    assert env.ddb.Table("burn-sessions").scan()["Items"] == []
+    monkeypatch.setattr(badges, "create_badge", real_create)
+    assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201  # use refunded
+
+
+def test_failure_after_the_badge_exists_deletes_the_badge_too(env, monkeypatch):
+    import sessions
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 1})[1]["token"]
+
+    def boom(agent_id, badge):
+        raise RuntimeError("secrets manager down")
+
+    real_store = sessions._store_badge
+    monkeypatch.setattr(sessions, "_store_badge", boom)
+    with pytest.raises(RuntimeError):
+        call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
+    assert len(env.badges.created) == 1 and len(env.badges.deleted) == 1
+    assert [c[0] for c in env.minter.calls] == ["POST", "DELETE"]
+    monkeypatch.setattr(sessions, "_store_badge", real_store)
+    assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201

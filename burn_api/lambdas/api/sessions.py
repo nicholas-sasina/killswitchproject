@@ -182,23 +182,29 @@ def start_instance(role_name: str, enroll_token: str | None = None, parent_sessi
 
 def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
     agent_id = _new_instance_agent_id(role_name)
-    credentials = []
-    if limits["credentials"]:
-        credentials = minter_client.call(
-            "POST", f"/agents/{agent_id}/credentials", {"types": limits["credentials"]})["credentials"]
+    minted, badge = False, None
+    try:
+        credentials = []
+        if limits["credentials"]:
+            minted = True  # even a failed call may have created the IAM user before failing
+            credentials = minter_client.call(
+                "POST", f"/agents/{agent_id}/credentials", {"types": limits["credentials"]})["credentials"]
 
-    session_id = "sess_" + secrets.token_hex(8)
-    badge = badges.create_badge(agent_id, session_id)
-    badge_ref = _store_badge(agent_id, badge)
+        session_id = "sess_" + secrets.token_hex(8)
+        badge = badges.create_badge(agent_id, session_id)
+        badge_ref = _store_badge(agent_id, badge)
 
-    now = _now()
-    db.table(names.SESSIONS_TABLE).put_item(Item={
-        "session_id": session_id, "agent_id": agent_id, "client_id": badge["client_id"],
-        "status": "active", "tools": limits["tools"], "send_to": [], "created_at": now,
-        "role": role_name, "parent_session": parent_session, "token_id": token_id,
-        "owner": role.get("owner"), "egress": limits["egress"], "credentials": limits["credentials"],
-        "last_seen": now, "exited_at": None,
-    })
+        now = _now()
+        db.table(names.SESSIONS_TABLE).put_item(Item={
+            "session_id": session_id, "agent_id": agent_id, "client_id": badge["client_id"],
+            "status": "active", "tools": limits["tools"], "send_to": [], "created_at": now,
+            "role": role_name, "parent_session": parent_session, "token_id": token_id,
+            "owner": role.get("owner"), "egress": limits["egress"], "credentials": limits["credentials"],
+            "last_seen": now, "exited_at": None,
+        })
+    except BaseException:
+        _discard_partial_instance(agent_id, minted, badge)
+        raise
     fields = {"session_id": session_id, "role": role_name, "parent_session": parent_session}
     db.write_event(agent_id=agent_id, source="session", action="issued", **fields,
                    detail=f"session started with {len(credentials)} credentials")
@@ -209,3 +215,21 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         "role": role_name, "parent_session": parent_session, "token_id": token_id,
         "tools": limits["tools"], "egress": limits["egress"],
     }
+
+
+def _discard_partial_instance(agent_id: str, minted: bool, badge: dict | None):
+    """A join failed before its session row existed: remove what it created, best effort.
+
+    Without this every client retry (for example after a Cognito throttle) would leave another
+    IAM user, key and secret behind with no session pointing at them.
+    """
+    if badge:
+        try:
+            badges.delete_badge(badge["client_id"])
+        except Exception as exc:
+            print(f"cleanup: delete_badge failed for {agent_id}: {type(exc).__name__}")
+    if minted:
+        try:
+            minter_client.call("DELETE", f"/agents/{agent_id}/credentials")
+        except Exception as exc:
+            print(f"cleanup: credential delete failed for {agent_id}: {type(exc).__name__}")
