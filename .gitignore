@@ -1,0 +1,51 @@
+# --- Secrets and local config: NEVER commit these -------------------------
+# This is a public repo for a credential-containment project. Anything that
+# can hold a real value (env files, minted test creds, certs) stays local.
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+.run/
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+mitmproxy-ca*
+.mitmproxy/
+secrets.json
+credentials.json
+# Deploy outputs contain account IDs, endpoint URLs and resource ARNs.
+outputs.json
+**/outputs.json
+cdk.context.json
+cdk.out/
+infra/.build/
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# --- Node -------------------------------------------------------------------
+node_modules/
+.vite/
+dashboard/dist/
+*.local
+
+# --- Eval raw output (may contain generated test credentials) --------------
+eval/out/
+
+# --- OS / editor ------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
