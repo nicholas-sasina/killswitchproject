@@ -93,6 +93,39 @@ paths:
                 properties:
                   rotated: { type: array, items: { type: string } }
                   flagged: { type: array, items: { type: string } }
+  /agents/{agent_id}/key-activity:
+    get:
+      summary: CloudTrail history of the agent's AWS keys (current and previous), for the blast-radius view.
+      description: |
+        Direct-invoke event: {"method": "GET", "path": "/agents/agent-x/key-activity",
+        "query": {"since": "2026-11-07T20:00:00Z"}}. `since` is optional.
+        Never returns full access key ids or secret values, only the last 4 characters.
+        CloudTrail LookupEvents covers management events only and can lag by several minutes.
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+        - { name: since, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Events, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ts: { type: string, format: date-time }
+                        key_ref: { type: string, example: 'burn/agent-reader/aws_key#v2', description: 'secret_ref plus credential version' }
+                        key_hint: { type: string, description: last 4 characters of the access key id }
+                        event_name: { type: string, example: GetCallerIdentity }
+                        event_source: { type: string, example: sts.amazonaws.com }
+                        resource: { type: string, nullable: true }
+                        source_ip: { type: string, nullable: true }
+                        error_code: { type: string, nullable: true }
   /shared/credentials:
     post:
       summary: Issue a shared credential (used by several agents). Idempotent by name.
