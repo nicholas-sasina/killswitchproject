@@ -15,7 +15,7 @@ keywords = ["mpk_live_"]
 [[rules]]
 id = "connection-string-with-password"
 description = "URL-style connection string with an inline password"
-regex = '''[a-z][a-z0-9+.-]{1,20}://[^:\s/@'"]+:[^@\s'"{}]{6,}@[^\s'"]+'''
+regex = '''[a-z][a-z0-9+.-]{1,20}://[^:\s/@'"<>]+:[^@\s'"{}<>]{6,}@[^\s'"]+'''
 keywords = ["://"]
 
 [allowlist]
