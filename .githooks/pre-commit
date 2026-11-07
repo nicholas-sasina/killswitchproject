@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Pre-commit secret gate. This repo is public and Burn is a credential tool,
+# so a leaked key here would be both a real incident and a bad look.
+#
+# 1. gitleaks scans the staged diff (default rules + .gitleaks.toml).
+# 2. If .env names the AWS account, block diffs that contain the account ID
+#    (not a secret by itself, but it has no reason to be in a public repo).
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks is not installed (brew install gitleaks). Refusing to commit." >&2
+  exit 1
+fi
+
+gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
+
+acct=""
+if [[ -f .env ]]; then
+  acct=$(grep -E '^AWS_ACCOUNT_ID=' .env | cut -d= -f2 | tr -d '"' || true)
+fi
+if [[ -n "$acct" ]] && git diff --cached -U0 | grep -E '^\+' | grep -q "$acct"; then
+  echo "pre-commit: staged changes contain the AWS account ID from .env. Use a placeholder or env var." >&2
+  exit 1
+fi
