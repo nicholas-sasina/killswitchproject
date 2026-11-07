@@ -1,0 +1,183 @@
+// @vitest-environment jsdom
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe("containment dashboard", () => {
+  it("requires confirmation before Burn, shows its real result and loads the timeline", async () => {
+    const id = `agent-${crypto.randomUUID()}`;
+    const ref = `burn/${id}/api_key`;
+    let session = crypto.randomUUID();
+    let revoked = false;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        let body: unknown;
+        if (path === "/events")
+          body = {
+            events: [],
+            agents: [
+              {
+                agent_id: id,
+                role: "Reader",
+                status: revoked ? "revoked" : "active",
+                session_id: session,
+                exposures: 1,
+              },
+            ],
+          };
+        else if (path.endsWith("/ledger")) body = { agent_id: id, entries: [] };
+        else if (path.endsWith("/blast-radius"))
+          body = { agent_id: id, keys: [], events: [] };
+        else if (path === "/encodings") body = { encodings: ["plain"] };
+        else if (path === "/burn") {
+          expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body))).toEqual({
+            agent_id: id,
+            reason: "Suspicious activity",
+          });
+          revoked = true;
+          body = {
+            agent_id: id,
+            revoked: true,
+            sessions_revoked: [session],
+            rotated: [ref],
+            flagged: [],
+          };
+        } else throw new Error("Unexpected endpoint");
+        return new Response(JSON.stringify(body), {
+          headers: { "x-burn-mock": "true" },
+        });
+      });
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => {
+      render(
+        <App
+          config={{
+            burnUrl: "https://burn.example.test",
+            demoToken: crypto.randomUUID(),
+            leakTestUrl: "https://test.example.test",
+          }}
+        />,
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: `Burn ${id}` }));
+    const dialog = screen.getByRole("dialog");
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    );
+    expect(
+      fetcher.mock.calls.some((call) => String(call[0]).endsWith("/burn")),
+    ).toBe(false);
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), {
+      target: { value: "Suspicious activity" },
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Confirm Burn" }),
+      );
+    });
+    const outcome = screen.getByRole("status", { name: "Burn result" });
+    expect(outcome.textContent).toContain(ref);
+    expect(outcome.textContent).toContain("1 sessions revoked");
+    expect(screen.getByText("MOCK DATA")).toBeTruthy();
+    expect(
+      fetcher.mock.calls.some((call) =>
+        String(call[0]).endsWith("/blast-radius"),
+      ),
+    ).toBe(true);
+    expect(screen.getByText(/CloudTrail event history can lag/)).toBeTruthy();
+    session = crypto.randomUUID();
+    revoked = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(
+      (screen.getByRole("button", { name: `Burn ${id}` }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(screen.queryByRole("status", { name: "Burn result" })).toBeNull();
+  });
+
+  it("clears a custom test payload after sending and reports the proxy outcome", async () => {
+    const id = `agent-${crypto.randomUUID()}`;
+    const payload = crypto.randomUUID();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/leak-test") {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            agent_id: id,
+            encoding: "plain",
+            free_text: payload,
+          });
+          return new Response(
+            JSON.stringify({
+              blocked: true,
+              encoding: "plain",
+              reason: "Credential match stopped",
+            }),
+          );
+        }
+        const body =
+          path === "/events"
+            ? { events: [], agents: [{ agent_id: id, status: "active" }] }
+            : path === "/encodings"
+              ? { encodings: ["plain"] }
+              : { agent_id: id, entries: [] };
+        return new Response(JSON.stringify(body));
+      });
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => {
+      render(
+        <App
+          config={{
+            burnUrl: "https://burn.example.test",
+            demoToken: crypto.randomUUID(),
+            leakTestUrl: "https://test.example.test",
+          }}
+        />,
+      );
+    });
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Send test ↗",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    fireEvent.change(screen.getByLabelText(/Free-text payload/), {
+      target: { value: payload },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send test ↗" }));
+    });
+    expect(screen.getByText("⊘ Blocked")).toBeTruthy();
+    expect(screen.getByText("Credential match stopped")).toBeTruthy();
+    expect(
+      (screen.getByLabelText(/Free-text payload/) as HTMLTextAreaElement).value,
+    ).toBe("");
+    expect(screen.queryByText(payload)).toBeNull();
+  });
+});
