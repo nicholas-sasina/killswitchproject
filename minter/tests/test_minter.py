@@ -185,3 +185,22 @@ def test_bad_requests():
     assert call("POST", "/agents/Not_An_Agent/credentials", {"types": ["api_key"]})[0] == 400
     assert call("POST", f"/agents/{AGENT}/credentials", {"types": ["root_key"]})[0] == 400
     assert call("GET", "/nope")[0] == 404
+
+
+def test_recreating_a_just_deleted_secret_retries(monkeypatch, secrets_client):
+    import vault
+    monkeypatch.setattr(vault.time, "sleep", lambda s: None)
+    client, real = aws.secrets(), aws.secrets().create_secret
+    calls = []
+
+    def flaky(**kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            raise client.exceptions.InvalidRequestException(
+                {"Error": {"Code": "InvalidRequestException", "Message": "already scheduled for deletion"}},
+                "CreateSecret")
+        return real(**kwargs)
+
+    monkeypatch.setattr(client, "create_secret", flaky)
+    vault.put("burn/shared/tok", "v")
+    assert len(calls) == 3 and secret(secrets_client, "burn/shared/tok") == "v"
