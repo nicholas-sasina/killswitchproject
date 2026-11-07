@@ -17,6 +17,10 @@ _REASONS = {"session_required", "session_inactive", "private_destination", "dest
             "destination_port_not_allowed", "credential_detected", "payload_too_large", "exit_check_unavailable"}
 
 
+class NoSession(ValueError):
+    """The agent has no stored proxy session to use for a test."""
+
+
 def encode(value: str, encoding: str) -> list[str]:
     if encoding == "plain":
         return [value]
@@ -68,10 +72,12 @@ class LeakTest:
     def current_session(self, agent: str) -> str:
         rows = query_all(self.ddb.Table(names.SESSIONS_TABLE), IndexName="by_agent",
                          KeyConditionExpression=Key("agent_id").eq(agent))
+        if not rows:
+            raise NoSession("no_session")
         active = [row for row in rows if row.get("status") == "active"]
-        if not active:
-            raise ValueError("no active session")
-        return max(active, key=lambda row: str(row.get("created_at", row.get("ts", ""))))["session_id"]
+        # Let the proxy enforce revocation so a burned agent gets a normal test result.
+        candidates = active or rows
+        return max(candidates, key=lambda row: str(row.get("created_at", row.get("ts", ""))))["session_id"]
 
     def value(self, ref: str) -> str:
         raw = self.secrets.get_secret_value(SecretId=ref)["SecretString"]
