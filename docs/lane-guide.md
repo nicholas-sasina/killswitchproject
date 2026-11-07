@@ -3,9 +3,13 @@
 Read first, in order: `docs/spec.md`, this file, `contracts/README.md`, then your lane brief.
 
 ## Git
-- You work on your own branch in your own worktree. Commit small, each commit does ONE thing, each with
-  a test (unit test, or a script that proves the behavior). Conventional prefixes (`feat:`, `fix:`,
-  `refactor:`, `test:`, `docs:`, `chore:`); the message explains *why*. End every commit message with:
+- You work on your own branch in your own worktree. **Keep the commit count low**: one commit per
+  coherent feature, with its code, tests and docs together (e.g. "feat(minter): issue and rotate
+  per-agent API keys"), not one per file or per small step. A typical PR has 1-4 commits. Squash fixups
+  before pushing. Every commit includes a test (unit test, or a script that proves the behavior).
+  Conventional prefixes (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`); the message explains *why*.
+- PRs are **squash-merged** by the orchestrator, so `main` gets one commit per PR. Write the PR title
+  as a good commit subject. End every commit message with:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or your own model/tool attribution).
 - Push your branch and open a PR to `main` with `gh pr create` when a milestone works (you may open
   several PRs in sequence). PR body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
