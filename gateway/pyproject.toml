@@ -22,4 +22,6 @@ burn-contracts = { path = "../contracts", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]  # badges.py is imported as a top-level module, as in the Burn API Lambda
+# Each Lambda folder is its own top-level package at runtime, so tests import
+# them the same way. badges.py is imported from this folder.
+pythonpath = [".", "lambdas/interceptor", "lambdas/tools"]
