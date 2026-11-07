@@ -15,18 +15,20 @@ def key() -> bytes:
     return fp.key_from_hex(vault.get(FINGERPRINT_KEY_SECRET))
 
 
-def register(secret_ref: str, owner: str, secret_type: str, version: int, parts) -> int:
+def register(secret_ref: str, owner: str, secret_type: str, version: int, parts,
+             extra: dict | None = None) -> int:
     """Write fingerprint rows for one credential version.
 
     parts: (part_name, text, exact, shingles). Only the secret bits are
     fingerprinted: e.g. for an api key the random body, not the public prefix.
+    extra: more safe attributes for every row (canaries add canary/session_id/instance_id).
     """
     hmac_key = key()
     rows = {}
     for part, text, exact, shingles in parts:
         base = {
             "secret_ref": secret_ref, "owner_agent_id": owner, "secret_type": secret_type,
-            "part": part, "version": version, "status": "active",
+            "part": part, "version": version, "status": "active", **(extra or {}),
         }
         if exact:
             rows[fp.fingerprint(text, hmac_key)] = {**base, "kind": "exact"}
@@ -39,6 +41,10 @@ def register(secret_ref: str, owner: str, secret_type: str, version: int, parts)
         for digest, row in rows.items():
             batch.put_item(Item={"fingerprint": digest, **row})
     return len(rows)
+
+
+def get(digest: str) -> dict | None:
+    return aws.table(FINGERPRINTS_TABLE).get_item(Key={"fingerprint": digest}).get("Item")
 
 
 def _rows_for(secret_ref: str) -> list[dict]:
