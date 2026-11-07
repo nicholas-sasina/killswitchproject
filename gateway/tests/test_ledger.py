@@ -5,6 +5,7 @@ import secrets
 import string
 
 import interceptor
+import ledger
 import record
 import shapes
 from conftest import (events, ledger_rows, put_session, register_credential, response_event,
@@ -46,18 +47,33 @@ def test_shared_and_other_agents_credentials_are_attributed(aws):
         "shared credential seen in read_config output", "credential of agent-beta seen in read_config output"}
 
 
-def test_retried_call_records_once_and_a_new_call_records_again(aws):
+def test_repeat_sightings_update_the_entry_without_a_new_event(aws, monkeypatch):
     session = put_session(aws)
     value = register_credential(aws, "burn/agent-alpha/api_key", "agent-alpha")
 
+    monkeypatch.setattr(ledger, "utc_now_iso", lambda: "2026-01-01T00:00:00.000Z")
     respond(session, value, trace="Root=1-a", rpc_id=1)
-    first_seen = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["first_seen"]
     respond(session, value, trace="Root=1-a", rpc_id=1)  # interceptor retry: same call
+    monkeypatch.setattr(ledger, "utc_now_iso", lambda: "2026-01-01T00:05:00.000Z")
     respond(session, value, trace="Root=1-b", rpc_id=2)  # the agent reads it again
 
-    assert len(events(aws)) == 2
+    [event] = events(aws)
+    assert event["action"] == "recorded"
     row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
-    assert row["first_seen"] == first_seen and row["seen_in"] == {"Root=1-a#1", "Root=1-b#2"}
+    assert row["first_seen"] == "2026-01-01T00:00:00.000Z" and row["last_seen"] == "2026-01-01T00:05:00.000Z"
+    assert row["seen_in"] == {"Root=1-a#1", "Root=1-b#2"}
+
+
+def test_same_credential_seen_by_another_agent_is_recorded_for_it(aws):
+    alpha = put_session(aws)
+    beta = put_session(aws, agent_id="agent-beta")
+    shared = register_credential(aws, "burn/shared/crm_db_url", "shared", secret_type="other")
+
+    respond(alpha, f"db: {shared}", trace="Root=1-a")
+    respond(beta, f"db: {shared}", trace="Root=1-b")
+
+    assert sorted(e["agent_id"] for e in events(aws)) == ["agent-alpha", "agent-beta"]
+    assert "burn/shared/crm_db_url" in ledger_rows(aws, "agent-beta")
 
 
 def test_encoded_credential_is_still_recorded(aws):

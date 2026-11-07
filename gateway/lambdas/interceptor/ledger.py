@@ -4,9 +4,11 @@ One row per (agent_id, credential). Rows hold fingerprints and references,
 never values. When Burn burns an agent, this is the list of everything that
 must be rotated or flagged.
 
-The interceptor may be retried, so every write is keyed by the call that
-caused it (trace id + JSON-RPC id): a retry finds its call already in
-seen_in and records nothing twice.
+Every sighting updates last_seen and seen_in, but only the first one per
+(agent, credential) is reported as new: an agent that reads the same file or
+gets the same sender's messages again already has that entry. The write is
+keyed by the call that caused it (trace id + JSON-RPC id), so an interceptor
+retry finds its call already in seen_in and changes nothing.
 """
 import functools
 
@@ -25,7 +27,7 @@ def _table():
 
 
 def record(agent_id: str, finding: Finding, *, source: str, via: str, call: str) -> bool:
-    """Add the credential to the agent's ledger. False if this call already recorded it."""
+    """Add the credential to the agent's ledger. True only if the agent did not have it yet."""
     return _upsert(agent_id, ledger_key(finding), {
         "secret_ref": finding.secret_ref,
         "fingerprint": finding.fingerprint,
@@ -46,7 +48,8 @@ def entries(agent_id: str) -> list[dict]:
 
 
 def copy_entry(entry: dict, to_agent: str, *, via: str, call: str) -> bool:
-    """Give to_agent the sender's ledger entry (it received a message from them)."""
+    """Give to_agent the sender's ledger entry (it received a message from them).
+    True only if to_agent did not have it yet."""
     fields = {k: entry.get(k) for k in ("secret_ref", "fingerprint", "secret_type", "owner", "owner_agent_id")}
     return _upsert(to_agent, entry["secret_ref_or_fp"], fields, source="handoff", via=via, call=call)
 
@@ -58,13 +61,15 @@ def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, cal
     values = {f":{k}": v for k, v in first.items()}
     sets = ", ".join(f"#{k} = if_not_exists(#{k}, :{k})" for k in first)
     try:
-        _table().update_item(
+        response = _table().update_item(
             Key={"agent_id": agent_id, "secret_ref_or_fp": key},
             UpdateExpression=f"SET {sets}, last_seen = :now ADD seen_in :calls",
             ConditionExpression="attribute_not_exists(seen_in) OR NOT contains(seen_in, :call)",
             ExpressionAttributeNames=names,
             ExpressionAttributeValues={**values, ":now": utc_now_iso(), ":calls": {call}, ":call": call},
+            ReturnValues="ALL_OLD",
         )
     except _table().meta.client.exceptions.ConditionalCheckFailedException:
-        return False
-    return True
+        return False  # interceptor retry: this call is already in seen_in
+    # ALL_OLD returns the entry as it was before this write: nothing means it is new.
+    return not response.get("Attributes")

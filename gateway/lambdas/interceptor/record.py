@@ -1,7 +1,8 @@
 """RESPONSE step for tools/call: record every credential the agent is about to see.
 
 Tool output is scanned before the agent gets it. Each credential found is added
-to the agent's ledger (burn-exposures) and announced with a "recorded" event.
+to the agent's ledger (burn-exposures); the first time an agent sees a credential
+it is announced with a "recorded" event.
 Burn does not redact: the agent may legitimately need what it read. The point
 is to know, at burn time, exactly which credentials this agent has seen.
 """
@@ -44,7 +45,7 @@ def record_tool_output(event: dict, session: dict, tool: str, status: int, reply
     call = shapes.call_key(event)
     for finding in findings.values():
         if not ledger.record(agent_id, finding, source="tool_response", via=tool, call=call):
-            continue  # this call was already recorded (interceptor retry)
+            continue  # already in the ledger: last_seen/seen_in updated, nothing new to announce
         sessions.put_event(make_event(
             agent_id=agent_id, source="tool_response", action="recorded", session_id=session["session_id"],
             tool=tool, secret_ref=finding.secret_ref, fingerprint=finding.fingerprint,
