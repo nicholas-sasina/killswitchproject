@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://burn.example/contracts/scenario.schema.json",
+  "title": "Burn demo scenario",
+  "description": "Format of /agents/scenarios/*.yaml. All scenario-specific data (agent ids, tickets, files, customers) lives here, never in code. The scenario loader writes it to the burn-scenario table; tool Lambdas and the Burn API read it from there. A second scenario must run through the same code unchanged.",
+  "type": "object",
+  "required": ["name", "agents", "tickets"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9-]{1,40}$" },
+    "description": { "type": "string" },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "role", "tools", "credentials", "instructions"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^agent-[a-z0-9-]{1,40}$" },
+          "role": { "type": "string", "description": "Short label for the dashboard, e.g. reader." },
+          "tools": {
+            "type": "array",
+            "description": "MCP tools this agent may call (names from contracts/mcp-tools.json). Enforced by the pre-call interceptor.",
+            "items": { "type": "string" }
+          },
+          "send_to": {
+            "type": "array",
+            "description": "Agents this agent may send_message to (the fixed graph).",
+            "items": { "type": "string" }
+          },
+          "credentials": {
+            "type": "array",
+            "description": "Own credentials minted for this agent at session start.",
+            "items": { "type": "string", "enum": ["api_key", "aws_key"] }
+          },
+          "instructions": { "type": "string", "description": "System prompt for this agent." }
+        }
+      }
+    },
+    "shared_credentials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "template"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9_]{1,40}$" },
+          "type": { "type": "string", "enum": ["other", "api_key"] },
+          "template": { "type": "string", "description": "{random} is replaced by the minter with fresh random characters." }
+        }
+      }
+    },
+    "tickets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "subject", "body"],
+        "properties": {
+          "id": { "type": "string" },
+          "subject": { "type": "string" },
+          "body": { "type": "string" },
+          "customer_id": { "type": "string" }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "description": "Files read_config can return. Content may contain credential placeholders; see contracts/README.md#placeholders.",
+      "items": {
+        "type": "object",
+        "required": ["path", "content"],
+        "properties": {
+          "path": { "type": "string" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    "customers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "email"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "email": { "type": "string" },
+          "plan": { "type": "string" },
+          "notes": { "type": "string", "description": "May contain placeholders, e.g. a leaked connection string in a debug note." }
+        }
+      }
+    }
+  }
+}

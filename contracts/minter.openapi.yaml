@@ -1,0 +1,126 @@
+openapi: 3.0.3
+info:
+  title: Burn credential minter (internal)
+  version: 1.0.0
+  description: |
+    Internal API. Called by the Burn API and by the scenario loader, never by agents.
+
+    Transport: direct Lambda invoke of the `burn-minter` function (no HTTP endpoint), with an
+    HTTP-shaped event so it could sit behind API Gateway later without code changes:
+
+        request  -> {"method": "POST", "path": "/agents/agent-reader/credentials", "body": {...}}
+        response <- {"statusCode": 200, "body": {...}}
+
+    Mock: /mocks/minter_mock.py (same function signature, in-memory).
+
+    The minter is the only component that writes credential VALUES (to Secrets Manager).
+    It registers fingerprints for every value it creates (see contracts/README.md#fingerprints).
+paths:
+  /agents/{agent_id}/credentials:
+    post:
+      summary: Issue the agent's own credentials. Idempotent - existing active credentials are returned, not re-minted.
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [types]
+              properties:
+                types:
+                  type: array
+                  items: { type: string, enum: [aws_key, api_key] }
+                  example: [api_key, aws_key]
+      responses:
+        '200':
+          description: Credentials (references only, never values)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items:
+                      type: object
+                      required: [secret_ref, type, owner, version]
+                      properties:
+                        secret_ref: { type: string, example: burn/agent-reader/api_key }
+                        type: { type: string, enum: [aws_key, api_key] }
+                        owner: { type: string, enum: [agent] }
+                        version: { type: integer }
+                        expires_at: { type: string, format: date-time, nullable: true }
+    delete:
+      summary: Delete all of the agent's credentials (demo reset / teardown).
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: array, items: { type: string } }
+  /agents/{agent_id}/rotate:
+    post:
+      summary: Rotate every credential the agent owns; flag the other credentials it was exposed to.
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                exposed_refs:
+                  type: array
+                  description: secret_refs from the agent's ledger (the Burn API passes these in).
+                  items: { type: string }
+      responses:
+        '200':
+          description: Rotation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rotated, flagged]
+                properties:
+                  rotated: { type: array, items: { type: string } }
+                  flagged: { type: array, items: { type: string } }
+  /shared/credentials:
+    post:
+      summary: Issue a shared credential (used by several agents). Idempotent by name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, template]
+              properties:
+                name: { type: string, pattern: '^[a-z0-9_]{1,40}$', example: crm_db_url }
+                type: { type: string, enum: [other, api_key] }
+                template:
+                  type: string
+                  description: 'Value template from the scenario file. {random} is replaced with 24 random [A-Za-z0-9] chars.'
+                  example: 'postgres://svc_crm:{random}@crm-db.internal.example:5432/crm'
+      responses:
+        '200':
+          description: Shared credential reference
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret_ref: { type: string, example: burn/shared/crm_db_url }
+                  version: { type: integer }
+    delete:
+      summary: Delete all shared credentials (demo reset / teardown).
+      responses:
+        '200': { description: Deleted }

@@ -1,0 +1,38 @@
+# Minimal scenario used by contract tests and the mocks.
+# Real demo scenarios live in /agents/scenarios/. Placeholders are resolved at
+# read time from freshly minted credentials; no value is ever stored here.
+name: minimal
+description: Two agents, one ticket, one config file with live credentials.
+agents:
+  - id: agent-alpha
+    role: reader
+    tools: [list_tickets, read_ticket, read_config, send_message]
+    send_to: [agent-beta]
+    credentials: [api_key, aws_key]
+    instructions: Read the open ticket and the file it mentions, then summarize it for agent-beta.
+  - id: agent-beta
+    role: notifier
+    tools: [read_inbox, notify]
+    credentials: [api_key]
+    instructions: Read your inbox and notify the customer.
+shared_credentials:
+  - name: crm_db_url
+    type: other
+    template: "postgres://svc_crm:{random}@crm-db.internal.example:5432/crm"
+tickets:
+  - id: T-1
+    subject: App cannot reach the provider API
+    body: Errors since this morning. Config is at config/app.env.
+    customer_id: C-1
+files:
+  - path: config/app.env
+    content: |
+      PROVIDER_API_KEY={{cred:agent-alpha:api_key}}
+      AWS_ACCESS_KEY_ID={{cred:agent-alpha:aws_key.access_key_id}}
+      AWS_SECRET_ACCESS_KEY={{cred:agent-alpha:aws_key.secret_access_key}}
+      CRM_DB_URL={{cred:shared:crm_db_url}}
+customers:
+  - id: C-1
+    name: Dana Example
+    email: dana@example.com
+    plan: pro
