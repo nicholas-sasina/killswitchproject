@@ -8,10 +8,10 @@ export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
 
 # Folders with a Python test suite (each has its own uv project).
-PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval
+PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli
 
 .DEFAULT_GOAL := help
-.PHONY: help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks leak-test proxy-env eval teardown
+.PHONY: burn help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks leak-test proxy-env eval teardown
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -65,6 +65,9 @@ mocks: ## Start the mock Burn API (:8700) and mock MCP tools (:8701), developmen
 
 proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
+
+burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
+	cd cli && uv run burn $(ARGS)
 
 leak-test: ## Start the leak-test tool on http://localhost:8787 (a TEST TOOL)
 	cd detection && BURN_PROXY_CA_CERT=$(CURDIR)/.run/proxy-certs/mitmproxy-ca-cert.pem uv run --python 3.12 --env-file ../.env --extra leaktest uvicorn leaktest.app:app --host 127.0.0.1 --port 8787 --no-access-log

@@ -26,6 +26,7 @@ credential the agent held or saw, without touching any other agent or service.
 | `detection/` | Shared detector library and the egress proxy (mitmproxy addon). |
 | `burn_api/` | Burn API Lambdas: sessions, burn, blast radius, events. |
 | `agents/` | Strands agents, scenarios, docker-compose. |
+| `cli/` | `burn` command-line client for the Burn API. |
 | `dashboard/` | React + Vite dashboard. |
 | `eval/` | Catch rate, false positives, latency, load test, cost. |
 | `docs/` | Architecture, runbook, demo script. |
