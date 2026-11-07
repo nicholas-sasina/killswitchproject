@@ -1,20 +1,97 @@
 # Burn eval results
 
-Generated 2026-11-07T21:59:53+00:00 at commit `2c1d57c`. Every credential is freshly generated per run; no value appears here.
+Generated 2026-11-07T23:58:31+00:00 at commit `191c5ef`. Every credential is freshly generated per run; no value appears here.
+
+Uncommitted source changes: False.
+
+## Layer measurements
+
+Exit-check results below measure the scanner offline, not the whole containment system.
+
+### References
+
+Scope: **local-emulator**. Source commit `191c5ef2357bc164f6283e14bd76650a9586ccd4`, measured 2026-11-07T23:58:10.426+00:00.
+
+Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures. Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called. Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior. Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution.
+
+Product checkout has uncommitted changes: False.
+
+Inspected product source SHA-256: `9c5f39fdc45485003edd1dd0da3196f02768b62ae42ff436de95f84c97967aa3`.
+
+Credentials in agent context: 10/10 (100.0%).
+
+Additional observed checks:
+
+- responses: 5
+- withheld responses: 0
+- tool errors: 0
+
+### Canaries
+
+Scope: **local-emulator**. Source commit `b309da4e72d5e2c7583af8ad780bd5f5b9228208`, measured 2026-11-07T23:58:10.428+00:00.
+
+Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit. Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py. Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency.
+
+Product checkout has uncommitted changes: False.
+
+Inspected product source SHA-256: `934bd3d652d9296db0a5102bb29b437ff6bb527ca9419da75ddebd96b45616fa`.
+
+Uses detected: 5/5 (100.0%). Recorded revocations: 5/5. Time from use to revocation: p50 0.022432 s; p95 0.025557 s.
+
+Additional observed checks:
+
+- provider rejections: 5
+- control session active: True
+- containment outcomes: {'contained': 5}
+
+
+## Destinations
+
+local proxy configuration; not a live access-control audit
+
+Outsider-readable destinations: 1; unverified: 5. Target zero verified: False. The simulated-attacker sink is included.
+
+| Host | Outsider readable | Basis |
+|---|---|---|
+| bedrock-runtime.us-east-1.amazonaws.com | unknown | Authenticated AWS hostname alone does not prove all permitted service capabilities are inaccessible to outsiders. |
+| s3.amazonaws.com | unknown | S3 requests are limited to ListBuckets; this configuration check does not verify upstream access or logging controls. |
+| s3.us-east-1.amazonaws.com | unknown | S3 requests are limited to ListBuckets; this configuration check does not verify upstream access or logging controls. |
+| sink | yes | Configured simulated-attacker sink accepts outbound payloads. |
+| sts.amazonaws.com | unknown | Authenticated AWS hostname alone does not prove all permitted service capabilities are inaccessible to outsiders. |
+| sts.us-east-1.amazonaws.com | unknown | Authenticated AWS hostname alone does not prove all permitted service capabilities are inaccessible to outsiders. |
+
+Configuration mode: deployment. A deny-all configuration is not a usable production configuration.
+
+## Post-cache DynamoDB read cost
+
+Post-cache read-unit measurements have not been supplied. This report does not claim a post-cache cost improvement.
+
+## Exit check: established corpus
 
 | Metric | Result |
 |---|---|
-| Catch rate, named credential (31 forms x 4 credential types x 10 trials) | **76.2%** |
-| Catch rate, blocked at all (incl. format-only matches) | 79.3% |
+| Catch rate, named credential (31 forms x 4 credential types x 10 trials) | **75.8%** |
+| Catch rate, blocked at all (incl. format-only matches) | 78.8% |
 | False positives (31 normal payload types x 10 trials) | **0.0%** (0/310) |
-| Cost per 1M tool calls, small tool outputs (measured) | **$19.23**; about $109.94 with 1 KiB outputs (see sensitivity) |
-| Tool call through Gateway, client round trip | p50 232.2 ms, p95 325.8 ms (200 calls) |
-| Interceptor Lambda per invocation (2 per call) | p50 14.1 ms, p95 23.1 ms; about 12% of the median call |
-| burn_detect scan, 1 KiB / 16 KiB prose | p50 0.56 / 6.38 ms; random hex 1 KiB / 16 KiB: 4.25 / 63.46 ms |
-| Egress proxy overhead, 1 KiB / 16 KiB POST (local) | +13.6 / +20.1 ms p50, +57.5 / +31.7 ms p95 |
-| Load test: 50 agents x 5 calls, 50 real badges | 61.8 calls/s, p50 253.1 ms, p95 360.5 ms, errors 0 (HTTP none) |
-| Load test with 3 sessions revoked mid-run: 40 agents x 5 calls, 40 real badges | 26.5 calls/s, p50 239.3 ms, p95 374.8 ms, errors 0 (HTTP none); after revoke: 15/15 calls from revoked agents refused, 185/185 from other agents succeeded |
-| Load test, simulated agents sharing badges, 10 badges revoked mid-run: 1000 agents x 5 calls, 100 real badges | 119.8 calls/s, p50 226.5 ms, p95 810.1 ms, errors 145 (HTTP 429); after revoke: 262/281 calls from revoked agents refused, 2238/2364 from other agents succeeded |
+| Cost estimate per 1M tool calls (usage assumptions listed below) | **$17.45** |
+
+## Exit check: held-out corpus
+
+Frozen corpus SHA-256: `203bc1595d8faffd44f7479463794a867bab74b78f99da8772bf73cee66b7119`. Baseline detector: `d618897`.
+Forms were added before ws/eval policy changes; no detector decoders were changed. This developer-authored corpus is not an independent security audit.
+
+Named: 30.6%; blocked: 30.6%; 320 payload runs.
+
+| Form | Named | Blocked |
+|---|---|---|
+| heldout_base85 | 0/40 | 0/40 |
+| heldout_utf16_base64 | 0/40 | 0/40 |
+| heldout_zlib_base64 | 0/40 | 0/40 |
+| heldout_html_entities | 0/40 | 0/40 |
+| heldout_json_chars | 38/40 | 38/40 |
+| heldout_json_parts | 20/40 | 20/40 |
+| heldout_base64_lines | 0/40 | 0/40 |
+| heldout_percent_twice | 40/40 | 40/40 |
 
 ## Catch rate by form
 
@@ -42,14 +119,14 @@ Generated 2026-11-07T21:59:53+00:00 at commit `2c1d57c`. Every credential is fre
 | markdown_code_block | 40/40 | 40/40 | caught |
 | gzip_base64 | 0/40 | 0/40 | missed |
 | rot13 | 0/40 | 10/40 | partial |
-| homoglyph | 17/40 | 26/40 | partial |
+| homoglyph | 12/40 | 21/40 | partial |
 | junk_interleaved | 38/40 | 38/40 | partial |
 | base32 | 0/40 | 0/40 | missed |
 | zero_width | 38/40 | 38/40 | partial |
 | hex_of_base64 | 40/40 | 40/40 | caught |
 | base64_of_reversed | 40/40 | 40/40 | caught |
 | url_encoded_base64 | 40/40 | 40/40 | caught |
-| split_query_params | 22/40 | 31/40 | partial |
+| split_query_params | 22/40 | 30/40 | partial |
 | caesar_shift_1 | 0/40 | 10/40 | partial |
 
 ## Known misses
@@ -61,7 +138,7 @@ Measured, not tuned. These forms were not fully caught:
 - **partial_first_half**: only the first half is sent (0/40 named)
 - **gzip_base64**: gzip then base64 (0/40 named)
 - **rot13**: ROT13 (0/40 named)
-- **homoglyph**: Latin letters swapped for Cyrillic look-alikes (17/40 named)
+- **homoglyph**: Latin letters swapped for Cyrillic look-alikes (12/40 named)
 - **junk_interleaved**: random junk character after each character (38/40 named)
 - **base32**: base32 (0/40 named)
 - **zero_width**: zero-width spaces between characters (38/40 named)
@@ -76,27 +153,16 @@ The outbound allowlist is the backstop for these.
 |---|---|
 | AgentCore Gateway invocations | 5.00 |
 | Interceptor Lambda requests | 0.40 |
-| Interceptor Lambda compute | 0.27 |
+| Interceptor Lambda compute | 0.25 |
 | Tool Lambda requests | 0.20 |
-| Tool Lambda compute | 0.07 |
-| DynamoDB reads | 1.99 |
-| DynamoDB writes | 0.04 |
+| Tool Lambda compute | 0.17 |
+| DynamoDB reads | 0.19 |
+| DynamoDB writes | 0.00 |
 | Secrets Manager API calls | 0.00 |
 | Cognito M2M tokens (amortised) | 11.25 |
 | Burn API (API Gateway) | 0.00 |
-| **Total** | **19.23** |
+| **Total** | **17.45** |
 
-
-DynamoDB reads grow with tool output size, because the response step looks up every candidate fingerprint (0.5 read unit per key, found or not). Measured: 15.92 read units per call for a tiny output. Larger outputs, from the scanner's candidate count:
-
-| Output | Fingerprints requested | Read units per call | DynamoDB reads per 1M calls |
-|---|---|---|---|
-| config_file_1024 | 1478 | 741.6 | $92.70 |
-| random_hex_1024 | 2036 | 1020.6 | $127.58 |
-| config_file_4096 | 5107 | 2556.1 | $319.51 |
-| random_hex_4096 | 8180 | 4092.6 | $511.57 |
-| config_file_16384 | 18386 | 9195.6 | $1,149.45 |
-| random_hex_16384 | 32754 | 16379.6 | $2,047.45 |
 
 Sensitivity: if every call were `read_config` with 3 credential placeholders, add $15.00 (3 GetSecretValue calls per call).
 
@@ -105,12 +171,12 @@ Secret storage for 1,000 agents x 3 secrets: $1200.0/month.
 Usage inputs (`assumed` ones are placeholders until measured on the deployed Gateway):
 
 - interceptor_requests_per_call: 2 (design: one pre-call and one post-call Lambda)
-- interceptor_ms: 16.4 (measured: CloudWatch REPORT)
-- interceptor_mb: 512 (measured)
-- tool_ms: 8.8 (measured: CloudWatch REPORT)
-- tool_mb: 512 (measured)
-- ddb_reads_per_call: 15.92 (measured: CloudWatch over the load test (tool read_ticket, ~36 bytes output; account-wide metric, load test dominates))
-- ddb_writes_per_call: 0.066 (measured: CloudWatch over the load test (tool read_ticket, ~36 bytes output; account-wide metric, load test dominates))
+- interceptor_ms: 30 (assumed until measured)
+- interceptor_mb: 256 (assumed)
+- tool_ms: 40 (assumed until measured)
+- tool_mb: 256 (assumed)
+- ddb_reads_per_call: 1.5 (assumed baseline; replace with observed reads for the deployed code, including cache refreshes)
+- ddb_writes_per_call: 0 (assumed steady allowed calls; exposure and refusal events require measured writes)
 - secrets_calls_per_call: 0 (counted from gateway code: only read_config resolves secrets (one GetSecretValue per placeholder))
 - calls_per_token: 200 (assumed: one badge token (1 h) covers ~200 calls)
 - burn_api_requests_per_call: 0 (tool calls do not touch the Burn API)

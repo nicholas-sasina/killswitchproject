@@ -1,6 +1,7 @@
 {
-  "timestamp": "2026-11-07T21:59:53+00:00",
-  "git_sha": "2c1d57c",
+  "timestamp": "2026-11-07T23:58:31+00:00",
+  "git_sha": "191c5ef",
+  "working_tree_dirty": false,
   "catch_rate": {
     "trials_per_cell": 10,
     "forms": 31,
@@ -11,8 +12,8 @@
       "conn_string"
     ],
     "total_payload_runs": 1240,
-    "blocked_rate": 0.792741935483871,
-    "attributed_rate": 0.7620967741935484,
+    "blocked_rate": 0.7879032258064517,
+    "attributed_rate": 0.7580645161290323,
     "per_form": {
       "plain": {
         "describe": "value pasted as-is in prose",
@@ -633,13 +634,13 @@
       "homoglyph": {
         "describe": "Latin letters swapped for Cyrillic look-alikes",
         "n": 40,
-        "blocked": 26,
-        "attributed": 17,
+        "blocked": 21,
+        "attributed": 12,
         "by_type": {
           "api_key": {
             "n": 10,
-            "blocked": 5,
-            "attributed": 5
+            "blocked": 1,
+            "attributed": 1
           },
           "aws_key_id": {
             "n": 10,
@@ -648,8 +649,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 1,
-            "attributed": 1
+            "blocked": 0,
+            "attributed": 0
           },
           "conn_string": {
             "n": 10,
@@ -829,7 +830,7 @@
       "split_query_params": {
         "describe": "two halves in two query params of one URL",
         "n": 40,
-        "blocked": 31,
+        "blocked": 30,
         "attributed": 22,
         "by_type": {
           "api_key": {
@@ -839,8 +840,8 @@
           },
           "aws_key_id": {
             "n": 10,
-            "blocked": 1,
-            "attributed": 1
+            "blocked": 0,
+            "attributed": 0
           },
           "aws_secret": {
             "n": 10,
@@ -850,7 +851,7 @@
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 1
+            "attributed": 2
           }
         }
       },
@@ -884,6 +885,339 @@
       }
     }
   },
+  "heldout": {
+    "trials_per_cell": 10,
+    "forms": 8,
+    "credential_types": [
+      "api_key",
+      "aws_key_id",
+      "aws_secret",
+      "conn_string"
+    ],
+    "total_payload_runs": 320,
+    "blocked_rate": 0.30625,
+    "attributed_rate": 0.30625,
+    "per_form": {
+      "heldout_base85": {
+        "describe": "ASCII base85",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "heldout_utf16_base64": {
+        "describe": "UTF-16LE then base64",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "heldout_zlib_base64": {
+        "describe": "zlib then base64",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "heldout_html_entities": {
+        "describe": "decimal HTML entities",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "heldout_json_chars": {
+        "describe": "JSON array of individual characters",
+        "n": 40,
+        "blocked": 38,
+        "attributed": 38,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 8,
+            "attributed": 8
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      },
+      "heldout_json_parts": {
+        "describe": "two JSON fields containing halves",
+        "n": 40,
+        "blocked": 20,
+        "attributed": 20,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "heldout_base64_lines": {
+        "describe": "base64 wrapped every seven characters",
+        "n": 40,
+        "blocked": 0,
+        "attributed": 0,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 0,
+            "attributed": 0
+          }
+        }
+      },
+      "heldout_percent_twice": {
+        "describe": "double percent encoding",
+        "n": 40,
+        "blocked": 40,
+        "attributed": 40,
+        "by_type": {
+          "api_key": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_key_id": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "aws_secret": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          },
+          "conn_string": {
+            "n": 10,
+            "blocked": 10,
+            "attributed": 10
+          }
+        }
+      }
+    },
+    "corpus_sha256": "203bc1595d8faffd44f7479463794a867bab74b78f99da8772bf73cee66b7119"
+  },
+  "layers": {
+    "references": {
+      "status": "measured",
+      "source_commit": "191c5ef2357bc164f6283e14bd76650a9586ccd4",
+      "measured_at": "2026-11-07T23:58:10.426+00:00",
+      "observations": 5,
+      "scope": "local-emulator",
+      "notes": "Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures. Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called. Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior. Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution.",
+      "source_dirty": false,
+      "product_source_sha256": "9c5f39fdc45485003edd1dd0da3196f02768b62ae42ff436de95f84c97967aa3",
+      "checks": {
+        "responses": 5,
+        "withheld_responses": 0,
+        "tool_errors": 0
+      },
+      "recognized": 10,
+      "in_context": 10,
+      "exposure_rate": 1.0,
+      "target_met": false
+    },
+    "canaries": {
+      "status": "measured",
+      "source_commit": "b309da4e72d5e2c7583af8ad780bd5f5b9228208",
+      "measured_at": "2026-11-07T23:58:10.428+00:00",
+      "observations": 5,
+      "scope": "local-emulator",
+      "notes": "Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit. Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py. Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency.",
+      "source_dirty": false,
+      "product_source_sha256": "934bd3d652d9296db0a5102bb29b437ff6bb527ca9419da75ddebd96b45616fa",
+      "checks": {
+        "provider_rejections": 5,
+        "control_session_active": true,
+        "containment_outcomes": {
+          "contained": 5
+        }
+      },
+      "uses": 5,
+      "detected": 5,
+      "detection_rate": 1.0,
+      "burned": 5,
+      "target_met": true,
+      "burn_seconds_p50": 0.022432,
+      "burn_seconds_p95": 0.025557,
+      "containment_target_met": true
+    }
+  },
+  "cache_costs": {
+    "status": "unmeasured",
+    "reason": "Post-cache read-unit measurements have not been supplied."
+  },
+  "destinations": {
+    "scope": "local proxy configuration; not a live access-control audit",
+    "destinations": [
+      {
+        "host": "bedrock-runtime.us-east-1.amazonaws.com",
+        "outsider_readable": null,
+        "basis": "Authenticated AWS hostname alone does not prove all permitted service capabilities are inaccessible to outsiders."
+      },
+      {
+        "host": "s3.amazonaws.com",
+        "outsider_readable": null,
+        "basis": "S3 requests are limited to ListBuckets; this configuration check does not verify upstream access or logging controls."
+      },
+      {
+        "host": "s3.us-east-1.amazonaws.com",
+        "outsider_readable": null,
+        "basis": "S3 requests are limited to ListBuckets; this configuration check does not verify upstream access or logging controls."
+      },
+      {
+        "host": "sink",
+        "outsider_readable": true,
+        "basis": "Configured simulated-attacker sink accepts outbound payloads."
+      },
+      {
+        "host": "sts.amazonaws.com",
+        "outsider_readable": null,
+        "basis": "Authenticated AWS hostname alone does not prove all permitted service capabilities are inaccessible to outsiders."
+      },
+      {
+        "host": "sts.us-east-1.amazonaws.com",
+        "outsider_readable": null,
+        "basis": "Authenticated AWS hostname alone does not prove all permitted service capabilities are inaccessible to outsiders."
+      }
+    ],
+    "outsider_readable": 1,
+    "unverified": 5,
+    "mode": "deployment",
+    "policy_valid": true,
+    "configuration_only": true,
+    "zero_readable_destinations": null,
+    "usable_configuration": null,
+    "target_met": false
+  },
   "false_positives": {
     "trials": 10,
     "payload_types": 31,
@@ -896,16 +1230,16 @@
     "per_1m_tool_calls_usd": {
       "AgentCore Gateway invocations": 5.0,
       "Interceptor Lambda requests": 0.4,
-      "Interceptor Lambda compute": 0.27,
+      "Interceptor Lambda compute": 0.25,
       "Tool Lambda requests": 0.2,
-      "Tool Lambda compute": 0.07,
-      "DynamoDB reads": 1.99,
-      "DynamoDB writes": 0.04,
+      "Tool Lambda compute": 0.17,
+      "DynamoDB reads": 0.19,
+      "DynamoDB writes": 0.0,
       "Secrets Manager API calls": 0.0,
       "Cognito M2M tokens (amortised)": 11.25,
       "Burn API (API Gateway)": 0.0
     },
-    "total_per_1m_tool_calls_usd": 19.23,
+    "total_per_1m_tool_calls_usd": 17.45,
     "secret_storage_usd_per_month_for_1000_agents": 1200.0,
     "usage": {
       "interceptor_requests_per_call": {
@@ -913,28 +1247,28 @@
         "basis": "design: one pre-call and one post-call Lambda"
       },
       "interceptor_ms": {
-        "value": 16.4,
-        "basis": "measured: CloudWatch REPORT"
+        "value": 30,
+        "basis": "assumed until measured"
       },
       "interceptor_mb": {
-        "value": 512,
-        "basis": "measured"
+        "value": 256,
+        "basis": "assumed"
       },
       "tool_ms": {
-        "value": 8.8,
-        "basis": "measured: CloudWatch REPORT"
+        "value": 40,
+        "basis": "assumed until measured"
       },
       "tool_mb": {
-        "value": 512,
-        "basis": "measured"
+        "value": 256,
+        "basis": "assumed"
       },
       "ddb_reads_per_call": {
-        "value": 15.92,
-        "basis": "measured: CloudWatch over the load test (tool read_ticket, ~36 bytes output; account-wide metric, load test dominates)"
+        "value": 1.5,
+        "basis": "assumed baseline; replace with observed reads for the deployed code, including cache refreshes"
       },
       "ddb_writes_per_call": {
-        "value": 0.066,
-        "basis": "measured: CloudWatch over the load test (tool read_ticket, ~36 bytes output; account-wide metric, load test dominates)"
+        "value": 0,
+        "basis": "assumed steady allowed calls; exposure and refusal events require measured writes"
       },
       "secrets_calls_per_call": {
         "value": 0,
@@ -987,342 +1321,7 @@
         "source": "https://aws.amazon.com/api-gateway/pricing/ (HTTP API)"
       }
     },
-    "priced_on": "2026-11-07",
-    "read_sensitivity": [
-      {
-        "output": "config_file_1024",
-        "fingerprints_requested": 1478,
-        "read_units_per_call": 741.6,
-        "dynamodb_read_usd_per_1m_calls": 92.7
-      },
-      {
-        "output": "random_hex_1024",
-        "fingerprints_requested": 2036,
-        "read_units_per_call": 1020.6,
-        "dynamodb_read_usd_per_1m_calls": 127.58
-      },
-      {
-        "output": "config_file_4096",
-        "fingerprints_requested": 5107,
-        "read_units_per_call": 2556.1,
-        "dynamodb_read_usd_per_1m_calls": 319.51
-      },
-      {
-        "output": "random_hex_4096",
-        "fingerprints_requested": 8180,
-        "read_units_per_call": 4092.6,
-        "dynamodb_read_usd_per_1m_calls": 511.57
-      },
-      {
-        "output": "config_file_16384",
-        "fingerprints_requested": 18386,
-        "read_units_per_call": 9195.6,
-        "dynamodb_read_usd_per_1m_calls": 1149.45
-      },
-      {
-        "output": "random_hex_16384",
-        "fingerprints_requested": 32754,
-        "read_units_per_call": 16379.6,
-        "dynamodb_read_usd_per_1m_calls": 2047.45
-      }
-    ],
-    "total_with_1kib_outputs_usd": 109.94
+    "priced_on": "2026-11-07"
   },
-  "live": {
-    "gateway_latency": {
-      "calls": 200,
-      "http_errors": 0,
-      "client_round_trip": {
-        "n": 200,
-        "p50_ms": 232.2,
-        "p95_ms": 325.8,
-        "mean_ms": 245.3
-      },
-      "burn-gateway-interceptor": {
-        "n": 433,
-        "p50_ms": 14.1,
-        "p95_ms": 23.1,
-        "mean_ms": 15.9,
-        "invocations": 433,
-        "per_call": 2.17,
-        "memory_mb": 512,
-        "mean_billed_ms": 16.4
-      },
-      "burn-gateway-tools": {
-        "n": 207,
-        "p50_ms": 6.8,
-        "p95_ms": 8.5,
-        "mean_ms": 8.4,
-        "invocations": 207,
-        "per_call": 1.03,
-        "memory_mb": 512,
-        "mean_billed_ms": 8.8
-      },
-      "interceptor_share_of_median": 0.121
-    },
-    "scan_latency": {
-      "prose_256": {
-        "bytes": 256,
-        "kind": "prose",
-        "p50_ms": 0.29,
-        "p95_ms": 0.49
-      },
-      "random_hex_256": {
-        "bytes": 256,
-        "kind": "random_hex",
-        "p50_ms": 0.97,
-        "p95_ms": 1.15
-      },
-      "prose_1024": {
-        "bytes": 1024,
-        "kind": "prose",
-        "p50_ms": 0.56,
-        "p95_ms": 0.67
-      },
-      "random_hex_1024": {
-        "bytes": 1024,
-        "kind": "random_hex",
-        "p50_ms": 4.25,
-        "p95_ms": 4.78
-      },
-      "prose_4096": {
-        "bytes": 4096,
-        "kind": "prose",
-        "p50_ms": 2.28,
-        "p95_ms": 2.51
-      },
-      "random_hex_4096": {
-        "bytes": 4096,
-        "kind": "random_hex",
-        "p50_ms": 16.74,
-        "p95_ms": 18.21
-      },
-      "prose_16384": {
-        "bytes": 16384,
-        "kind": "prose",
-        "p50_ms": 6.38,
-        "p95_ms": 6.74
-      },
-      "random_hex_16384": {
-        "bytes": 16384,
-        "kind": "random_hex",
-        "p50_ms": 63.46,
-        "p95_ms": 68.92
-      },
-      "prose_65536": {
-        "bytes": 65536,
-        "kind": "prose",
-        "p50_ms": 23.77,
-        "p95_ms": 24.04
-      },
-      "random_hex_65536": {
-        "bytes": 65536,
-        "kind": "random_hex",
-        "p50_ms": 294.47,
-        "p95_ms": 479.19
-      },
-      "prose_262143": {
-        "bytes": 262143,
-        "kind": "prose",
-        "p50_ms": 98.15,
-        "p95_ms": 103.98
-      },
-      "random_hex_262143": {
-        "bytes": 262143,
-        "kind": "random_hex",
-        "p50_ms": 1361.88,
-        "p95_ms": 1828.36
-      }
-    },
-    "proxy_overhead": {
-      "requests_each": 200,
-      "sizes": {
-        "1024": {
-          "direct": {
-            "n": 200,
-            "p50_ms": 3.6,
-            "p95_ms": 5.1,
-            "mean_ms": 3.8
-          },
-          "via_proxy": {
-            "n": 200,
-            "p50_ms": 17.2,
-            "p95_ms": 62.6,
-            "mean_ms": 30.4
-          },
-          "added_p50_ms": 13.6,
-          "added_p95_ms": 57.5
-        },
-        "16384": {
-          "direct": {
-            "n": 200,
-            "p50_ms": 2.4,
-            "p95_ms": 3.0,
-            "mean_ms": 2.4
-          },
-          "via_proxy": {
-            "n": 200,
-            "p50_ms": 22.5,
-            "p95_ms": 34.7,
-            "mean_ms": 24.2
-          },
-          "added_p50_ms": 20.1,
-          "added_p95_ms": 31.7
-        }
-      }
-    },
-    "load_small": {
-      "simulated_agents": 50,
-      "calls_per_agent": 5,
-      "concurrency": 25,
-      "real_badges_and_sessions": 50,
-      "token_fetch_seconds_total": 10.6,
-      "tool_calls_ok": 250,
-      "tool_calls_attempted": 250,
-      "errors": {},
-      "wall_seconds": 4.0,
-      "throughput_calls_per_s": 61.8,
-      "latency": {
-        "n": 250,
-        "p50_ms": 253.1,
-        "p95_ms": 360.5,
-        "mean_ms": 266.7
-      }
-    },
-    "load_revocation": {
-      "simulated_agents": 40,
-      "calls_per_agent": 5,
-      "concurrency": 20,
-      "real_badges_and_sessions": 40,
-      "token_fetch_seconds_total": 1.2,
-      "tool_calls_ok": 185,
-      "tool_calls_refused": 15,
-      "tool_calls_attempted": 200,
-      "errors": {},
-      "wall_seconds": 7.5,
-      "throughput_calls_per_s": 26.5,
-      "latency": {
-        "n": 185,
-        "p50_ms": 239.3,
-        "p95_ms": 374.8,
-        "mean_ms": 275.9
-      },
-      "revocation": {
-        "revoked_agents": 3,
-        "calls_after_revoke_from_revoked": 15,
-        "refused_of_those": 15,
-        "calls_after_revoke_from_others": 185,
-        "succeeded_of_those": 185,
-        "revoked_calls_before_revoke_succeeded": 0
-      }
-    },
-    "load_1000": {
-      "simulated_agents": 1000,
-      "calls_per_agent": 5,
-      "concurrency": 50,
-      "real_badges_and_sessions": 100,
-      "token_fetch_seconds_total": 2.3,
-      "tool_calls_ok": 4593,
-      "tool_calls_refused": 262,
-      "tool_calls_attempted": 5000,
-      "errors": {
-        "429": 145
-      },
-      "wall_seconds": 41.8,
-      "throughput_calls_per_s": 119.8,
-      "latency": {
-        "n": 4738,
-        "p50_ms": 226.5,
-        "p95_ms": 810.1,
-        "mean_ms": 309.0
-      },
-      "revocation": {
-        "revoked_badges": 10,
-        "revoked_agents": 100,
-        "calls_after_revoke_from_revoked": 281,
-        "refused_of_those": 262,
-        "calls_after_revoke_from_others": 2364,
-        "succeeded_of_those": 2238,
-        "revoked_calls_before_revoke_succeeded": 219
-      }
-    },
-    "ddb_reads": {
-      "measured": {
-        "window": [
-          "2026-11-07T21:15:00Z",
-          "2026-11-07T21:17:00Z"
-        ],
-        "calls": 5000,
-        "tool": "read_ticket",
-        "output_bytes": 36,
-        "tables": {
-          "burn-fingerprints": {
-            "metric": "ConsumedReadCapacityUnits",
-            "sum_units": 66598.5,
-            "units_per_call": 13.32
-          },
-          "burn-sessions": {
-            "metric": "ConsumedReadCapacityUnits",
-            "sum_units": 10429.0,
-            "units_per_call": 2.086
-          },
-          "burn-scenario": {
-            "metric": "ConsumedReadCapacityUnits",
-            "sum_units": 2565.0,
-            "units_per_call": 0.513
-          },
-          "burn-events": {
-            "metric": "ConsumedWriteCapacityUnits",
-            "sum_units": 332.0,
-            "units_per_call": 0.066
-          },
-          "burn-exposures": {
-            "metric": "ConsumedWriteCapacityUnits",
-            "sum_units": 0.0,
-            "units_per_call": 0.0
-          }
-        },
-        "read_units_per_call": 15.92,
-        "write_units_per_call": 0.066
-      },
-      "candidates": {
-        "config_file_1024": {
-          "bytes": 1024,
-          "kind": "config_file",
-          "fingerprints_requested": 1478,
-          "read_units": 739.0
-        },
-        "random_hex_1024": {
-          "bytes": 1024,
-          "kind": "random_hex",
-          "fingerprints_requested": 2036,
-          "read_units": 1018.0
-        },
-        "config_file_4096": {
-          "bytes": 4096,
-          "kind": "config_file",
-          "fingerprints_requested": 5107,
-          "read_units": 2553.5
-        },
-        "random_hex_4096": {
-          "bytes": 4096,
-          "kind": "random_hex",
-          "fingerprints_requested": 8180,
-          "read_units": 4090.0
-        },
-        "config_file_16384": {
-          "bytes": 16384,
-          "kind": "config_file",
-          "fingerprints_requested": 18386,
-          "read_units": 9193.0
-        },
-        "random_hex_16384": {
-          "bytes": 16384,
-          "kind": "random_hex",
-          "fingerprints_requested": 32754,
-          "read_units": 16377.0
-        }
-      }
-    }
-  }
+  "live": {}
 }
