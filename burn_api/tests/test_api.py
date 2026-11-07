@@ -112,3 +112,16 @@ def test_blast_radius(env):
     assert status == 200 and len(body["events"]) == 2 and "lag" in body["note"]
     assert {k["key_ref"]: k["status"] for k in body["keys"]} == {
         "burn/agent-a/aws_key#v1": "inactive", "burn/agent-a/aws_key#v2": "active"}
+
+
+def test_preflight_needs_no_token_but_other_methods_do(env):
+    import handler
+    for path in ("/events", "/burn"):
+        event = {"requestContext": {"http": {"method": "OPTIONS", "path": path}},
+                 "headers": {"origin": "http://localhost:5173", "access-control-request-method": "POST"}}
+        out = handler.handler(event)
+        assert out["statusCode"] == 204
+        assert out["headers"]["access-control-allow-origin"] == "http://localhost:5173"
+        assert "x-burn-demo-token" in out["headers"]["access-control-allow-headers"]
+    assert call(env, "GET", "/events", token="")[0] == 401
+    assert call(env, "POST", "/burn", {"agent_id": "agent-a"}, token="")[0] == 401
