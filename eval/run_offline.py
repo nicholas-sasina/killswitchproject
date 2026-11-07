@@ -56,6 +56,10 @@ def with_sensitivity(result: dict, live: dict) -> dict:
         fp = d["measured"]["tables"]["burn-fingerprints"]["units_per_call"]
         result["read_sensitivity"] = cost.read_sensitivity(
             d["candidates"], d["measured"]["read_units_per_call"], fp, cost.PRICES["dynamodb_per_1m_read_units"][0])
+        # Same total with the DynamoDB read line replaced by the one for 1 KiB outputs.
+        row = next(r for r in result["read_sensitivity"] if r["output"] == "config_file_1024")
+        swapped = result["total_per_1m_tool_calls_usd"] - result["per_1m_tool_calls_usd"]["DynamoDB reads"]
+        result["total_with_1kib_outputs_usd"] = round(swapped + row["dynamodb_read_usd_per_1m_calls"], 2)
     return result
 
 
@@ -139,7 +143,9 @@ def markdown(r: dict) -> str:
         f"| Catch rate, named credential ({c['forms']} forms x 4 credential types x {c['trials_per_cell']} trials) | **{pct(c['attributed_rate'])}** |",
         f"| Catch rate, blocked at all (incl. format-only matches) | {pct(c['blocked_rate'])} |",
         f"| False positives ({f['payload_types']} normal payload types x {f['trials']} trials) | **{pct(f['false_positive_rate'])}** ({f['flagged']}/{f['total_payload_runs']}) |",
-        f"| Cost per 1M tool calls (see assumptions) | **${k['total_per_1m_tool_calls_usd']:,.2f}** |",
+        f"| Cost per 1M tool calls, small tool outputs (measured) | **${k['total_per_1m_tool_calls_usd']:,.2f}**"
+        + (f"; about ${k['total_with_1kib_outputs_usd']:,.2f} with 1 KiB outputs (see sensitivity)" if "total_with_1kib_outputs_usd" in k else "")
+        + " |",
     ]
     out += live_rows(r.get("live", {}))
     out += ["", "## Catch rate by form", "", "| Form | Named | Blocked | Result |", "|---|---|---|---|"]

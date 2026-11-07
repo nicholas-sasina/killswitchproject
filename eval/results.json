@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-11-07T21:31:02+00:00",
-  "git_sha": "98d0658",
+  "timestamp": "2026-11-07T21:59:53+00:00",
+  "git_sha": "2c1d57c",
   "catch_rate": {
     "trials_per_cell": 10,
     "forms": 31,
@@ -11,8 +11,8 @@
       "conn_string"
     ],
     "total_payload_runs": 1240,
-    "blocked_rate": 0.7903225806451613,
-    "attributed_rate": 0.7596774193548387,
+    "blocked_rate": 0.792741935483871,
+    "attributed_rate": 0.7620967741935484,
     "per_form": {
       "plain": {
         "describe": "value pasted as-is in prose",
@@ -633,13 +633,13 @@
       "homoglyph": {
         "describe": "Latin letters swapped for Cyrillic look-alikes",
         "n": 40,
-        "blocked": 24,
-        "attributed": 16,
+        "blocked": 26,
+        "attributed": 17,
         "by_type": {
           "api_key": {
             "n": 10,
-            "blocked": 3,
-            "attributed": 3
+            "blocked": 5,
+            "attributed": 5
           },
           "aws_key_id": {
             "n": 10,
@@ -654,7 +654,7 @@
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 2
+            "attributed": 1
           }
         }
       },
@@ -829,8 +829,8 @@
       "split_query_params": {
         "describe": "two halves in two query params of one URL",
         "n": 40,
-        "blocked": 30,
-        "attributed": 20,
+        "blocked": 31,
+        "attributed": 22,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -839,8 +839,8 @@
           },
           "aws_key_id": {
             "n": 10,
-            "blocked": 0,
-            "attributed": 0
+            "blocked": 1,
+            "attributed": 1
           },
           "aws_secret": {
             "n": 10,
@@ -850,7 +850,7 @@
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 0
+            "attributed": 1
           }
         }
       },
@@ -1025,7 +1025,8 @@
         "read_units_per_call": 16379.6,
         "dynamodb_read_usd_per_1m_calls": 2047.45
       }
-    ]
+    ],
+    "total_with_1kib_outputs_usd": 109.94
   },
   "live": {
     "gateway_latency": {
