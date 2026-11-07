@@ -29,6 +29,19 @@ credential the agent held or saw, without touching any other agent or service.
 | `dashboard/` | React + Vite dashboard. |
 | `eval/` | Catch rate, false positives, latency, load test, cost. |
 | `docs/` | Architecture, runbook, demo script. |
+| `scripts/` | Repository tooling: the pre-commit secret gate. |
+
+## Quick start
+
+```bash
+make hooks && make deploy && make env   # once per AWS account (us-east-1)
+make demo                               # proxy + three agents in Docker
+make dashboard                          # http://localhost:5173
+```
+
+The full runbook (prerequisites, demo, reset, checks, cost, teardown) is in
+[docs/runbook.md](docs/runbook.md); how it fits together is in
+[docs/architecture.md](docs/architecture.md).
 
 ## Secrets policy (this repo is public)
 
