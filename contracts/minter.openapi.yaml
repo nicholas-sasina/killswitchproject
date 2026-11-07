@@ -82,9 +82,11 @@ paths:
                   type: array
                   description: secret_refs from the agent's ledger (the Burn API passes these in).
                   items: { type: string }
+                evidence:
+                  $ref: '#/components/schemas/FlagEvidence'
       responses:
         '200':
-          description: Rotation result
+          description: Rotation result. Canaries the agent owns are never rotated (they never authenticate).
           content:
             application/json:
               schema:
@@ -93,6 +95,10 @@ paths:
                 properties:
                   rotated: { type: array, items: { type: string } }
                   flagged: { type: array, items: { type: string } }
+                  flag_levels:
+                    type: object
+                    description: Optional. Review level of each flagged secret_ref after this call.
+                    additionalProperties: { $ref: '#/components/schemas/FlagLevel' }
   /agents/{agent_id}/key-activity:
     get:
       summary: CloudTrail history of the agent's AWS keys (current and previous), for the blast-radius view.
@@ -135,6 +141,94 @@ paths:
                         resource: { type: string, nullable: true }
                         source_ip: { type: string, nullable: true }
                         error_code: { type: string, nullable: true }
+  /sessions/{session_id}/canary:
+    post:
+      summary: Issue the session's canary. Idempotent per session - a retry returns the same canary.
+      description: |
+        One decoy credential per session (or instance). It looks like a mock-provider api_key
+        (`mpk_live_` + 32 chars) but never authenticates. The value goes only to Secrets Manager at
+        `canary_ref` (= names.canary_secret_ref(agent_id, session_id)); this route returns metadata only.
+        Called by session/instance creation right after the session id is known.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent_id]
+              properties:
+                agent_id: { type: string, example: agent-worker }
+                instance_id: { type: string, nullable: true, description: 'Set when the session belongs to one instance of a role.' }
+      responses:
+        '200':
+          description: The session's canary (reference only, never the value)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Canary' }
+    get:
+      summary: Metadata of the session's canary (never the value). 404 if none was issued.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+        - { name: agent_id, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The session's canary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Canary' }
+  /agents/{agent_id}/canaries:
+    delete:
+      summary: Delete every canary of the agent (demo reset only). Burns and session exits keep canaries so they stay attributable.
+      parameters:
+        - { name: agent_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: array, items: { type: string } }
+  /flags:
+    post:
+      summary: Raise the review level of registered credentials (seen < attempted < reported). Never lowers it; idempotent.
+      description: |
+        For shared / other-owner credentials. Flagging never rotates anything. Each level keeps the first
+        evidence that reached it. Which sources may claim which level:
+        seen = tool_response, handoff, burn; attempted = egress, gateway, handoff (a blocked send);
+        reported = provider (presented at a monitored service). Canaries are never flagged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret_refs, level, evidence]
+              properties:
+                secret_refs: { type: array, maxItems: 100, items: { type: string } }
+                level: { $ref: '#/components/schemas/FlagLevel' }
+                evidence: { $ref: '#/components/schemas/FlagEvidence' }
+      responses:
+        '200':
+          description: Level of each registered secret_ref after the call (unregistered refs and canaries are left out)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flags]
+                properties:
+                  flags:
+                    type: array
+                    items:
+                      type: object
+                      required: [secret_ref, flag_level, changed]
+                      properties:
+                        secret_ref: { type: string }
+                        flag_level: { $ref: '#/components/schemas/FlagLevel' }
+                        changed: { type: boolean, description: true if this call raised the level }
   /shared/credentials:
     post:
       summary: Issue a shared credential (used by several agents). Idempotent by name.
@@ -166,3 +260,33 @@ paths:
       summary: Delete all shared credentials (demo reset / teardown).
       responses:
         '200': { description: Deleted }
+components:
+  schemas:
+    FlagLevel:
+      type: string
+      enum: [seen, attempted, reported]
+    FlagEvidence:
+      type: object
+      description: Safe metadata only. Never a credential value, URL query string or request body.
+      required: [source]
+      additionalProperties: false
+      properties:
+        source: { type: string, enum: [tool_response, egress, handoff, burn, gateway, provider] }
+        event_id: { type: string, pattern: '^evt_[0-9A-HJKMNP-TV-Z]{26}$' }
+        agent_id: { type: string, pattern: '^(agent-[a-z0-9-]{1,40}|system)$' }
+        session_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
+        instance_id: { type: string, pattern: '^[A-Za-z0-9_.:-]{1,128}$' }
+        tool: { type: string, pattern: '^[A-Za-z0-9_.-]{1,64}$' }
+        ts: { type: string, format: date-time }
+        fingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+    Canary:
+      type: object
+      required: [canary_ref, agent_id, session_id, version, status, issued_at]
+      properties:
+        canary_ref: { type: string, example: burn/agent-worker/canary_0f1e2d3c4b5a69788796a5b4 }
+        agent_id: { type: string }
+        session_id: { type: string }
+        instance_id: { type: string, nullable: true }
+        version: { type: integer, description: always 1; canaries are never rotated }
+        status: { type: string, enum: [issuing, active, tripped] }
+        issued_at: { type: string, format: date-time }

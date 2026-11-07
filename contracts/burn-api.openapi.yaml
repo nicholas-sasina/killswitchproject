@@ -9,6 +9,13 @@ info:
     Every request must send `x-burn-demo-token` (value from .env, BURN_DEMO_TOKEN).
     The mock server accepts any token and adds the response header `x-burn-mock: true`
     so the dashboard can show a MOCK banner.
+
+    Internal (not an HTTP route): the mock API provider hands a canary incident to the
+    `burn-api` Lambda by direct async invoke (`names.BURN_API_FUNCTION`), with the event
+    `{"canary_incident": {"secret_ref": "burn/agent-x/canary_...", "event_id": "evt_..."}}`.
+    The Lambda re-reads attribution from burn-credentials (it never trusts the payload) and
+    contains only the canary's own session: conditional revoke (active -> revoked), then
+    rotation of the agent's credentials only if no other active session uses them.
 servers:
   - url: http://localhost:8700
     description: mock server (development only)
@@ -409,6 +416,7 @@ components:
         via: { type: string, nullable: true, description: 'tool name, or sender agent_id for handoff' }
         first_seen: { type: string, format: date-time }
         status: { type: string, enum: [active, rotated, flagged], description: 'status of the credential itself' }
+        flag_level: { type: string, enum: [seen, attempted, reported], nullable: true, description: 'review level when status = flagged (seen < attempted < reported, never decreases)' }
     RoleName:
       type: string
       pattern: '^[a-z0-9][a-z0-9-]{0,31}$'

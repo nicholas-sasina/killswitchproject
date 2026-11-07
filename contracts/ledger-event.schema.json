@@ -34,8 +34,8 @@
     },
     "action": {
       "type": "string",
-      "enum": ["recorded", "blocked", "revoked", "rotated", "flagged", "refused", "issued", "inherited", "rejected", "started", "exited", "unregistered"],
-      "description": "recorded = credential seen in a tool response, added to ledger. blocked = outbound credential stopped. revoked = badge revoked. rotated = credential rotated. flagged = shared/other-owner credential flagged for review. refused = call with a revoked/unknown badge or disallowed tool refused. issued = session/credential issued. inherited = receiver of send_message inherited sender's ledger entry. rejected = provider refused a stale (rotated) key. started / exited = an instance began or ended (source instance). unregistered = a call with a badge Burn never issued was refused (agent_id system)."
+      "enum": ["recorded", "blocked", "revoked", "rotated", "flagged", "refused", "issued", "inherited", "rejected", "started", "exited", "unregistered", "canary_used"],
+      "description": "recorded = credential seen in a tool response, added to ledger. blocked = outbound credential stopped. revoked = badge revoked. rotated = credential rotated. flagged = shared/other-owner credential flagged for review. refused = call with a revoked/unknown badge or disallowed tool refused. issued = session/credential issued. inherited = receiver of send_message inherited sender's ledger entry. rejected = provider refused a stale (rotated) key. started / exited = an instance began or ended (source instance). unregistered = a call with a badge Burn never issued was refused (agent_id system). canary_used = a session's canary (a decoy credential that never authenticates) was presented to the mock API provider; agent_id/session_id/instance_id say whose canary it was."
     },
     "tool": {
       "type": ["string", "null"],
@@ -89,6 +89,15 @@
     "parent_session": {
       "type": ["string", "null"],
       "description": "Instance events: the session that spawned this instance, if any."
+    },
+    "instance_id": {
+      "type": ["string", "null"],
+      "description": "Agent instance (one worker of a role) the event is about, when known. Sessions without instances leave it null."
+    },
+    "flag_level": {
+      "type": ["string", "null"],
+      "enum": ["seen", "attempted", "reported", null],
+      "description": "flagged events: review severity of the credential after this event. seen < attempted < reported; it never decreases."
     }
   }
 }
