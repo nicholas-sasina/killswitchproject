@@ -11,6 +11,7 @@ import json
 from datetime import datetime
 
 import aws
+import aws_key
 import registry
 import vault
 from burn_contracts.names import agent_secret_ref
@@ -55,17 +56,32 @@ def _lookup(access_key_id: str, since: datetime | None, key_ref: str) -> list[di
     return rows
 
 
-def key_activity(agent_id: str, since: datetime | None) -> list[dict]:
+def _status(user: str, key_id: str) -> str:
+    """'active' or 'inactive' as IAM reports it; a key IAM no longer lists counts as inactive."""
+    listed = aws.iam().list_access_keys(UserName=user)["AccessKeyMetadata"]
+    return next((k["Status"].lower() for k in listed if k["AccessKeyId"] == key_id), "inactive")
+
+
+def key_activity(agent_id: str, since: datetime | None) -> dict:
+    """{"keys": [...], "events": [...]} for the agent's current and previous AWS key.
+
+    Key status comes from IAM, never from the events: right after a burn the new
+    key has no events yet but is the one that is active.
+    """
     secret_ref = agent_secret_ref(agent_id, "aws_key")
     row = registry.get(secret_ref)
     if row is None:
-        return []
+        return {"keys": [], "events": []}
     version = int(row["version"])
-    keys = [(_key_id(secret_ref, "AWSCURRENT"), version)]
-    if version > 1:
-        keys.append((_key_id(secret_ref, "AWSPREVIOUS"), version - 1))
-    events = []
-    for key_id, key_version in keys:
-        if key_id:
-            events += _lookup(key_id, since, f"{secret_ref}#v{key_version}")
-    return sorted(events, key=lambda e: e["ts"])
+    stages = [("AWSPREVIOUS", version - 1)] if version > 1 else []
+    stages.append(("AWSCURRENT", version))
+    keys, events = [], []
+    for stage, key_version in stages:
+        key_id = _key_id(secret_ref, stage)
+        if not key_id:
+            continue
+        key_ref = f"{secret_ref}#v{key_version}"
+        keys.append({"key_ref": key_ref, "key_hint": key_id[-4:],
+                     "status": _status(aws_key.user_name(agent_id), key_id)})
+        events += _lookup(key_id, since, key_ref)
+    return {"keys": keys, "events": sorted(events, key=lambda e: e["ts"])}

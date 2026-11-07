@@ -106,13 +106,22 @@ paths:
         - { name: since, in: query, required: false, schema: { type: string, format: date-time } }
       responses:
         '200':
-          description: Events, oldest first
+          description: The agent's current and previous AWS key with their IAM status, and their events oldest first
           content:
             application/json:
               schema:
                 type: object
-                required: [events]
+                required: [keys, events]
                 properties:
+                  keys:
+                    type: array
+                    description: AWSPREVIOUS (if any) then AWSCURRENT, with status as IAM reports it (never inferred from events)
+                    items:
+                      type: object
+                      properties:
+                        key_ref: { type: string, example: 'burn/agent-reader/aws_key#v2' }
+                        key_hint: { type: string, description: last 4 characters of the access key id }
+                        status: { type: string, enum: [active, inactive] }
                   events:
                     type: array
                     items:
