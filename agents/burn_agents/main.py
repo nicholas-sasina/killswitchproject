@@ -5,7 +5,7 @@ import sys
 import time
 
 from .badge import BadgeToken
-from .cloud import aws_session, check_cloud_access, check_provider
+from .cloud import aws_session, check_cloud_access, check_provider, retry_while_key_activates
 from .config import load_config
 from .gateway import GatewayTools, open_client
 from .loop import Worker, run_agent
@@ -44,7 +44,7 @@ def main() -> int:
             log.info("provider: %s", check_provider(cfg.provider_url, cfg.api_key))
 
     def serve() -> None:
-        heartbeat()
+        retry_while_key_activates(heartbeat)
         client = open_client(cfg.gateway_url, badge)
         with client:
             allowed = set(spec["tools"])

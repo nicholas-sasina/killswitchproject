@@ -58,3 +58,9 @@ def test_reader_files_hold_own_and_shared_credentials(path):
 def test_scenarios_share_no_agent_ids():
     a, b = (set(x["id"] for x in load(p)["agents"]) for p in FILES[:2])
     assert not a & b
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
+def test_every_agent_gets_its_own_aws_key(path):
+    # The model is called with the agent's own key, so every agent needs one.
+    assert all("aws_key" in a["credentials"] for a in load(path)["agents"])

@@ -28,7 +28,8 @@ class Config:
     client_id: str
     client_secret: str
     scope: str
-    # The agent's own credentials (never shared with other agents).
+    # The agent's own credentials (never shared with other agents). Required: without
+    # an own AWS key boto3 would silently fall back to whatever the host has.
     api_key: str
     aws_access_key_id: str
     aws_secret_access_key: str
@@ -52,9 +53,9 @@ def load_config(env: dict | None = None) -> Config:
         client_id=_required(env, "BURN_CLIENT_ID"),
         client_secret=_required(env, "BURN_CLIENT_SECRET"),
         scope=env.get("BURN_SCOPE", ""),
-        api_key=env.get("BURN_API_KEY", ""),
-        aws_access_key_id=env.get("BURN_AWS_ACCESS_KEY_ID", ""),
-        aws_secret_access_key=env.get("BURN_AWS_SECRET_ACCESS_KEY", ""),
+        api_key=_required(env, "BURN_API_KEY"),
+        aws_access_key_id=_required(env, "BURN_AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=_required(env, "BURN_AWS_SECRET_ACCESS_KEY"),
         ticket_pause=float(env.get("BURN_TICKET_PAUSE", "20")),
         poll_seconds=float(env.get("BURN_POLL_SECONDS", "5")),
         heartbeat_seconds=float(env.get("BURN_HEARTBEAT_SECONDS", "300")),

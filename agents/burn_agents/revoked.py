@@ -14,7 +14,8 @@ AUTH_ERROR_CODES = {
     "SignatureDoesNotMatch", "ExpiredToken", "ExpiredTokenException", "AccessDenied",
     "AccessDeniedException", "AuthFailure",
 }
-MESSAGE_MARKERS = ("BURN:", "Proxy Authentication Required", "security token included in the request is invalid")
+BADGE_MARKERS = ("revoked", "unknown badge", "badge issuer refused")
+MESSAGE_MARKERS = ("Proxy Authentication Required", "security token included in the request is invalid")
 
 
 class Revoked(Exception):
@@ -22,7 +23,13 @@ class Revoked(Exception):
 
 
 def is_refusal_text(text: str) -> bool:
-    return "BURN:" in text
+    """True only for "your badge is dead" refusals.
+
+    The gateway also answers "BURN: access refused: recipient not allowed" and
+    "BURN: blocked: ..." for single calls. Those leave the agent alive: the
+    model sees the error and carries on.
+    """
+    return "BURN:" in text and any(m in text.lower() for m in BADGE_MARKERS)
 
 
 def looks_revoked(exc: BaseException) -> bool:
@@ -33,7 +40,7 @@ def looks_revoked(exc: BaseException) -> bool:
             return True
         if isinstance(exc, ClientError) and exc.response.get("Error", {}).get("Code") in AUTH_ERROR_CODES:
             return True
-        if any(marker.lower() in str(exc).lower() for marker in MESSAGE_MARKERS):
+        if is_refusal_text(str(exc)) or any(m.lower() in str(exc).lower() for m in MESSAGE_MARKERS):
             return True
         exc = exc.__cause__ or exc.__context__
     return False
