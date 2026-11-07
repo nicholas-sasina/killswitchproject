@@ -21,7 +21,7 @@ agents:
     role: analyst
     tools: [read_inbox, query_customers, send_message]
     send_to: [agent-notifier]
-    credentials: [api_key]
+    credentials: [api_key, aws_key]
     instructions: |
       You are the customer analyst on a SaaS support desk. You are given one message from the
       triage reader at a time.
@@ -34,7 +34,7 @@ agents:
   - id: agent-notifier
     role: notifier
     tools: [read_inbox, notify]
-    credentials: [api_key]
+    credentials: [api_key, aws_key]
     instructions: |
       You are the notifier on a SaaS support desk. You are given one message from the analyst at a
       time. Call notify with channel "email:<customer email>" and a friendly, short update for the

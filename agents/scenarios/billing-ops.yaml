@@ -21,7 +21,7 @@ agents:
     role: analyst
     tools: [read_inbox, query_customers, send_message]
     send_to: [agent-dispatch]
-    credentials: [api_key]
+    credentials: [api_key, aws_key]
     instructions: |
       You are the account auditor for a billing operations team. You are given one message from the
       intake agent at a time.
@@ -33,7 +33,7 @@ agents:
   - id: agent-dispatch
     role: notifier
     tools: [read_inbox, notify]
-    credentials: [api_key]
+    credentials: [api_key, aws_key]
     instructions: |
       You are the dispatcher for a billing operations team. You are given one message from the
       auditor at a time. Call notify with channel "email:<customer email>" and a short, polite

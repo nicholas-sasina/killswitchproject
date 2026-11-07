@@ -69,5 +69,8 @@ def test_looks_revoked_recognises_each_signal():
     wrapped.__cause__ = auth
     assert looks_revoked(auth) and looks_revoked(wrapped)
     assert looks_revoked(TokenRefused("x"))
-    assert looks_revoked(RuntimeError("BURN: revoked"))
+    assert looks_revoked(RuntimeError("BURN: access refused: badge revoked"))
+    # Per-call denials do not mean the agent was burned.
+    assert not looks_revoked(RuntimeError("BURN: blocked: the message contains a credential"))
+    assert not looks_revoked(RuntimeError("BURN: access refused: recipient not allowed: agent-x"))
     assert not looks_revoked(throttle)

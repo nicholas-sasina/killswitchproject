@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -66,10 +67,39 @@ def step_prompt(reader_ids: list[str]) -> None:
             (RUN_DIR / "step" / f"{agent_id}.go").touch()
 
 
+def run_on_host(scenario: dict, scenario_path: Path, step: bool) -> None:
+    """Development only: one local process per agent, logs in .run/<agent>.log. Nothing is checked on exit."""
+    procs = []
+    for agent in scenario["agents"]:
+        env = dict(os.environ, AGENT_ID=agent["id"], BURN_SCENARIO_FILE=str(scenario_path))
+        for line in (RUN_DIR / f"{agent['id']}.env").read_text().splitlines():
+            key, _, value = line.partition("=")
+            env[key] = value
+        if step and "list_tickets" in agent["tools"]:
+            env["BURN_STEP_FILE"] = str(RUN_DIR / "step" / f"{agent['id']}.go")
+        log = open(RUN_DIR / f"{agent['id']}.log", "w")
+        procs.append(subprocess.Popen([sys.executable, "-m", "burn_agents"], cwd=AGENTS_DIR, env=env,
+                                      stdout=log, stderr=subprocess.STDOUT))
+        print(f"{agent['id']} running, log: .run/{agent['id']}.log")
+    try:
+        if step:
+            step_prompt([a["id"] for a in scenario["agents"] if "list_tickets" in a["tools"]])
+        else:
+            for proc in procs:
+                proc.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for proc in procs:
+            proc.terminate()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default="scenarios/support-desk.yaml")
     parser.add_argument("--step", action="store_true", help="advance the ticket reader one ticket per Enter")
+    parser.add_argument("--no-proxy", action="store_true",
+                        help="DEVELOPMENT ONLY: run agents as host processes, with no Docker, proxy or exit check")
     args = parser.parse_args()
     scenario_path = AGENTS_DIR / args.scenario if not Path(args.scenario).is_absolute() else Path(args.scenario)
 
@@ -87,6 +117,9 @@ def main() -> None:
         write_env_file(RUN_DIR / f"{agent['id']}.env", agent_env(agent["id"], session, gateway_url, provider_url))
         print(f"{agent['id']} ({agent['role']}): session {session['session_id']}")
 
+    if args.no_proxy:
+        run_on_host(scenario, scenario_path, args.step)
+        return
     generated = build_compose(scenario, scenario_path.name, sessions, args.step)
     (RUN_DIR / "compose.agents.yml").write_text(yaml.safe_dump(generated))
 
