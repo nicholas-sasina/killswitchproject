@@ -168,6 +168,8 @@ def test_delete_for_agent_is_reset_only_and_complete(tables):
     ("/sessions/sess_ok/canary", {}),
     ("/sessions/has space/canary", {"agent_id": AGENT}),
     ("/sessions/sess_ok/canary", {"agent_id": AGENT, "instance_id": "bad/inst"}),
+    ("/sessions/sess_ok/canary", {"agent_id": 7}),
+    ("/sessions/sess_ok/canary", {"agent_id": AGENT, "instance_id": 7}),
 ])
 def test_bad_canary_requests_are_400(path, body):
     assert call("POST", path, body)[0] == 400

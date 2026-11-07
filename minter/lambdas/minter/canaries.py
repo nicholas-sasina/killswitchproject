@@ -41,9 +41,9 @@ class NotFound(Exception):
 
 
 def _check_ids(agent_id: str, session_id: str, instance_id: str | None) -> str:
-    if not is_agent_id(agent_id):
+    if not isinstance(agent_id, str) or not is_agent_id(agent_id):
         raise ValueError(f"invalid agent id: {agent_id!r}")
-    if instance_id is not None and not SESSION_ID_RE.match(instance_id):
+    if instance_id is not None and (not isinstance(instance_id, str) or not SESSION_ID_RE.match(instance_id)):
         raise ValueError("invalid instance id")
     return canary_secret_ref(agent_id, session_id)  # validates session_id
 
