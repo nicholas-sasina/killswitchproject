@@ -1,0 +1,10 @@
+# Adds a client on the egress network so the same request can be timed without the proxy.
+services:
+  direct-client:
+    build:
+      context: ../.run/detection-build
+      dockerfile: detection/tests/integration/Dockerfile
+    networks: [egress]
+    environment:
+      BURN_SINK_URL: https://sink:8443
+    volumes: ["test-data:/test-data:ro"]

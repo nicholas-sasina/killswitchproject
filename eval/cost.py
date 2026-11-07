@@ -20,13 +20,13 @@ PRICES = {
 # Per-call usage. `source` is "assumed" until the deployed Gateway has been measured.
 USAGE = {
     "interceptor_requests_per_call": (2, "design: one pre-call and one post-call Lambda"),
-    "interceptor_ms": (30, "assumed"),          # average billed duration per interceptor invocation
+    "interceptor_ms": (30, "assumed until measured"),          # average billed duration per interceptor invocation
     "interceptor_mb": (256, "assumed"),
-    "tool_ms": (40, "assumed"),
+    "tool_ms": (40, "assumed until measured"),
     "tool_mb": (256, "assumed"),
-    "ddb_reads_per_call": (1 + 300, "assumed: 1 session read + ~600 fingerprint keys at 0.5 RRU (eventually consistent) for a ~1 KB response"),
-    "ddb_writes_per_call": (1.2, "assumed: 1 event + ~0.2 ledger writes"),
-    "secrets_calls_per_call": (1, "assumed: tool resolves its placeholders with one GetSecretValue"),
+    "ddb_reads_per_call": (1.5, "counted from gateway code for read_ticket: 1 consistent session read (1 RRU) + 1 eventually consistent GetItem (0.5 RRU)"),
+    "ddb_writes_per_call": (0, "counted from gateway code: an allowed call writes nothing; refusals write one event"),
+    "secrets_calls_per_call": (0, "counted from gateway code: only read_config resolves secrets (one GetSecretValue per placeholder)"),
     "calls_per_token": (200, "assumed: one badge token (1 h) covers ~200 calls"),
     "burn_api_requests_per_call": (0, "tool calls do not touch the Burn API"),
 }
