@@ -9,6 +9,7 @@ from burn_contracts import names
 
 import auth
 import burn
+import canary
 import db
 import minter_client
 import reads
@@ -77,6 +78,10 @@ def _preflight(headers: dict):
 
 
 def handler(event, context=None):
+    if "canary_incident" in event and "requestContext" not in event:
+        # Direct async invoke from the mock provider (IAM-only; API Gateway events always
+        # carry requestContext). The payload is re-verified, never trusted: see canary.py.
+        return canary.handle_incident(event["canary_incident"])
     http = event["requestContext"]["http"]
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     if http["method"] == "OPTIONS":
