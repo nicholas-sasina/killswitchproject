@@ -1,0 +1,25 @@
+[project]
+name = "burn-mocks"
+version = "0.1.0"
+description = "Local development servers for the Burn contracts."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "burn-contracts",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "mcp>=1.26,<2",
+  "pyyaml>=6,<7",
+  "jsonschema>=4,<5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "httpx>=0.28,<1", "pytest-asyncio>=1,<2"]
+
+[tool.uv.sources]
+burn-contracts = { path = "../contracts", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
