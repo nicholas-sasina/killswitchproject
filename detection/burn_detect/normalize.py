@@ -11,6 +11,7 @@ _HEX = re.compile(r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{8,}(?![A-Fa-f0-9])")
 _URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,31}://[^\s<>\"']+")
 _ESCAPE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2}))")
 _SEPARATORS = re.compile(r"[\s.\-:,|]+")
+_ALNUM_SEPARATORS = re.compile(r"[\W_]+")
 MAX_VARIANTS = 96
 MAX_TEXT = 262_144
 
@@ -85,15 +86,16 @@ def variants(text: str) -> list[tuple[str, str]]:
                     seen.add(decoded)
                     following.append((decoded, label))
                     result.append((decoded, label))
-                    if len(result) >= MAX_VARIANTS // 3:
+                    if len(result) >= MAX_VARIANTS // 4:
                         break
-            if len(result) >= MAX_VARIANTS // 3:
+            if len(result) >= MAX_VARIANTS // 4:
                 break
         frontier = following
-        if not frontier or len(result) >= MAX_VARIANTS // 3:
+        if not frontier or len(result) >= MAX_VARIANTS // 4:
             break
     for value, parent in result[:]:
-        for transformed, encoding in ((_SEPARATORS.sub("", value), "separators"), (value[::-1], "reversed")):
+        for transformed, encoding in ((_SEPARATORS.sub("", value), "separators"),
+                (_ALNUM_SEPARATORS.sub("", value), "separators"), (value[::-1], "reversed")):
             if transformed not in seen:
                 seen.add(transformed)
                 result.append((transformed, encoding if parent == "plain" else parent + "+" + encoding))

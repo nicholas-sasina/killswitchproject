@@ -1,0 +1,15 @@
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.run
+**/.env*
+**/*.pem
+**/*.key
+.git
+infra
+agents
+dashboard
+minter
+burn_api
+gateway
+eval

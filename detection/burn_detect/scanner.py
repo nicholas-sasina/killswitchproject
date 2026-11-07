@@ -87,7 +87,12 @@ class Scanner:
         current = evidence
         if window is not None:
             evidence = window.accumulate(evidence)
+        exact_secrets = {(group[0], group[2]) for group in found}
         for group, (row, indices, encoding) in evidence.items():
+            if group not in current:
+                continue
+            if (group[0], group[2]) in exact_secrets:
+                continue
             total = int(row.get("n_shingles", 0))
             if total <= 0:
                 continue
@@ -96,11 +101,11 @@ class Scanner:
                 if len(current.get(group, ({}, set(), ""))[1]) / total < self.threshold:
                     encoding = "multi_request"
                 found[group] = _finding(row, row["fingerprint"], "shingle", encoding, coverage)
-        for fp, (secret_type, encoding, parts) in formats.items():
+        for fp, (secret_type, encoding, format_parts) in formats.items():
             if fp in rows or any(f.fingerprint == fp for f in found.values()):
                 continue
             attributed = {}
-            for part_fp in parts:
+            for part_fp in format_parts:
                 row = rows.get(part_fp, {})
                 group = (row.get("secret_ref"), row.get("part"), row.get("version"))
                 if row.get("kind") == "shingle" and group in found:
