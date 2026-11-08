@@ -6,10 +6,20 @@ info:
     Public API used by the dashboard, the scenario runner and the eval harness.
     Real implementation: API Gateway HTTP API + Lambda (/burn_api). Mock: /mocks/burn_api_mock.py.
 
-    Every request must send `x-burn-demo-token` (value from .env, BURN_DEMO_TOKEN), except:
-    a join (`POST /sessions` with exactly `{role, enroll_token}`), whose join token is its authority; and an
-    instance's own calls (its heartbeat and exit, and `POST /sessions` with exactly `{role, parent_session}` for
-    a child of it), which may send that instance's session token as `Authorization: Bearer bst_...` instead.
+    Who may call what, once people sign-in is switched on for a stack (`BURN_PEOPLE_AUTH=1` on the API).
+    Until then the admin header (`x-burn-demo-token`) works as before on every route, alongside the
+    instance credentials below.
+    - People sign in to the people user pool (invite-only) and send their ID token as
+      `Authorization: Bearer <jwt>` (`personBearer`). It is required on every route except the exempt
+      ones below; a missing or invalid token is a 401.
+    - The exempt routes are exactly `POST /instances`, `POST /instances/{session_id}/heartbeat`,
+      `POST /instances/{session_id}/exit` and the CORS `OPTIONS` preflight. They carry their own credential, which
+      the API checks itself: a join token in the body for a join (`joinToken`), or the instance's own session token,
+      `Authorization: Bearer bst_...` (`instanceBearer`), for its heartbeat, exit and spawning a child.
+    - Every form of `POST /sessions` now needs a person. Instance clients (joining and spawning) use
+      `POST /instances`.
+    - `x-burn-demo-token` (`adminHeader`) is then for local development only: the API ignores it unless it
+      also runs with `BURN_LOCAL_DEV=1`, which a deployment never sets.
     The mock server accepts any token and adds the response header `x-burn-mock: true`
     so the dashboard can show a MOCK banner.
 
@@ -23,16 +33,17 @@ servers:
   - url: http://localhost:8700
     description: mock server (development only)
 security:
-  - demoToken: []
+  - personBearer: []
+  - adminHeader: []
 paths:
   /sessions:
     post:
       summary: Start an agent session (one instance). Issues a badge and the instance's credentials.
       security:
-        - demoToken: []
-        - sessionToken: []   # {role, parent_session}: the parent's session token
-        - {}                 # {role, enroll_token}: the join token in the body is the authority
+        - personBearer: []
+        - adminHeader: []    # local development only
       description: |
+        Every form needs a signed-in person; instance clients use `POST /instances` for the two role forms.
         Three forms:
         - `{agent_id}`: a scenario agent (a role with one instance, fixed agent id). Unchanged.
         - `{role, enroll_token}`: a new instance of a role, joining with a join token.
@@ -61,6 +72,7 @@ paths:
                     role: { $ref: '#/components/schemas/RoleName' }
                     parent_session: { type: string }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '201':
           description: Session started
           content:
@@ -83,6 +95,7 @@ paths:
                 agent_id: { $ref: '#/components/schemas/AgentId' }
                 reason: { type: string, maxLength: 200 }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Burn completed (blast radius is fetched separately)
           content:
@@ -109,6 +122,7 @@ paths:
       parameters:
         - { name: agent_id, in: path, required: true, schema: { $ref: '#/components/schemas/AgentId' } }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Blast radius
           content:
@@ -148,6 +162,7 @@ paths:
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Badge status
           content:
@@ -174,6 +189,7 @@ paths:
           required: false
           schema: { type: integer, default: 200, maximum: 500 }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Events in ascending event_id order, plus current agent states.
           content:
@@ -198,6 +214,7 @@ paths:
       parameters:
         - { name: agent_id, in: path, required: true, schema: { $ref: '#/components/schemas/AgentId' } }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Ledger entries
           content:
@@ -214,6 +231,7 @@ paths:
     get:
       summary: List roles (burn.yaml, dashboard and scenario agents).
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Roles
           content:
@@ -231,6 +249,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RoleSpec' }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
         '409': { description: a role with this name exists }
   /roles/{name}:
@@ -239,6 +258,7 @@ paths:
       parameters:
         - { name: name, in: path, required: true, schema: { $ref: '#/components/schemas/RoleName' } }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200': { description: Role, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
         '404': { description: no such role }
     put:
@@ -252,6 +272,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/RoleSpec' }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
         '409': { description: the role is managed elsewhere (managed_by differs) }
   /roles/{name}/tokens:
@@ -269,6 +290,7 @@ paths:
                 uses: { type: integer, minimum: 1, maximum: 10000, default: 1 }
                 ttl: { type: integer, minimum: 60, maximum: 2592000, default: 3600, description: seconds }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '201':
           description: Token created
           content:
@@ -287,6 +309,7 @@ paths:
       parameters:
         - { name: token_id, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200': { description: Revoked, content: { application/json: { schema: { $ref: '#/components/schemas/EnrollToken' } } } }
         '404': { description: no such token }
   /instances:
@@ -296,6 +319,7 @@ paths:
         - { name: role, in: query, required: false, schema: { $ref: '#/components/schemas/RoleName' } }
         - { name: status, in: query, required: false, schema: { type: string, enum: [active, revoked, exited] } }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Instances, newest first
           content:
@@ -308,9 +332,9 @@ paths:
     post:
       summary: Start a role instance (join or spawn). The same two role forms as POST /sessions.
       security:
-        - demoToken: []      # the admin token may start either form
-        - sessionToken: []   # {role, parent_session}: the parent's session token
-        - {}                 # {role, enroll_token}: the join token in the body is the authority
+        - instanceBearer: [] # {role, parent_session}: the parent's session token
+        - joinToken: []      # {role, enroll_token}: the join token in the body
+        - adminHeader: []    # local development only
       description: |
         A path of its own for the two role forms, so an authorizer in front of the API can decide by
         method and path alone: these two requests carry their own authority (the join token, or the
@@ -353,20 +377,22 @@ paths:
   /instances/{session_id}/heartbeat:
     post:
       summary: Mark an instance as alive (sent by `burn run` while the agent makes calls).
-      security: [{ demoToken: [] }, { sessionToken: [] }]   # the session token of this instance
+      security: [{ instanceBearer: [] }, { adminHeader: [] }]   # the session token of this instance
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: no valid session token for this instance }
         '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
         '404': { description: no such session }
         '409': { description: the instance is not active (burned or exited) }
   /instances/{session_id}/exit:
     post:
       summary: Clean exit. Revokes the instance's badge and deletes its own credentials.
-      security: [{ demoToken: [] }, { sessionToken: [] }]   # the session token of this instance
+      security: [{ instanceBearer: [] }, { adminHeader: [] }]   # the session token of this instance
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
       responses:
+        '401': { description: no valid session token for this instance }
         '200': { description: Exited, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
         '404': { description: no such session }
   /burns:
@@ -389,6 +415,7 @@ paths:
                 id: { type: string, description: 'session_id, role name or token_id' }
                 reason: { type: string, maxLength: 200 }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Burned
           content:
@@ -440,6 +467,7 @@ paths:
                 since: { type: string, format: date-time, description: 'default: all time' }
                 reason: { type: string, maxLength: 200 }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Burned
           content:
@@ -474,6 +502,7 @@ paths:
     get:
       summary: Flagged credentials awaiting (or after) owner review, highest level first.
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: Flags
           content:
@@ -495,6 +524,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/FlagResolution' }
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
           description: The flag after the decision (after rotate, the new version has no flag)
           content:
@@ -506,16 +536,35 @@ paths:
                   rotated_to_version: { type: integer, nullable: true }
         '404': { description: not a flagged credential }
 components:
+  responses:
+    Unauthorized:
+      description: No valid credential for this route (a missing or invalid person bearer token).
   securitySchemes:
-    demoToken:
+    personBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: The signed-in person's ID token from the people user pool (invite-only). Covers every route except the instance routes.
+    instanceBearer:
+      type: http
+      scheme: bearer
+      description: A role instance's own session token (bst_...), returned once in its join reply. For its heartbeat and exit, and for spawning a child with {role, parent_session}.
+    joinToken:
+      type: apiKey
+      in: query
+      name: enroll_token
+      x-in-body: true
+      description: A join token (bjt_...) carried in the JSON request body as `enroll_token`, with `role` and nothing else. OpenAPI cannot express a body credential, so this scheme documents it.
+    adminHeader:
       type: apiKey
       in: header
       name: x-burn-demo-token
-    sessionToken:
-      type: http
-      scheme: bearer
-      description: A role instance's own session token (bst_...), returned once in its join reply.
+      description: Local development only (BURN_LOCAL_DEV=1) once people sign-in is switched on for a stack (BURN_PEOPLE_AUTH=1); a deployed API then ignores this header. Until then it works as before.
   schemas:
+    CreatedBy:
+      type: string
+      nullable: true
+      description: The signed-in person's email who caused this, or null for rows created before sign-in (or by an instance without a person). Not the same as `owner`, which stays the team named in burn.yaml.
     SessionStarted:
       description: The reply that starts a session or an instance (POST /sessions, POST /instances).
       type: object
@@ -533,6 +582,7 @@ components:
         role: { $ref: '#/components/schemas/RoleName' }
         parent_session: { type: string, nullable: true }
         token_id: { type: string, nullable: true }
+        created_by: { $ref: '#/components/schemas/CreatedBy' }
         tools: { type: array, items: { type: string } }
         egress: { type: array, items: { type: string }, nullable: true }
         secrets:
@@ -713,6 +763,7 @@ components:
         expires_at: { type: string, format: date-time }
         status: { type: string, enum: [active, used_up, expired, revoked] }
         created_at: { type: string, format: date-time }
+        created_by: { $ref: '#/components/schemas/CreatedBy' }
     Instance:
       type: object
       required: [session_id, agent_id, role, status, created_at]
@@ -724,6 +775,7 @@ components:
         parent_session: { type: string, nullable: true }
         token_id: { type: string, nullable: true }
         owner: { type: string, nullable: true }
+        created_by: { $ref: '#/components/schemas/CreatedBy' }
         tools: { type: array, items: { type: string } }
         egress: { type: array, items: { type: string }, nullable: true }
         created_at: { type: string, format: date-time }
