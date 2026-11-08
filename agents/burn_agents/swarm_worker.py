@@ -67,6 +67,7 @@ BEARER_ENV = "AWS_BEARER_TOKEN_BEDROCK"  # botocore sends this instead of signin
 DEFAULT_WORKER_CALLS = 40  # per worker, unless --max-model-calls says otherwise: about ten tickets
 USAGE = "model calls used: {used} of {limit}"  # the worker's last line; the launcher reads it (USAGE_RE)
 USAGE_RE = re.compile(r"model calls used: (\d+) of (\d+)\s*$")
+ACCOUNT_ID = re.compile(r"\b\d{12}\b")
 FINISHED = {"end_turn", "stop_sequence"}  # a turn that ended any other way did not finish its item
 # Twenty workers on one account hit Bedrock's limits. botocore retries a throttled call with backoff, and "adaptive"
 # also slows this worker's own client down while it is throttled. Strands retries a throttled turn on top of that.
@@ -93,7 +94,8 @@ class CapReached(Exception):
 def root_cause(exc: BaseException) -> str:
     """The first underlying error, so an ExceptionGroup from the MCP client's task group explains itself.
 
-    Class and message only; the message of a connection error names a URL or status, never a credential.
+    Class and message only; the message of a connection error names a URL or status, never a credential. An AWS
+    error is reduced to its code, because its message can name the account and the identity.
     """
     seen = set()
     while id(exc) not in seen:
@@ -103,7 +105,10 @@ def root_cause(exc: BaseException) -> str:
         if nxt is None:
             break
         exc = nxt
-    return f"{type(exc).__name__}: {str(exc)[:200]}"
+    from botocore.exceptions import ClientError
+    if isinstance(exc, ClientError):
+        return f"ClientError: {exc.response.get('Error', {}).get('Code', '?')}"
+    return f"{type(exc).__name__}: {ACCOUNT_ID.sub('<account>', str(exc)[:200])}"
 
 
 def start_offset(agent_id: str, interval: float) -> float:

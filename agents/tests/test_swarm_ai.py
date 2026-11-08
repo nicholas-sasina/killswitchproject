@@ -416,3 +416,12 @@ def test_a_bedrock_bearer_token_in_the_environment_stops_the_worker_before_any_m
     assert asyncio.run(swarm_worker.main_async(env)) == 2
     err = capsys.readouterr().err
     assert "AWS_BEARER_TOKEN_BEDROCK is set" in err and "bedrock-api-key-fake" not in err
+
+
+def test_logged_aws_errors_carry_the_code_not_the_message_that_names_the_account():
+    denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "User: arn:aws:iam::123456789012:user/"
+                                    "burn-agent-x is not authorized to perform: bedrock:InvokeModel"}}, "ConverseStream")
+    assert swarm_worker.root_cause(denied) == "ClientError: AccessDeniedException"
+    wrapped = RuntimeError("failed")
+    wrapped.__cause__ = OSError("arn:aws:iam::123456789012:role/x refused")
+    assert "123456789012" not in swarm_worker.root_cause(wrapped)
