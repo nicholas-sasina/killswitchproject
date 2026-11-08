@@ -255,3 +255,12 @@ def test_a_secret_with_no_string_value_is_unavailable(planted):
     content = read_as_session("read_config", path="config/app.env.bak")["content"]
 
     assert content.endswith("DB=(credential not issued)\n") and f"KEY={planted['api_key']}\n" in content
+
+
+def test_a_bug_while_reading_a_secret_still_fails_the_call(planted):
+    """Only AWS errors and a missing string value become one unfilled placeholder; a bug is not hidden."""
+    fail_reads({planted["canary_ref"]}, TypeError("a programming error"))
+
+    with pytest.raises(TypeError):
+        read_as_session("read_config", path="config/app.env.bak")
+
