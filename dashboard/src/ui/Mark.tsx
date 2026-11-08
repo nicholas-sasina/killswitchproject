@@ -1,5 +1,5 @@
 // Burn's mark, from the website (site/src/components/Mark.tsx): the flame and
-// the wordmark. The console's navigation shows it at the board's size.
+// the wordmark. The console's navigation shows it at its own nav size.
 import "./ui.css";
 
 const FLAME =

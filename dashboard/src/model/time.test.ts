@@ -13,7 +13,7 @@ const now = new Date(2026, 10, 8, 19, 45, 0);
 const t = new Date(2026, 10, 8, 19, 42, 9);
 
 describe("console times", () => {
-  it("writes the forms the boards use", () => {
+  it("writes each form the console uses", () => {
     expect(clock(t)).toBe("7:42:09");
     expect(clockTime(t)).toBe("7:42:09 PM");
     expect(shortTime(t)).toBe("7:42 PM");

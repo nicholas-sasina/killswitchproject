@@ -1,6 +1,6 @@
 /**
  * How the console writes times. Everything is the viewer's local time, in
- * the forms the boards use: "7:42:31" in the Live feed, "7:42:09 PM" on an
+ * these forms: "7:42:31" in the Live feed, "7:42:09 PM" on an
  * agent's timeline, "7:42 PM" in a sentence, "Nov 6, 3:15 PM" for another day.
  * Each function returns "" for a missing or unreadable time, so a caller can
  * leave the phrase out rather than print "Invalid Date".

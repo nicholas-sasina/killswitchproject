@@ -83,7 +83,7 @@ export interface Figure {
 /**
  * The quiet stat strip inside a card: "KEYS SEEN 4 | IN PLAIN TEXT 1 |
  * OWNED 2" (row), or the Overview's "Last 24 hours" grid (grid). Only the
- * strips the boards draw; no new stat bands.
+ * strips the console has; no new stat bands.
  */
 export function Figures({
   items,
