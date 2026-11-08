@@ -1,1 +1,147 @@
-/* The roles page. Tokens from styles/tokens.css only; shared pieces from src/ui/. */
+/* The roles pages. Tokens from styles/tokens.css only; shared pieces from
+   src/ui/. Every selector sits under the page's own class. */
+
+/* ---------- Role hero: stats and buttons on the right, as on the board ---- */
+
+.role-hero.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0 36px;
+  align-items: end;
+}
+
+.role-hero .hero-main {
+  display: contents;
+}
+
+.role-hero .hero-crumbs,
+.role-hero .hero-heading {
+  grid-column: 1 / -1;
+}
+
+.role-hero .hero-lede {
+  grid-column: 1;
+  max-width: 680px;
+}
+
+.role-hero .hero-stats {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.role-hero .hero-actions {
+  grid-column: 3;
+  grid-row: 3;
+  margin-top: 0;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+@media (max-width: 1099px) {
+  .role-hero.hero {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 28px;
+  }
+  .role-hero .hero-lede {
+    grid-column: 1 / -1;
+  }
+  .role-hero .hero-stats {
+    grid-column: 1;
+    grid-row: 4;
+  }
+  .role-hero .hero-actions {
+    grid-column: 2;
+    grid-row: 4;
+    justify-self: end;
+  }
+}
+
+@media (max-width: 640px) {
+  .role-hero .hero-actions {
+    grid-column: 1 / -1;
+    grid-row: 5;
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+}
+
+/* ---------- The agents table ---------- */
+
+.role-agents .segmented {
+  flex-wrap: wrap;
+}
+
+.role-table {
+  table-layout: fixed;
+}
+
+.role-table .role-col-started {
+  width: 150px;
+}
+
+.role-table .role-col-last {
+  width: 130px;
+}
+
+.role-table .role-col-keys {
+  width: 26%;
+}
+
+.role-table .role-col-action {
+  width: 84px;
+}
+
+.role-table td {
+  color: var(--muted);
+}
+
+.role-agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.role-agent-text {
+  min-width: 0;
+}
+
+.role-agent-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.role-agent-link:hover {
+  text-decoration: underline;
+}
+
+.role-row.is-running td:nth-child(3) {
+  color: var(--ink);
+}
+
+.role-table .role-quiet {
+  color: var(--muted-2);
+}
+
+.role-table .role-hot {
+  color: var(--ember-ink);
+}
+
+.role-incident {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ember-ink);
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  .role-table .role-col-started,
+  .role-table .role-started {
+    display: none;
+  }
+  .role-table .role-col-keys {
+    width: 30%;
+  }
+}
