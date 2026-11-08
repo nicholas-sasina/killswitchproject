@@ -20,27 +20,24 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
-from burn_contracts import names
+from burn_contracts import names, tools
 
 import burn_scopes
 import db
 import errors
 
-MAX_SOURCE_REF = 260
+MAX_REQUEST = 4096  # a bare resource (with `tool`) may be long; the recorded form never is
 _TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 
 def _source_ref(body: dict) -> str:
     source_ref, tool = body.get("source_ref"), body.get("tool")
-    if not isinstance(source_ref, str) or not source_ref or len(source_ref) > MAX_SOURCE_REF \
-            or not source_ref.isprintable():
-        raise errors.ApiError(400, "source_ref is required ('<tool>:<resource>', at most 260 characters)")
-    if tool is not None:
-        if not isinstance(tool, str) or not re.fullmatch(r"[a-z_]{1,64}", tool):
-            raise errors.ApiError(400, "tool must be a tool name")
-        if not source_ref.startswith(tool + ":") and source_ref != tool:
-            source_ref = f"{tool}:{source_ref}"  # the caller sent the resource id alone
-    return source_ref
+    if not isinstance(source_ref, str) or not source_ref or len(source_ref) > MAX_REQUEST:
+        raise errors.ApiError(400, "source_ref is required ('<tool>:<resource>', or the resource with tool)")
+    if tool is not None and (not isinstance(tool, str) or not re.fullmatch(r"[a-z_]{1,64}", tool)):
+        raise errors.ApiError(400, "tool must be a tool name")
+    # With tool and a bare resource, the resource is recorded the way the Gateway records it.
+    return tools.requested_source_ref(source_ref, tool)
 
 
 def _since(value) -> str | None:

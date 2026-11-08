@@ -100,7 +100,9 @@ replays the pre-rotation key without anyone having stored a copy.
   Gateway swaps it for the value only there, only for a secret the session owns or has in its ledger, and
   never for `send_message` or `notify`.
 - Ledger rows record `source_ref` = `<tool>:<resource>` from the tool's `resource_arg`
-  (`burn_contracts.tools.source_ref`), so `POST /burn/by-source` can find everyone who read a source.
+  (`burn_contracts.tools.source_ref`; a resource that is not printable, longer than 200 characters or
+  starts with `sha256:` becomes `<tool>:sha256:<hex>`, so two resources never share one), so
+  `POST /burn/by-source` can find everyone who read a source.
   Every delivered call that names a resource also writes a read row, sort key `read#<source_ref>`
   (`names.READ_ROW_PREFIX`), credential or not, and `send_message` copies it to the receiver. Read rows
   have no `secret_ref`, `fingerprint` or `status`; burns, ledger reads and exposure counts skip them.

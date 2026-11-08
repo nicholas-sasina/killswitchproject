@@ -107,12 +107,24 @@ def test_tool_and_resource_id_can_be_sent_separately(env, ledger):
     assert out["source_ref"] == SOURCE and [b["agent_id"] for b in out["burned"]] == [one["agent_id"]]
 
 
+@pytest.mark.parametrize("resource", ["config/" + "d" * 300 + ".env", "line\nbreak", "sha256:" + "0" * 64,
+                                      "s3://bucket/key"])
+def test_a_resource_sent_with_its_tool_matches_how_the_gateway_recorded_it(env, ledger, resource):
+    from burn_contracts import tools
+    [one] = instances(env, 1)
+    recorded = tools.source_ref("read_config", {"path": resource})
+    row(ledger, one["agent_id"], "burn/shared/x", source_ref=recorded, first_seen="2026-11-07T20:00:00.000Z",
+        via="read_config")
+    out = call(env, "POST", "/burn/by-source", {"tool": "read_config", "source_ref": resource})[1]
+    assert out["source_ref"] == recorded and [b["agent_id"] for b in out["burned"]] == [one["agent_id"]]
+
+
 def test_nobody_read_it(env, ledger):
     assert call(env, "POST", "/burn/by-source", {"source_ref": "read_ticket:T-0"})[0] == 404
 
 
 @pytest.mark.parametrize("body", [
-    {}, {"source_ref": ""}, {"source_ref": "x" * 261}, {"source_ref": "a\nb"},
+    {}, {"source_ref": ""}, {"source_ref": "x" * 4097}, {"source_ref": 7},
     {"source_ref": SOURCE, "since": "yesterday"}, {"source_ref": "T-1", "tool": "Bad Tool"},
 ])
 def test_bad_requests(env, ledger, body):

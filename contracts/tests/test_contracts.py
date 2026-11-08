@@ -312,8 +312,22 @@ def test_source_ref_and_resolvable_args():
     assert tools.source_ref("read_config", {"path": "config/app.env"}) == "read_config:config/app.env"
     assert tools.source_ref("list_tickets", {}) == "list_tickets"
     assert tools.source_ref("read_ticket", {}) == "read_ticket"
-    assert len(tools.source_ref("read_config", {"path": "x" * 999})) == len("read_config:") + 200
-    assert tools.source_ref("read_config", {"path": "a\nb\x00c"}) == "read_config:abc"
+    assert tools.source_ref("read_ticket", {"ticket_id": 1001}) == "read_ticket:1001"
+    assert tools.source_ref("read_config", {"path": "x" * 200}) == "read_config:" + "x" * 200
+
+
+def test_source_refs_never_collide():
+    from burn_contracts import tools
+    import hashlib
+    hashed = tools.source_ref("read_config", {"path": "a\nb"})
+    assert hashed == "read_config:sha256:" + hashlib.sha256(b"a\nb").hexdigest()
+    pairs = [("a\nb", "ab"), ("x" * 201, "x" * 202), ("y" * 300 + "1", "y" * 300 + "2"),
+             ("sha256:" + "0" * 64, "plain")]
+    for one, other in pairs:
+        assert tools.source_ref("read_config", {"path": one}) != tools.source_ref("read_config", {"path": other})
+    literal = "sha256:" + hashlib.sha256(b"a\nb").hexdigest()  # a resource named like a hash is hashed too
+    assert tools.source_ref("read_config", {"path": literal}) != hashed
+    assert all(len(tools.source_ref("read_config", {"path": p})) <= len("read_config:") + 200 for p, _ in pairs)
     assert tools.resolvable_args("send_message") == () and tools.resolvable_args("notify") == ()
 
 
