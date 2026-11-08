@@ -288,3 +288,34 @@ def test_progress_is_posted_to_the_local_endpoint_with_the_local_token_and_a_ref
     asyncio.run(go())
     assert sent == [("http://127.0.0.1:9/progress", "Bearer local-tok", {"item": "w01-item-01", "state": "started"}),
                     ("http://127.0.0.1:9/progress", "Bearer local-tok", {"item": "w01-item-01", "state": "done"})]
+
+
+def test_the_worker_waits_longer_for_a_progress_answer_than_burn_run_waits_for_burn(monkeypatch):
+    """burn run holds a "started" until Burn records it, then answers (503 after its wait). The worker must still be
+    listening by then, or it gives up first and never learns whether it was burned or Burn was just slow."""
+    import inspect
+    from pathlib import Path
+
+    import httpx
+    from burn_agents import swarm_worker
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "cli"))
+    from burn_cli.runner.run import Instance
+    from burn_cli.runner.spawn_endpoint import SpawnEndpoint
+    waits = [inspect.signature(c.__init__).parameters["progress_wait"].default for c in (Instance, SpawnEndpoint)]
+    assert swarm_worker.PROGRESS_TIMEOUT >= max(waits) + 5  # room for the answer after the wait ends
+
+    seen = {}
+
+    class Recording(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Recording)
+
+    async def go():
+        async with swarm_worker.progress_reporter("http://127.0.0.1:9/progress", "local-tok"):
+            pass
+
+    asyncio.run(go())
+    assert seen["timeout"] == swarm_worker.PROGRESS_TIMEOUT
