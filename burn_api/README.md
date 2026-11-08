@@ -8,7 +8,18 @@ burning an instance, a role, a lineage or a join token in one call.
 
 ## How it works
 - One Lambda behind an API Gateway HTTP API; `handler.py` routes every path in `contracts/burn-api.openapi.yaml`.
-- Every request must carry `x-burn-demo-token`; it is compared in constant time with `burn-system/demo-token`.
+- Who may call what is decided in `auth.py`, in one of two modes:
+  - **Sign-in off** (the default): every request carries `x-burn-demo-token`, compared in constant time with
+    `burn-system/demo-token`, except a join (its join token) and an instance's own calls (its session token,
+    `Authorization: Bearer bst_...`).
+  - **Sign-in on** (`BURN_PEOPLE_AUTH=1`, set by deploying with `-c burn:people_auth=on`): every route except
+    `POST /instances` and an instance's own heartbeat and exit needs a signed-in person. API Gateway's JWT
+    authorizer verifies the person's ID token, and the Lambda checks again that its claims are in
+    `requestContext`; it never reads them from a header or the body. The demo token then works only with
+    `BURN_LOCAL_DEV=1`, which a deployment never sets.
+  - Either way the caller is recorded: `created_by` (the person's email) on new join tokens and sessions,
+    with instances inheriting it from their token or parent, and `actor` on every event (a person, `admin`,
+    or `instance:<session_id>`).
 - `POST /sessions` asks the minter for the agent's credentials, creates a Cognito badge, and writes a `burn-sessions` row.
 - `POST /burn` flips the agent's sessions to `revoked` (the gateway refuses revoked badges on every call), then has the minter rotate the agent's own credentials and flag shared ones from its ledger.
 - Every step writes an event to `burn-events`; `GET /events?since=` is what the dashboard polls.
