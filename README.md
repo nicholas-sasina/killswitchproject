@@ -5,6 +5,9 @@
 Burn contains a compromised AI agent in one click: it revokes the agent's badge and kills every
 credential the agent held or saw, without touching any other agent or service.
 
+**Live:** [website](https://d1s4nb0o9g7gtd.cloudfront.net) · [console](https://do2xre1ud22ky.cloudfront.net)
+(the console needs an invited sign-in)
+
 1. **Per-agent credentials.** Every agent gets its own copy of each credential it needs, so burning
    one agent never breaks another, and a leaked key traces to exactly one agent.
 2. **Secret references.** Every tool response passes through the Gateway. By default, a credential Burn
