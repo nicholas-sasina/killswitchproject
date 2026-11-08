@@ -46,8 +46,10 @@ def test_session_with_a_bad_token_is_a_clear_error(fake):
 
 class SpawnStub(BaseHTTPRequestHandler):
     seen = []
+    auth = []
 
     def do_POST(self):
+        SpawnStub.auth.append(self.headers.get("authorization"))
         body = json.loads(self.rfile.read(int(self.headers["content-length"])))
         SpawnStub.seen.append(body)
         status, out = (403, {"error": "role not allowed"}) if body["role"] == "no" else (200, {"session_id": "sess_c", "agent_id": "agent-w-1"})
@@ -65,9 +67,11 @@ def test_spawn_posts_role_and_argv_to_the_spawn_url(monkeypatch):
     server = HTTPServer(("127.0.0.1", 0), SpawnStub)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setenv("BURN_SPAWN_URL", f"http://127.0.0.1:{server.server_port}/spawn")
+    monkeypatch.setenv("BURN_LOCAL_TOKEN", "local-abc")
     try:
         assert burn.spawn("worker", "python task.py --n 2") == {"session_id": "sess_c", "agent_id": "agent-w-1"}
         assert SpawnStub.seen[-1] == {"role": "worker", "command": ["python", "task.py", "--n", "2"]}
+        assert SpawnStub.auth[-1] == "Bearer local-abc"  # the per-run token proves the caller is this instance's agent
         burn.spawn("worker", ["echo", "a b"])
         assert SpawnStub.seen[-1]["command"] == ["echo", "a b"]
         with pytest.raises(burn.BurnError, match="403: role not allowed"):
