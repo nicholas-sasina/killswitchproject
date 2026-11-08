@@ -151,6 +151,18 @@ def test_join_tokens_parse_and_are_caught_by_gitleaks():
     assert re.search(rule["regex"], f"export BURN_JOIN_TOKEN={token}")
 
 
+def test_session_tokens_are_recognized_and_caught_by_gitleaks():
+    import secrets
+    import tomllib
+    token = names.SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    assert names.is_session_token(token)
+    for bad in [None, "", "bst_short", token[:-1], token + "x", "bjt_" + token[4:], token + "\n"]:
+        assert not names.is_session_token(bad)
+    rules = tomllib.loads((ROOT.parent / ".gitleaks.toml").read_text())["rules"]
+    rule = next(r for r in rules if r["id"] == "burn-session-token")
+    assert re.search(rule["regex"], f"Authorization: Bearer {token}")
+
+
 def test_instance_events_are_schema_valid():
     started = events.make_event(
         agent_id="agent-worker-3fa91c", source="instance", action="started",
@@ -270,6 +282,14 @@ def test_dismissed_event_and_flag_routes():
         assert resolution["properties"]["action"]["enum"] == ["rotate", "dismiss"]
         assert "reason" in resolution["required"]
         assert "instance_count" in doc["components"]["schemas"]["Flag"]["required"]
+
+
+def test_eval_role_names_are_reserved_for_the_eval_harness():
+    from burn_contracts import names
+    for reserved in ("eval", "eval-7", "eval-"):
+        assert names.is_reserved_role_name(reserved)
+    for fine in ("evaluator", "my-eval", "worker", "eva"):
+        assert not names.is_reserved_role_name(fine)
 
 
 def test_tool_mirrors_match_mcp_tools_json():

@@ -4,11 +4,26 @@
 
 Shows live agent status, credential exposure and containment activity with agents and events side by side.
 Burn an agent and inspect its CloudTrail history alongside blocked events from real traffic.
+The **Instances by role** panel groups sessions under their roles, with parent/child lineage,
+status, last seen and exposure counts. Filter by role, status, agent, session or owner to inspect larger swarms.
+Code-managed roles are labelled read-only, and scenario roles retain their names.
+
+Use **Add agent** to create a dashboard-managed role with tools from the MCP contract,
+credential types, message/spawn permissions, optional egress hosts and an owner. Choose the
+join token's uses and lifetime, then use **Copy token**. The token appears separately from the
+join commands, which use a hidden `read -rs BURN_JOIN_TOKEN` prompt or `pbpaste` with `--token-stdin`
+to keep its value out of shell history and command-line arguments. For the clipboard command,
+copy the command first, then use **Copy token** before running it. The token is shown once and
+discarded when continuing or closing. The waiting view changes to connected when a new instance joins.
+Existing dashboard-managed roles have a **New token** action. Both **Burn instance** and
+**Burn role** require confirmation; burning a role revokes all its active instances.
 
 ## How it works
 
 - Polls the Burn API every second with an incremental cursor; a reducer deduplicates events by `event_id`.
 - Agent selection loads its exposure ledger, refreshed every five seconds.
+- One roles request and one instances request refresh the entire role panel every five seconds,
+  including the waiting view, with cancellation and no overlapping requests.
 - Confirming Burn highlights the card with returned rotation/flag counts for ten seconds; full references remain below the ledger.
 - A revoked agent's CloudTrail timeline refreshes every ten seconds.
 - Every response is checked for `x-burn-mock: true`; once detected, a full-width red banner stays until reload.
@@ -53,14 +68,20 @@ npm run build
 
 Tests cover reducer updates and cursor preservation, request headers and routes, persistent mock detection,
 Burn confirmation and timed card feedback, nullable metadata, and blocked handoff/egress events.
+Enrollment tests cover role creation, token display/copy/dismissal, retries and connection detection.
+Role panel tests cover lineage across roles, filtering 25 instances, burn confirmations and partial failures,
+and the shared polling limits.
 `npm run preview` serves the production build. The Burn API must allow the dashboard's origin,
 successful unauthenticated OPTIONS preflights, `x-burn-demo-token` and `Content-Type`.
 Development services expose `x-burn-mock` in `Access-Control-Expose-Headers` so the browser can detect mock data.
 
 ## FAQ
 
-**Does the browser receive credential values?** No. The dashboard reads credential references and metadata.
-Blocked handoff and egress events describe stopped traffic without exposing credential values.
+**Does the browser receive credential values?** The dashboard reads agent credential references and metadata.
+Creating a join token returns its value once so you can copy it separately from the join commands. It stays in the open
+dialog's memory and is never written to localStorage, the URL or console logs. Continuing or closing
+discards it; **Copy token** writes only the token to your clipboard. Blocked handoff and egress events describe
+stopped traffic without exposing agent credential values.
 
 **Why is the timeline empty after Burn?** CloudTrail history can lag several minutes.
 The dashboard keeps polling every ten seconds and shows the API's lag note while waiting.
