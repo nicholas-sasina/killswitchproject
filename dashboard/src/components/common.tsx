@@ -3,12 +3,6 @@ import { BurnMark } from "./Brand";
 /** The Burn mark, re-exported for the controls that carry it. */
 export { BurnMark };
 
-/**
- * Kept so existing call sites keep working after the mark was redrawn.
- * @deprecated Use `BurnMark`.
- */
-export const Flame = BurnMark;
-
 export function Status({ value }: { value: string }) {
   return (
     <span className={`status status-${value}`}>
