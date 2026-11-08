@@ -310,16 +310,21 @@ def own_aws_session(env: dict):
 STARTUP_RETRIES = (1, 2, 4, 5, 5, 5)  # seconds between tries of the key at start: about 20 s in all
 
 
-def new_key_refusal(exc: BaseException) -> bool:
-    """The two refusals a brand-new key gets before AWS and the egress proxy know it.
+NEW_KEY_CODES = {"InvalidClientTokenId", "AccessDenied", "AccessDeniedException"}
 
-    AWS answers InvalidClientTokenId until a new IAM key has propagated. The proxy, whose view of new keys refreshes
-    every couple of seconds, can block the first call that carries one as `credential_detected`; its refusal is JSON,
-    which botocore reports as a parse error with the body in the message.
+
+def new_key_refusal(exc: BaseException) -> bool:
+    """The refusals a brand-new key gets before AWS and the egress proxy know it.
+
+    While a new IAM key propagates, STS answers InvalidClientTokenId and then, for a few more seconds, AccessDenied.
+    AccessDenied from sts:GetCallerIdentity is never a burn: no IAM policy can deny that call, and a burned session is
+    refused by the proxy (session_inactive) before it reaches AWS. The proxy, whose view of new keys refreshes every
+    couple of seconds, can block the first call that carries one as `credential_detected`; its refusal is JSON, which
+    botocore reports as a parse error with the body in the message.
     """
     from botocore.exceptions import ClientError
     if isinstance(exc, ClientError):
-        return exc.response.get("Error", {}).get("Code") == "InvalidClientTokenId"
+        return exc.response.get("Error", {}).get("Code") in NEW_KEY_CODES
     return "credential_detected" in str(exc)
 
 
