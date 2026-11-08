@@ -182,11 +182,15 @@ def cache_path() -> Path:
 
 
 def save_cache(credentials: dict, path: Path | None = None) -> Path:
-    """Write the cache so it is never readable by anyone else, not even briefly: the directory is 0700 and the file
-    is created 0600 under a temporary name, then renamed into place."""
+    """Write the cache so it is never readable by anyone else, not even briefly: the file is created 0600 under a
+    temporary name, then renamed into place. A directory created here is 0700; an existing one (BURN_CONFIG_DIR may
+    point at a directory shared with other things) keeps its mode, since the file is private either way."""
     path = path or cache_path()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
+    try:
+        path.parent.mkdir(mode=0o700, parents=True)
+        path.parent.chmod(0o700)  # mkdir's mode is narrowed by the umask, never widened; make it exact
+    except FileExistsError:
+        pass
     tmp = path.parent / f".credentials.{secrets.token_hex(6)}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -266,5 +270,8 @@ def current_id_token(now: float | None = None) -> str:
     now = time.time() if now is None else now
     if cached.get("expires_at", 0) - now < REFRESH_MARGIN:
         cached = refreshed(cached)
-        save_cache(cached)
+        try:
+            save_cache(cached)
+        except OSError as exc:
+            raise SignInError(f"could not save the refreshed sign-in in {cache_path().parent} ({exc.strerror})") from None
     return cached["id_token"]

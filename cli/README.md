@@ -105,7 +105,7 @@ uid of its own from a reserved range (or `--user NAME`, shared by every instance
 read `burn run`'s environment (`/proc/1/environ`), which holds the API token and the join token, and one agent
 cannot read another's: a child never sees its parent's credentials. Child supervisors stay root; only agent commands
 are dropped. When `burn run` is **not** root (directly on a laptop), the agent runs as you: it can read your
-files and `burn run`'s environment. Containment against a hostile agent then needs a container or a separate user.
+files, including your `burn login` sign-in in `~/.config/burn`, and `burn run`'s environment. Containment against a hostile agent then needs a container or a separate user.
 
 `burn run` also needs `BURN_GATEWAY_URL` (written by `make env`) and, optionally, `BURN_PROXY_URL`.
 

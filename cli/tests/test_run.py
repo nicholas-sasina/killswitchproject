@@ -543,7 +543,8 @@ def test_the_help_says_what_a_non_root_agent_can_read(capsys):
     with pytest.raises(SystemExit):
         cli(["run", "--help"])
     out = " ".join(capsys.readouterr().out.split())
-    assert "not containment" in out and "can read your files and burn run's environment" in out
+    assert "not containment" in out
+    assert "can read your files, including your `burn login` sign-in in ~/.config/burn, and burn run's environment" in out
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="needs root to switch users")

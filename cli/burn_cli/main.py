@@ -29,7 +29,8 @@ demo stack, which gives the agent no route except the proxy.
 Who the agent runs as: when burn run is root (a container's PID 1) the agent runs as an unprivileged uid of its
 own (or --user), so it cannot read burn run's environment or files, and no instance can read another's, so a
 child never sees its parent's credentials. When burn run is not root, the agent runs as
-you: it can read your files and burn run's environment (/proc/<pid>/environ). Containment against a hostile
+you: it can read your files, including your `burn login` sign-in in ~/.config/burn, and burn run's environment
+(/proc/<pid>/environ). Containment against a hostile
 agent then needs a container or a separate user.
 """
 

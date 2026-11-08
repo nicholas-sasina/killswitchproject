@@ -177,11 +177,32 @@ def test_the_cache_is_private_from_the_first_moment(cognito, monkeypatch):
     assert [p.name for p in path.parent.iterdir()] == ["credentials.json"]  # no temporary file left behind
 
 
-def test_an_existing_loose_directory_is_tightened(cognito):
-    path = signin.cache_path()
-    path.parent.mkdir(parents=True, mode=0o755)
-    signin.save_cache({"id_token": "x"})
+def test_a_new_directory_is_private_and_an_existing_one_keeps_its_mode(cognito, monkeypatch):
+    old = os.umask(0)  # the 0700 must not depend on the umask
+    try:
+        path = signin.save_cache({"id_token": "x"})
+    finally:
+        os.umask(old)
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    shared = path.parent.parent / "shared"  # a BURN_CONFIG_DIR that already exists for other things
+    shared.mkdir()
+    shared.chmod(0o755)
+    monkeypatch.setenv("BURN_CONFIG_DIR", str(shared))
+    path = signin.save_cache({"id_token": "x"})
+    assert stat.S_IMODE(shared.stat().st_mode) == 0o755 and stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_a_refreshed_sign_in_that_cannot_be_saved_is_a_sign_in_error(cognito, monkeypatch):
+    cognito.refresh_tokens.add("refresh-0")
+    signin.save_cache({"id_token": jwt({"exp": 1}), "refresh_token": "refresh-0", "expires_at": 1,
+                       "email": "a@example.com", "domain": cognito.url, "client_id": "c"})
+
+    def full(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(signin, "save_cache", full)
+    with pytest.raises(signin.SignInError, match="could not save the refreshed sign-in .*No space left on device"):
+        signin.current_id_token()
 
 
 def test_a_token_with_plenty_of_time_left_is_used_as_is(cognito):
