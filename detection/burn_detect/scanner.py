@@ -8,7 +8,7 @@ from burn_contracts.fingerprint import fingerprint, shingle_fingerprint, shingle
 from .normalize import _URL, TOKENS, candidates, segments, variants
 from .window import SessionWindow
 
-_EDGE = ".,;:'\"()[]{}<>"  # trimmed from a token's ends when locating a fragment match
+_EDGE = ".,;:'\"()[]{}<>"  # trimmed from a piece's ends when locating a credential inside a token
 _FORMATS = (
     (re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"), "aws_key"),
     (re.compile(r"(?<![A-Za-z0-9_])mpk_live_[A-Za-z0-9]{32}(?![A-Za-z0-9])"), "api_key"),
@@ -26,9 +26,10 @@ class Finding:
     kind: str
     encoding: str
     coverage: float
-    # Where it is in the scanned text (optional, additive). For a decoded match the span covers
-    # the whole encoded segment. Only exact and format matches can be located; None / () means
-    # "not located" (a fragment, or a whole-text transform such as reversal).
+    # Where it is in the scanned text (optional, additive): each located copy of every registered
+    # part of the credential (an AWS key's id and its secret), so all of them can be replaced.
+    # For a decoded match the span covers the whole encoded segment. None / () means no copy
+    # could be located exactly (a fragment, or a whole-text transform such as reversal).
     start: int | None = None
     end: int | None = None
     spans: tuple[tuple[int, int], ...] = ()
@@ -40,6 +41,10 @@ def _finding(row: dict, fp: str, kind: str, encoding: str, coverage: float) -> F
     owner = "shared" if agent == "shared" else "agent" if agent else "unknown"
     return Finding(row.get("secret_ref"), fp, row.get("secret_type", "other"), owner,
                    agent if owner == "agent" else None, kind, encoding, coverage)
+
+
+def _inside(span: tuple[int, int], spans) -> bool:
+    return any(a <= span[0] and span[1] <= b for a, b in spans)
 
 
 class Scanner:
@@ -84,13 +89,14 @@ class Scanner:
                     add(match[0], span)
         return positions
 
-    def _piece_spans(self, text: str, findings: list[Finding], rows: dict) -> dict[tuple, list]:
-        """For fragment (shingle) findings: try the pieces of each token around '=' and edge
-        punctuation (KEY=<value>, '<value>.'), and keep those that are an exact row of the same
-        credential. Only locates; it never changes which findings the scan returns."""
-        wanted = {(rows[f.fingerprint].get("secret_ref"), rows[f.fingerprint].get("version"))
-                  for f in findings if f.kind == "shingle" and f.fingerprint in rows}
-        if not wanted:
+    def _piece_spans(self, text: str, located: dict[tuple, set]) -> dict[tuple, set]:
+        """Try the pieces of each token around '=' and edge punctuation (KEY=<value>, '<value>.')
+        and keep those that are an exact row of a found credential: a part that matched only by
+        shingles because it shares a token with its key name (an AWS secret beside its key id),
+        or the value behind a fragment finding. located: (secret_ref, version) -> spans already
+        located for it; a piece inside one of them is covered already and is not tried. Only
+        locates; it never changes which findings the scan returns."""
+        if not located:
             return {}
         pieces = {}
         for match in TOKENS.finditer(text):
@@ -101,35 +107,47 @@ class Scanner:
                     start += 1
                 while end > start and match[0][end - 1] in _EDGE:
                     end -= 1
-                piece = match[0][start:end]
-                if piece and piece != match[0]:
-                    pieces.setdefault(fingerprint(piece, self.key), []).append((offset + start, offset + end))
+                piece, span = match[0][start:end], (offset + start, offset + end)
+                if piece and piece != match[0] and not all(_inside(span, spans) for spans in located.values()):
+                    pieces.setdefault(fingerprint(piece, self.key), []).append(span)
         if not pieces:
             return {}
-        found = {}  # a second lookup, only for fragment findings that have pieces to try
+        found = {}  # a second lookup, only when a found credential has pieces left to try
         for fp, row in self.lookup(set(pieces)).items():
             group = (row.get("secret_ref"), row.get("version"))
-            if row.get("kind") == "exact" and group in wanted:
-                found.setdefault(group, []).extend(pieces[fp])
+            if row.get("kind") == "exact" and group in located:
+                found.setdefault(group, set()).update(s for s in pieces[fp] if not _inside(s, located[group]))
         return found
 
     def _locate(self, text: str, rows: dict, findings: list[Finding], known: dict | None = None) -> list[Finding]:
-        """Attach spans and the canary flag. Costs nothing when nothing was found."""
+        """Attach spans and the canary flag. Costs nothing when nothing was found.
+
+        Spans are per credential (secret_ref and version): each of its findings carries every
+        located copy of every registered part, because a part seen beside another part's exact
+        match gets no finding of its own (an AWS secret beside its key id). A format-only
+        finding carries its own."""
         if not findings:
             return findings
         positions = self._positions(text, known) if any(f.kind in ("exact", "format") for f in findings) else {}
-        by_piece = self._piece_spans(text, findings, rows)
-        located = []
+
+        def group(fp: str) -> tuple:
+            row = rows.get(fp, {})
+            return row.get("secret_ref"), row.get("version")
+
+        located = {group(f.fingerprint): set() for f in findings if f.fingerprint in rows}
+        for fp, row in rows.items():
+            if row.get("kind") == "exact" and group(fp) in located:  # every exact row here matched
+                located[group(fp)].update(positions.get(fp, ()))
+        for credential, spans in self._piece_spans(text, located).items():
+            located[credential] |= spans
+        result = []
         for f in findings:
-            if f.kind in ("exact", "format"):
-                spans = tuple(sorted(set(positions.get(f.fingerprint, ()))))
-            else:
-                row = rows.get(f.fingerprint, {})
-                spans = tuple(sorted(set(by_piece.get((row.get("secret_ref"), row.get("version")), ()))))
+            own = located[group(f.fingerprint)] if f.fingerprint in rows else positions.get(f.fingerprint, ())
+            spans = tuple(sorted(set(own)))
             start, end = spans[0] if spans else (None, None)
             canary = bool(rows.get(f.fingerprint, {}).get("canary"))
-            located.append(replace(f, start=start, end=end, spans=spans, canary=canary))
-        return located
+            result.append(replace(f, start=start, end=end, spans=spans, canary=canary))
+        return result
 
     def _collect_candidates(self, text: str) -> tuple[dict, dict, dict, dict]:
         exact, shingles, formats = {}, {}, {}
