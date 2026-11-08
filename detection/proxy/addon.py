@@ -27,7 +27,8 @@ class BurnProxy:
     def _initialize(self):
         if self.checker is None:
             self.state = self.state or AwsState()
-            self.checker = ExitCheck(Scanner(self.state.key(), self.state.lookup), self.settings)
+            self.checker = ExitCheck(Scanner(self.state.key(), self.state.lookup), self.settings,
+                                     refresh=self.state.refresh)
 
     def _reply(self, flow, reason, *, agent="system", session=None, finding=None, action="blocked"):
         fields = {"session_id": session, "detail": reason}
