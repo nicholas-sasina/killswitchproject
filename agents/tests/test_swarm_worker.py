@@ -144,12 +144,23 @@ def test_a_task_with_nothing_left_makes_no_calls_and_exits_0():
     assert code == 0 and seen == []
 
 
-def test_a_revoked_badge_stops_the_task_with_the_item_started_but_not_done():
+def test_a_badge_that_dies_mid_task_stops_it_with_the_burned_exit_code(caplog):
+    caplog.set_level("INFO", logger="swarm_worker")
+    from burn_agents.swarm_worker import EXIT_BURNED
+
     async def dead(tool, args):
         return True, BADGE_DEAD
 
     code, seen, _ = run_task(dead, ["w01-item-01", "w01-item-02"])
-    assert code == 0 and seen == [("started", "w01-item-01"), ("call", "read_inbox")]
+    assert code == EXIT_BURNED == 3 and seen == [("started", "w01-item-01"), ("call", "read_inbox")]
+    assert "burned at w01-item-01, stopping" in caplog.text
+
+
+def test_a_dead_badge_raised_as_an_exception_mid_task_is_also_burned():
+    async def dead(tool, args):
+        raise RuntimeError(BADGE_DEAD)
+
+    assert run_task(dead, ["w01-item-01"])[0] == 3
 
 
 def test_a_failed_call_is_retried_for_the_same_item_and_reported_done_once():
@@ -200,6 +211,19 @@ def test_the_task_and_resume_come_from_the_environment_and_are_checked():
                 {"BURN_TASK": '["a-1"]', "BURN_RESUME": '{"done": [], "quarantined": [], "note": "x"}'}):
         with pytest.raises(ValueError):
             read_task(bad)
+
+
+def test_a_dead_badge_that_escapes_the_loop_is_burned_only_for_a_task_worker(monkeypatch):
+    from burn_agents import swarm_worker
+
+    async def dead(env):
+        raise RuntimeError(BADGE_DEAD)
+
+    monkeypatch.setattr(swarm_worker, "main_async", dead)
+    monkeypatch.delenv("BURN_TASK", raising=False)
+    assert swarm_worker.main() == 0  # no task: stopping on a dead badge is the normal end, as before
+    monkeypatch.setenv("BURN_TASK", '["w01-item-01"]')
+    assert swarm_worker.main() == 3
 
 
 def test_with_a_task_it_needs_the_progress_endpoint():

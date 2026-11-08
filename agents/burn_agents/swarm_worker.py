@@ -27,6 +27,7 @@ log = logging.getLogger("swarm_worker")
 Call = Callable[[str, dict], Awaitable[tuple[bool, str]]]  # (tool, arguments) -> (is_error, text)
 Report = Callable[[str, str], Awaitable[None]]  # (item, "started" | "done"); raises if burn run did not take it
 MAX_CONSECUTIVE_FAILURES = 5
+EXIT_BURNED = 3  # a task worker stopped because it was burned (as `burn run` exits when it stops a burned agent)
 
 
 def root_cause(exc: BaseException) -> str:
@@ -104,8 +105,8 @@ async def work_task(call: Call, report: Report, *, task: list[str], resume: dict
     """Work through `task`, skipping what `resume` says was done or quarantined. Returns an exit code.
 
     Per item: report started, one `tool` call, report done, then `interval` seconds before the next. A failed call is
-    retried for the same item. 0 = every item handled (or the badge was revoked: Burn decides what happens to the
-    rest), 1 = the Gateway stayed unreachable, or burn run did not take a progress report (no more work without it).
+    retried for the same item. 0 = every item handled, EXIT_BURNED = burned before the end (the Gateway refused the
+    badge), 1 = the Gateway stayed unreachable, or burn run did not take a progress report (no more work without it).
     """
     handled = set(resume.get("done", [])) | set(resume.get("quarantined", []))
     todo = [item for item in task if item not in handled]
@@ -115,21 +116,19 @@ async def work_task(call: Call, report: Report, *, task: list[str], resume: dict
     for n, item in enumerate(todo):
         if n:
             await sleep(interval)
-        if not await _report(report, item, "started"):
-            return 1
+        if (code := await _report(report, item, "started")) is not None:
+            return code
         failures = 0
         while True:
             try:
                 is_error, text = await call(tool, {})
             except Exception as exc:  # noqa: BLE001 - a dead connection and a revoked badge look alike here
                 if is_refusal_text(str(exc)):
-                    log.info("badge revoked, stopping at %s", item)
-                    return 0
+                    return _burned(item)
                 problem = root_cause(exc)
             else:
                 if is_error and is_refusal_text(text):
-                    log.info("badge revoked, stopping at %s", item)
-                    return 0
+                    return _burned(item)
                 if not is_error:
                     break
                 problem = "refused: " + text[:80]
@@ -138,20 +137,26 @@ async def work_task(call: Call, report: Report, *, task: list[str], resume: dict
             if failures >= MAX_CONSECUTIVE_FAILURES:
                 return 1
             await sleep(interval)
-        if not await _report(report, item, "done"):
-            return 1
+        if (code := await _report(report, item, "done")) is not None:
+            return code
         log.info("%s done", item)
     log.info("task finished")
     return 0
 
 
-async def _report(report: Report, item: str, state: str) -> bool:
+def _burned(item: str) -> int:
+    log.info("burned at %s, stopping", item)
+    return EXIT_BURNED
+
+
+async def _report(report: Report, item: str, state: str) -> int | None:
+    """None once burn run has taken the report, else the exit code to stop with."""
     try:
         await report(item, state)
-        return True
+        return None
     except Exception as exc:  # noqa: BLE001
         log.error("burn run did not take %s %s (%s): stopping", item, state, root_cause(exc))
-        return False
+        return 1
 
 
 @asynccontextmanager
@@ -216,8 +221,8 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as exc:  # noqa: BLE001
-        if is_refusal_text(str(exc)):
-            return 0
+        if is_refusal_text(str(exc)):  # a dead badge: the normal end without a task, a burn mid-task with one
+            return EXIT_BURNED if os.environ.get(TASK_ENV) else 0
         log.error("stopping: %s", root_cause(exc))
         return 1
 
