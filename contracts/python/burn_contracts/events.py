@@ -17,14 +17,19 @@ ACTIONS = {
     "refused", "issued", "inherited", "rejected",
     # instance lifecycle (source "instance"), and a badge Burn never issued (source "gateway")
     "started", "exited", "unregistered",
+    # a session's canary was presented to the mock provider (source "provider")
+    "canary_used",
 }
 SECRET_TYPES = {"aws_key", "api_key", "other"}
 OWNERS = {"agent", "shared", "unknown"}
+# Review severity of a flagged credential, lowest first. Levels only ever go up.
+FLAG_LEVELS = ("seen", "attempted", "reported")
 
 OPTIONAL_FIELDS = (
     "session_id", "tool", "secret_ref", "fingerprint", "secret_type", "owner",
     "owner_agent_id", "target_agent_id", "destination", "encoding", "detail",
     "role", "parent_session",
+    "flag_level",
 )
 
 _SECRET_REF_RE = re.compile(r"^burn/(agent-[a-z0-9-]{1,40}|shared)/[a-z0-9_]{1,40}$")
@@ -60,6 +65,8 @@ def make_event(*, agent_id: str, source: str, action: str, **fields) -> dict:
         raise ValueError("fingerprint must be 64 lowercase hex chars")
     if fields.get("role") is not None and not _ROLE_RE.match(fields["role"]):
         raise ValueError(f"invalid role: {fields['role']!r}")
+    if fields.get("flag_level") is not None and fields["flag_level"] not in FLAG_LEVELS:
+        raise ValueError(f"invalid flag_level: {fields['flag_level']!r}")
     if fields.get("detail") is not None and len(fields["detail"]) > 500:
         raise ValueError("detail longer than 500 chars")
 

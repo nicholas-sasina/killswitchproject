@@ -40,6 +40,7 @@ def test_sessions_activity_burn_and_other_agent_survives(client, scenario):
         client.app.state.mock.tick()
     ledger = check(client.get(f"/agents/{agents[0]}/ledger"), "/agents/{agent_id}/ledger")
     assert all(re.fullmatch(r"[a-f0-9]{64}", row["fingerprint"]) for row in ledger["entries"])
+    assert all(row["flag_level"] is None for row in ledger["entries"])
     before = check(client.get("/events"), "/events")
     assert {"recorded", "inherited", "blocked"} <= {event["action"] for event in before["events"]}
     result = check(client.post("/burn", json={"agent_id": agents[0]}), "/burn", "post")
@@ -57,6 +58,7 @@ def test_sessions_activity_burn_and_other_agent_survives(client, scenario):
     assert any(event["agent_id"] == agents[1] and event["action"] == "recorded" for event in after["events"])
     entries = check(client.get(f"/agents/{agents[0]}/ledger"), "/agents/{agent_id}/ledger")["entries"]
     assert {entry["status"] for entry in entries} == {"rotated", "flagged"}
+    assert {entry["flag_level"] for entry in entries if entry["status"] == "flagged"} == {"seen"}
     inherited = check(client.get(f"/agents/{agents[1]}/ledger"), "/agents/{agent_id}/ledger")["entries"]
     assert any(entry["owner_agent_id"] == agents[0] and entry["status"] == "rotated" for entry in inherited)
     blast = check(client.get(f"/burn/{agents[0]}/blast-radius"), "/burn/{agent_id}/blast-radius")
