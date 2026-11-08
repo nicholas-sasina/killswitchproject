@@ -377,10 +377,26 @@ paths:
   /instances/{session_id}/heartbeat:
     post:
       summary: Mark an instance as alive (sent by `burn run` while the agent makes calls).
+      description: |
+        The body may carry task progress the agent reported to its supervisor since the last heartbeat
+        (`progress`, oldest first). Burn stamps each event with its own receive time, on Burn's clock, so an
+        agent cannot backdate anything, and keeps one entry per item on the instance:
+        `{"started_at": <ts>, "done_at": <ts or null>}`.
+        - `done` for an item that was never started counts as started and done at the same time.
+        - A repeated `started` keeps the first `started_at`; a repeated `done` keeps the first `done_at`.
+        - Only item ids are stored. Reads return counts (`items_started`, `items_done`), never the map.
+        A broken rule is a 400 naming the rule, and nothing from that heartbeat is recorded. It is never a 409,
+        so a supervisor cannot mistake it for its instance being burned.
       security: [{ instanceBearer: [] }, { adminHeader: [] }]   # the session token of this instance
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Heartbeat' }
       responses:
+        '400': { description: "a progress rule was broken: a bad item id or state, more than 50 events in one heartbeat, or more than 500 distinct items for this instance" }
         '401': { description: no valid session token for this instance }
         '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
         '404': { description: no such session }
@@ -768,6 +784,27 @@ components:
         status: { type: string, enum: [active, used_up, expired, revoked] }
         created_at: { type: string, format: date-time }
         created_by: { $ref: '#/components/schemas/CreatedBy' }
+    ItemId:
+      type: string
+      pattern: '^[A-Za-z0-9_.:-]{1,64}$'
+      description: One item of an instance's task, named by whatever launched it (names.ITEM_ID_RE).
+      example: w01-item-03
+    ProgressEvent:
+      type: object
+      required: [item, state]
+      additionalProperties: false
+      properties:
+        item: { $ref: '#/components/schemas/ItemId' }
+        state: { type: string, enum: [started, done] }
+    Heartbeat:
+      type: object
+      additionalProperties: false
+      properties:
+        progress:
+          type: array
+          maxItems: 50
+          description: Progress the agent reported since the last heartbeat, oldest first.
+          items: { $ref: '#/components/schemas/ProgressEvent' }
     Instance:
       type: object
       required: [session_id, agent_id, role, status, created_at]

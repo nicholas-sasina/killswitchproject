@@ -225,6 +225,16 @@ is returned once in the join reply and never stored; the supervisor never hands 
   and clears the flag; `dismiss` keeps the value and closes the flag. A dismissed flag reopens only on
   evidence at a higher level than the level it was dismissed at.
 
+### Replace on burn
+- **Progress** is item ids only (`names.ITEM_ID_RE`). The launcher hands an agent its task as `BURN_TASK` (a
+  JSON list of item ids); the agent tells its `burn run` supervisor `{"item": <id>, "state": "started" | "done"}`
+  at `BURN_PROGRESS_URL`, and the supervisor sends what it has queued in the body of its next heartbeat
+  (`{"progress": [...]}`, at most `names.MAX_PROGRESS_EVENTS` = 50 per heartbeat).
+- Burn stamps each event with its own receive time and keeps one entry per item on the session row,
+  `progress: {<item>: {"started_at", "done_at"}}`, at most `names.MAX_PROGRESS_ITEMS` = 500 items per
+  instance. `done` without `started` counts as both at once; a repeat never moves a time. A broken rule is a
+  400 naming it (never a 409, which means burned or exited). Reads show counts only.
+
 ### Events
 - Build every event with `burn_contracts.events.make_event(...)`. It fills `event_id` and `ts`
   and rejects unknown enum values, so all writers stay schema-valid.

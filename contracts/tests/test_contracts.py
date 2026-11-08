@@ -495,3 +495,34 @@ def test_roles_can_ask_for_a_replacement_when_an_instance_is_burned():
         jsonschema.validate({"version": 1, "roles": [role | {"replace_on_burn": "yes"}]}, schema)
     fields = _api()["components"]["schemas"]["RoleFields"]["properties"]
     assert fields["replace_on_burn"] == {key: prop[key] for key in ("type", "default", "description")}
+
+
+def test_progress_is_item_ids_only_with_fixed_limits():
+    assert names.ITEM_ID_RE.pattern == r"^[A-Za-z0-9_.:-]{1,64}$"
+    for good in ("w01-item-01", "T-1001", "a", "x" * 64, "ns:item_1.2"):
+        assert names.is_item_id(good)
+    for bad in (None, 7, "", "x" * 65, "has space", "a/b", "w01\n", "{{burn:ref:x}}", "é"):
+        assert not names.is_item_id(bad)
+    assert names.MAX_PROGRESS_ITEMS == 500 and names.MAX_PROGRESS_EVENTS == 50
+    assert names.PROGRESS_STATES == ("started", "done")
+    assert (names.PROGRESS_URL_ENV, names.TASK_ENV, names.RESUME_ENV) == (
+        "BURN_PROGRESS_URL", "BURN_TASK", "BURN_RESUME")
+
+
+def test_progress_rides_on_the_heartbeat_and_a_broken_rule_is_not_a_409():
+    api = _api()
+    schemas = api["components"]["schemas"]
+    assert schemas["ItemId"]["pattern"] == names.ITEM_ID_RE.pattern
+    op = api["paths"]["/instances/{session_id}/heartbeat"]["post"]
+    assert op["requestBody"]["required"] is False  # a bare heartbeat stays valid
+    body = op["requestBody"]["content"]["application/json"]["schema"]
+    assert body == {"$ref": "#/components/schemas/Heartbeat"}
+    progress = schemas["Heartbeat"]["properties"]["progress"]
+    assert progress["maxItems"] == names.MAX_PROGRESS_EVENTS
+    event = schemas["ProgressEvent"]
+    assert event["required"] == ["item", "state"] and event["additionalProperties"] is False
+    assert event["properties"]["item"] == {"$ref": "#/components/schemas/ItemId"}
+    assert tuple(event["properties"]["state"]["enum"]) == names.PROGRESS_STATES
+    assert "400" in op["responses"] and "409" in op["responses"]
+    assert str(names.MAX_PROGRESS_ITEMS) in op["responses"]["400"]["description"]
+    assert "Burn's clock" in op["description"]

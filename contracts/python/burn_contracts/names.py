@@ -182,3 +182,21 @@ def canary_secret_ref(agent_id: str, session_id: str) -> str:
 def is_canary_ref(secret_ref: str) -> bool:
     parts = (secret_ref or "").split("/")
     return len(parts) == 3 and parts[0] == "burn" and parts[2].startswith(CANARY_PREFIX)
+
+
+# Task progress (replace on burn). An agent tells its `burn run` supervisor which task items it started and
+# finished; the supervisor sends them on its next heartbeat and Burn stamps each one with its own clock. Only item
+# ids travel, never free text, so nothing the agent writes can reach the instance that replaces it.
+ITEM_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+PROGRESS_STATES = ("started", "done")
+MAX_PROGRESS_EVENTS = 50   # progress events in one heartbeat
+MAX_PROGRESS_ITEMS = 500   # distinct items one instance may report (one stored entry each, about 100 bytes)
+# The supervisor's local progress endpoint, and the task a launcher hands it, in the agent's environment.
+PROGRESS_URL_ENV = "BURN_PROGRESS_URL"  # http://127.0.0.1:<port>/progress, takes {"item": <id>, "state": <state>}
+TASK_ENV = "BURN_TASK"                  # JSON list of item ids
+RESUME_ENV = "BURN_RESUME"              # JSON {"done": [ids], "quarantined": [ids]} from the replace reply
+
+
+def is_item_id(value) -> bool:
+    # fullmatch: "$" alone would also accept a trailing newline.
+    return isinstance(value, str) and bool(ITEM_ID_RE.fullmatch(value))
