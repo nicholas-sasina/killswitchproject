@@ -35,6 +35,10 @@ npx aws-cdk@2 destroy --all    # tear down
 ```
 First time in a new account: `npx aws-cdk@2 bootstrap aws://<account-id>/us-east-1`.
 
+To deploy, prefer `make deploy` and `make deploy-<Stack>` from the repo root. They keep people sign-in
+and the hosted dashboard as this account runs them (see "Deploys follow the account" below). A bare
+`npx aws-cdk@2 deploy` passes no flags, so it switches both off in BurnPeople and BurnApi.
+
 Teardown note: Secrets Manager keeps deleted secrets for a recovery window, so redeploying right
 after a destroy can fail on the secret names. Force-delete them first:
 `aws secretsmanager delete-secret --secret-id burn-system/fingerprint-key --force-delete-without-recovery`
@@ -87,16 +91,25 @@ token, which must never be public.
 - The CSP is the website's, plus the API and Cognito sign-in domains in `connect-src`.
 
 Deploy order:
-1. Switch people sign-in on (deploy BurnPeople and BurnApi with `-c burn:people_auth=on`).
+1. Switch people sign-in on: `make deploy-BurnApi PEOPLE_AUTH=on`, which deploys BurnPeople first.
 2. `make dashboard-deploy`: refuses unless sign-in is on. It builds and checks the dashboard, uploads it
    and prints its address.
 3. `make dashboard-hosted`: refuses unless the hosted dashboard serves a page. It deploys BurnPeople and
    BurnApi with `-c burn:people_auth=on -c burn:dashboard_hosted=on`.
 4. `make site-deploy`: the website's dashboard link now points at the hosted dashboard.
 
-Later deploys of BurnPeople and BurnApi need both flags too. Without them, sign-in goes back to the
-local addresses only. Pass them with `-c` each time, or keep them in the gitignored
-`infra/cdk.context.json`.
+### Deploys follow the account
+`make deploy` and `make deploy-<Stack>` pass `burn:people_auth` and `burn:dashboard_hosted` as this
+account runs them. `burn_api/scripts/deploy_flags.py` reads that state:
+- sign-in is on when SSM `/burn/people/enabled` is `on`, which BurnApi writes from its own flag;
+- the dashboard is hosted when sign-in is on, `/burn/dashboard/url` exists, and the dashboard serves a
+  page. An empty distribution answers 403, so it counts as not hosted.
+
+So after the steps above, every later deploy keeps sign-in and the hosted dashboard on. Nothing is
+committed to `cdk.json`, so a checkout deploying to another account starts with both off. When the
+hosted dashboard doesn't answer at all, the deploy refuses rather than guess. To change either on
+purpose, add `PEOPLE_AUTH=on|off` or `DASHBOARD_HOSTED=on|off`, e.g.
+`make deploy-BurnApi PEOPLE_AUTH=off`.
 
 ## FAQ
 - **Why so many stacks?** Each component deploys on its own, so changing one part never

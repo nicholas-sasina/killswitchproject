@@ -8,6 +8,9 @@ ROLE ?= worker
 N ?= 20
 ITEMS ?= 0
 CDK := npx -y aws-cdk@2
+# deploy and deploy-% keep people sign-in and the hosted dashboard as this account runs them (read from SSM),
+# so no checkout switches either off by accident. PEOPLE_AUTH=on|off or DASHBOARD_HOSTED=on|off changes one.
+DEPLOY_FLAGS = cd burn_api && uv run -q python scripts/deploy_flags.py$(if $(PEOPLE_AUTH), --people-auth=$(PEOPLE_AUTH))$(if $(DASHBOARD_HOSTED), --dashboard-hosted=$(DASHBOARD_HOSTED))
 export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
 
@@ -23,11 +26,11 @@ help: ## List targets
 hooks: ## Install the gitleaks pre-commit secret gate
 	./scripts/install-hooks.sh
 
-deploy: ## Deploy every AWS stack (us-east-1)
-	cd infra && uv sync -q && $(CDK) deploy --all --require-approval never
+deploy: ## Deploy every AWS stack (us-east-1); sign-in and the hosted dashboard stay as deployed
+	flags="$$($(DEPLOY_FLAGS))" && cd infra && uv sync -q && $(CDK) deploy --all --require-approval never $$flags
 
-deploy-%: ## Deploy one stack, e.g. make deploy-BurnApi
-	cd infra && uv sync -q && $(CDK) deploy $* --require-approval never
+deploy-%: ## Deploy one stack, e.g. make deploy-BurnApi (same flags as deploy)
+	flags="$$($(DEPLOY_FLAGS))" && cd infra && uv sync -q && $(CDK) deploy $* --require-approval never $$flags
 
 site-deploy: ## Build the website and deploy it to S3 and CloudFront (BurnSite)
 	url="$${VITE_DASHBOARD_URL:-$$(cd burn_api && uv run -q python scripts/hosted_dashboard.py url)}"; \
