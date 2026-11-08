@@ -1,27 +1,28 @@
 """DynamoDB access shared by every route: table handles, event writer, JSON helpers."""
 import json
+import threading
 from decimal import Decimal
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from burn_contracts import names
 from burn_contracts.events import make_event
 
-_resource = None
+_local = threading.local()
 
 
 def resource():
+    # One resource per thread (boto3 resources are not thread-safe; scoped burns use a pool).
     # Created lazily so tests can start moto before the first call.
-    global _resource
-    if _resource is None:
-        _resource = boto3.resource("dynamodb", region_name=names.REGION)
-    return _resource
+    if getattr(_local, "resource", None) is None:
+        _local.resource = boto3.session.Session().resource("dynamodb", region_name=names.REGION)
+    return _local.resource
 
 
 def reset():
     """Forget cached clients (tests only)."""
-    global _resource
-    _resource = None
+    global _local
+    _local = threading.local()
 
 
 def table(name: str):
@@ -48,10 +49,65 @@ def sessions_for_agent(agent_id: str) -> list[dict]:
     )
 
 
-def get_agent(agent_id: str) -> dict | None:
+def scan_all(tbl, **kwargs) -> list[dict]:
+    """Follow pagination on a filtered scan."""
+    items, start = [], None
+    while True:
+        if start:
+            kwargs["ExclusiveStartKey"] = start
+        page = tbl.scan(**kwargs)
+        items += page["Items"]
+        start = page.get("LastEvaluatedKey")
+        if not start:
+            return items
+
+
+def get_scenario_agent(agent_id: str) -> dict | None:
     """The agent object exactly as written in the scenario file, or None."""
     item = table(names.SCENARIO_TABLE).get_item(Key={"pk": f"agent#{agent_id}"}).get("Item")
     return item["data"] if item else None
+
+
+def get_agent(agent_id: str) -> dict | None:
+    """A scenario agent, or else an agent-shaped view of a role instance, or None.
+
+    Instances are not in the scenario file. Their agent id is resolved through their
+    session (the newest one), so burn, ledger and blast radius work for them unchanged.
+    """
+    agent = get_scenario_agent(agent_id)
+    if agent is not None:
+        return agent
+    rows = [s for s in sessions_for_agent(agent_id) if s.get("role")]
+    if not rows:
+        return None
+    row = max(rows, key=lambda s: s.get("created_at", ""))
+    return {"id": agent_id, "role": row["role"], "tools": list(row.get("tools", [])),
+            "credentials": list(row.get("credentials", [])), "send_to": []}
+
+
+# Lookups over burn-sessions by role, parent or token. They are filtered scans, which is fine at
+# swarm scale (hundreds of rows). A GSI per attribute (by_role, by_parent, by_token) is the next
+# step if the table grows; only these three functions would change.
+
+# The parent and token lookups are strongly consistent: a scoped burn must see a child row that a
+# concurrent spawn or join has just written.
+
+def sessions_for_role(role: str) -> list[dict]:
+    return scan_all(table(names.SESSIONS_TABLE), FilterExpression=Attr("role").eq(role))
+
+
+def sessions_for_parents(parent_sessions: list[str]) -> list[dict]:
+    found = []
+    for i in range(0, len(parent_sessions), 100):  # IN takes at most 100 values
+        found += scan_all(table(names.SESSIONS_TABLE),
+                          FilterExpression=Attr("parent_session").is_in(parent_sessions[i:i + 100]),
+                          ConsistentRead=True)
+    return found
+
+
+def sessions_for_token(token_id: str) -> list[dict]:
+    return scan_all(table(names.SESSIONS_TABLE), FilterExpression=Attr("token_id").eq(token_id),
+                    ConsistentRead=True)
 
 
 def write_event(**fields) -> dict:

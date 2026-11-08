@@ -120,7 +120,8 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 
 `burn-sessions` rows keep their existing fields (`session_id`, `agent_id`, `client_id`, `status`,
 `tools`, `send_to`, `created_at`). Instances add optional fields, never renaming or removing one:
-`role`, `parent_session`, `token_id`, `owner`, `egress`, `last_seen`, `exited_at`.
+`role`, `parent_session`, `token_id`, `owner`, `egress`, `credentials` (the narrowed credential types
+minted for the instance), `last_seen`, `exited_at`.
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
 `burn-enroll-tokens` rows: `token_id`, `role`, `secret_sha256`, `uses`, `uses_left`, `expires_at`,

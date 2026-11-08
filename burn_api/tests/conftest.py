@@ -50,6 +50,8 @@ def _create_tables(ddb):
     make("burn-credentials", "secret_ref")
     make("burn-sessions", "session_id", gsis=[("by_agent", "agent_id"), ("by_client", "client_id")])
     make("burn-scenario", "pk")
+    make("burn-roles", "name")
+    make("burn-enroll-tokens", "token_id", gsis=[("by_role", "role")])
 
 
 @pytest.fixture
@@ -72,6 +74,7 @@ def env(monkeypatch):
         auth.reset(); db.reset()
         fake = FakeMinter()
         monkeypatch.setattr(minter_client, "call", fake)
+        monkeypatch.setattr(minter_client, "call_async", fake.call_async)
         badges_stub.created.clear(); badges_stub.deleted.clear()
         yield types.SimpleNamespace(token=token, minter=fake, ddb=res, badges=badges_stub)
 

@@ -45,12 +45,22 @@ class BurnApiStack(cdk.Stack):
                 "service-role/AWSLambdaBasicExecutionRole")],
         )
         role.add_to_policy(iam.PolicyStatement(
-            actions=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+            # Scan: instance, role, parent and token lookups are filtered scans of this table.
+            actions=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem",
+                     "dynamodb:Scan"],
             resources=[table_arn(names.SESSIONS_TABLE), f"{table_arn(names.SESSIONS_TABLE)}/index/by_agent"],
         ))
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:GetItem"],
             resources=[table_arn(names.SCENARIO_TABLE), table_arn(names.CREDENTIALS_TABLE)],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # roles: get, put and list (Scan) only
+            actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan"],
+            resources=[table_arn(names.ROLES_TABLE)],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # join tokens: create, redeem (conditional update), revoke
+            actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+            resources=[table_arn(names.ENROLL_TOKENS_TABLE)],
         ))
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem", "dynamodb:Query"], resources=[table_arn(names.EVENTS_TABLE)]))
@@ -91,7 +101,8 @@ class BurnApiStack(cdk.Stack):
             default_integration=integrations.HttpLambdaIntegration("Integration", fn),
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_origins=[DASHBOARD_ORIGIN],
-                allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.OPTIONS],
+                allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.PUT,
+                               apigw.CorsHttpMethod.DELETE, apigw.CorsHttpMethod.OPTIONS],
                 allow_headers=["content-type", names.DEMO_TOKEN_HEADER],
             ),
         )
