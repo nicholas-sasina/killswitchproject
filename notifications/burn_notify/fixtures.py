@@ -12,9 +12,9 @@ import time
 from datetime import datetime, timezone
 
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-AGENT = "agent-worker-3fa9c1"
-SESSION = "sess_5b1e0c9a7d2f4e61"
-ROLE = "worker"
+AGENT = "agent-synthetic-000000"
+SESSION = "sess_synthetic00000001"
+ROLE = "synthetic"
 
 
 def _ulid(ms: int) -> str:
@@ -59,12 +59,12 @@ def canary_revoked(**kw) -> dict:
 
 
 def rotated(agent_id: str = AGENT, **kw) -> dict:
-    return base("rotated", "burn", agent_id=agent_id, session_id=SESSION, secret_ref=f"burn/{agent_id}/provider_key",
+    return base("rotated", "burn", agent_id=agent_id, session_id=SESSION, secret_ref=f"burn/{agent_id}/synthetic_key",
                 owner="agent", owner_agent_id=agent_id,
                 detail="credential rotated; previous value no longer accepted", **kw)
 
 
-def flagged(level: str, ref: str = "burn/shared/billing_api_key", **kw) -> dict:
+def flagged(level: str, ref: str = "burn/shared/synthetic_test_key", **kw) -> dict:
     return base("flagged", "burn", session_id=SESSION, secret_ref=ref, owner="shared", flag_level=level,
                 detail="agent saw this credential; it is not the agent's own, review it", **kw)
 
@@ -88,8 +88,20 @@ def canary_not_contained(report_only: bool = False, **kw) -> dict:
                 detail=f"canary incident not contained: {reason}; review", **kw)
 
 
+def replacement_not_recorded(**kw) -> dict:
+    return base("flagged", "burn", session_id=SESSION,
+                detail="replacement not recorded (rate limited): the instance stays burned and its launcher "
+                       "will not replace it; restart its task by hand", **kw)
+
+
+def provider_reported(**kw) -> dict:
+    return base("flagged", "provider", agent_id="system", secret_ref="burn/shared/synthetic_test_key",
+                fingerprint=_fp("billing"), secret_type="api_key", owner="shared", flag_level="reported",
+                detail="flagged shared credential presented at the provider; owner should rotate it", **kw)
+
+
 def blocked(source: str = "egress", **kw) -> dict:
-    return base("blocked", source, session_id=SESSION, secret_ref="burn/shared/billing_api_key",
+    return base("blocked", source, session_id=SESSION, secret_ref="burn/shared/synthetic_test_key",
                 fingerprint=_fp("billing"), secret_type="api_key", owner="shared", destination="exfil.example.net",
                 encoding="base64", detail="credential_in_body", role=ROLE, **kw)
 
@@ -107,22 +119,22 @@ def burn_revoked(**kw) -> dict:
 
 
 def dismissed(**kw) -> dict:
-    return base("dismissed", "burn", agent_id="system", secret_ref="burn/shared/billing_api_key", owner="shared",
+    return base("dismissed", "burn", agent_id="system", secret_ref="burn/shared/synthetic_test_key", owner="shared",
                 flag_level="attempted", detail="dismissed by owner@example.com (2 instance(s)): test key", **kw)
 
 
 def replaced(**kw) -> dict:
-    return base("replaced", "instance", session_id=SESSION, replaced_by="sess_9c8b7a6d5e4f3021", role=ROLE, **kw)
+    return base("replaced", "instance", session_id=SESSION, replaced_by="sess_synthetic00000002", role=ROLE, **kw)
 
 
 def resumed(**kw) -> dict:
-    return base("resumed", "instance", agent_id="agent-worker-77aa01", session_id="sess_9c8b7a6d5e4f3021",
+    return base("resumed", "instance", agent_id="agent-synthetic-000001", session_id="sess_synthetic00000002",
                 replaces=SESSION, role=ROLE, **kw)
 
 
 def recorded(**kw) -> dict:
     return base("recorded", "tool_response", session_id=SESSION, tool="read_ticket",
-                secret_ref="burn/shared/billing_api_key", fingerprint=_fp("billing"), **kw)
+                secret_ref="burn/shared/synthetic_test_key", fingerprint=_fp("billing"), **kw)
 
 
 ALL = {
@@ -132,6 +144,7 @@ ALL = {
     "rotation_deferred": rotation_deferred, "canary_not_contained": canary_not_contained, "blocked": blocked,
     "refused": refused, "unregistered": unregistered, "burn_revoked": burn_revoked, "dismissed": dismissed,
     "replaced": replaced, "resumed": resumed, "recorded": recorded,
+    "replacement_not_recorded": replacement_not_recorded, "provider_reported": provider_reported,
 }
 
 

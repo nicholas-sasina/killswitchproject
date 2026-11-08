@@ -54,3 +54,22 @@ def test_live_send_refuses_without_both_switches(monkeypatch):
 def test_unknown_fixture(monkeypatch):
     code, out = run(["dry-run", "--fixture", "nope"])
     assert code == 2
+
+
+def test_live_check_dry_run_full_sequence(tmp_path):
+    report = tmp_path / "report.json"
+    code, out = run(["live-check", "--dry-run", "--inject-failure", "--report", str(report)])
+    assert code == 0 and "overall: PASS" in out and "duplicate sent nothing: True" in out
+    data = json.loads(report.read_text())
+    steps = {s["step"]: s for s in data["steps"]}
+    assert all(v == 0 for v in steps["5 duplicate of the canary alert"]["requests_sent"].values())
+    assert {r["status"] for r in steps["6a injected failure (first receive)"]["results"]} == {"retrying"}
+    assert {r["status"] for r in steps["6b SQS redelivery"]["results"]} == {"delivered"}
+    for secret in ("hooks.slack.com/services", "api.telegram.org/bot", "discord.com/api/webhooks"):
+        assert secret not in report.read_text() and secret not in out
+
+
+def test_live_check_refuses_without_switches(monkeypatch):
+    monkeypatch.delenv("BURN_NOTIFY_LIVE", raising=False)
+    code, out = run(["live-check", "--config", str(EXAMPLE), "--live"])
+    assert code == 2 and "refusing" in out

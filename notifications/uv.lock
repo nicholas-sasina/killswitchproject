@@ -122,6 +122,7 @@ dev = [
     { name = "jsonschema" },
     { name = "moto", extra = ["dynamodb"] },
     { name = "pytest" },
+    { name = "trustme" },
 ]
 infra = [
     { name = "aws-cdk-lib" },
@@ -135,8 +136,9 @@ requires-dist = [{ name = "boto3" }]
 dev = [
     { name = "burn-contracts", editable = "../contracts" },
     { name = "jsonschema" },
-    { name = "moto", extras = ["dynamodb", "sqs", "ses", "sesv2", "secretsmanager"], specifier = ">=5" },
+    { name = "moto", extras = ["dynamodb", "sqs", "ses", "sesv2", "secretsmanager", "iam"], specifier = ">=5" },
     { name = "pytest" },
+    { name = "trustme" },
 ]
 infra = [
     { name = "aws-cdk-lib", specifier = ">=2.220.0" },
@@ -1094,6 +1096,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "trustme"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "idna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4b/c5/931476f4cf1cd9e736f32651005078061a50dc164a2569fb874e00eb2786/trustme-1.2.1.tar.gz", hash = "sha256:6528ba2bbc7f2db41f33825c8dd13e3e3eb9d334ba0f909713c8c3139f4ae47f", size = 26844, upload-time = "2025-01-02T01:55:32.632Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/f3/c34dbabf6da5eda56fe923226769d40e11806952cd7f46655dd06e10f018/trustme-1.2.1-py3-none-any.whl", hash = "sha256:d768e5fc57c86dfc5ec9365102e9b092541cd6954b35d8c1eea01a84f35a762a", size = 16530, upload-time = "2025-01-02T01:55:30.181Z" },
 ]
 
 [[package]]

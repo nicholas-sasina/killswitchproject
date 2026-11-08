@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 from . import incident as incident_mod
 from . import metrics, store as st
 from .config import DIGEST, Config, route
-from .events import is_canary_ref, parse
+from .events import event_time_ms, is_canary_ref, is_test_envelope, parse
 from .incident import Incident
 from .policy import CONTAINMENT_UPDATE, Severity, apply_overrides, classify
 from .providers import REGISTRY, DeliveryError, Destination, Provider
@@ -23,7 +23,10 @@ from .secrets import SecretError, SecretResolver
 
 log = get_logger()
 QUICK_RETRY_MAX_WAIT = 2.0
+DEPLOYMENT_TEST_NOTICE = "SYNTHETIC TEST - deployment check message; not a real security event"
 SUMMARY_DELAY = 45  # seconds after a containment update before its summary is due
+SUMMARY_HORIZON_MS = 10 * 60 * 1000  # containment results counted: from the revoke to 10 minutes after it
+DEST_BUDGET = 15.0  # seconds of Lambda time a destination may need (connect + read + one quick retry)
 
 
 @dataclass
@@ -66,62 +69,98 @@ def _fact_kind(event: dict, category: str) -> str | None:
             "flag_review": "flagged"}.get(category)
 
 
-def _containment_facts(facts: st.Facts) -> list[tuple[str, str]]:
+def _since(facts: st.Facts, start_ms: int | None) -> st.Facts:
+    """Only results recorded at or after the revoke (and within the horizon): earlier incidents for the
+    same agent, or rotations from before this containment, must not be counted as its outcome."""
+    if start_ms is None:
+        return facts
+
+    def keep(ids):
+        out = set()
+        for event_id in ids:
+            ms = event_time_ms(event_id)
+            if ms is not None and start_ms <= ms <= start_ms + SUMMARY_HORIZON_MS:
+                out.add(event_id)
+        return out
+    return st.Facts(**{kind: keep(getattr(facts, kind)) for kind in st.FACT_KINDS})
+
+
+def _containment_facts(facts: st.Facts, *, final: bool = False) -> list[tuple[str, str]]:
     if facts.rotation_failed:
         owned = "NOT rotated (rotation failed) - action required"
     elif facts.rotation_deferred:
         owned = "Not rotated (deferred) - review required"
     elif facts.rotated:
         owned = f"Rotated where confirmed ({len(facts.rotated)} rotation event(s) so far)"
+    elif final:
+        owned = "No rotation recorded since the revoke - verify in the dashboard"
     else:
         owned = "Rotation not yet confirmed"
     shared = (f"Flagged for review ({len(facts.flagged)} flag event(s) so far)" if facts.flagged
-              else "None flagged so far")
+              else "None flagged since the revoke" if final else "None flagged so far")
     return [("Owned credentials", owned), ("Shared credentials", shared)]
 
 
 class Processor:
     def __init__(self, config: Config, store: st.Store, *, providers: dict[str, Provider] | None = None,
-                 secrets: SecretResolver | None = None, clock=time.time, max_receives: int = 5):
+                 secrets: SecretResolver | None = None, clock=time.time, max_receives: int = 5,
+                 notice: str | None = None, monotonic=time.monotonic):
         self.config = config
         self.store = store
         self.providers = providers if providers is not None else {name: cls() for name, cls in REGISTRY.items()}
         self.secrets = secrets or SecretResolver(allow_env=config.allow_env_secrets)
         self.clock = clock
         self.max_receives = max_receives
+        self.notice = notice  # set only for synthetic test sends; labels every message [TEST]
+        self.monotonic = monotonic
         self.flushed: list[tuple[str, Incident]] = []  # summaries sent by flush_windows (for the dry run)
 
     # -- incident ------------------------------------------------------------------------
-    def incident_for(self, event: dict) -> tuple[Incident, bool]:
+    def incident_for(self, event: dict, notice: str | None = None) -> tuple[Incident, bool]:
         """Build the incident and say whether it is superseded (a stale, lower flag level)."""
         now = self.clock()
         result = apply_overrides(classify(event), self.config.severity_overrides)
         superseded = False
         kind = _fact_kind(event, result.category)
         facts = self.store.add_fact(event["agent_id"], kind, event["event_id"], now) if kind else None
+        # Flag-level ordering is shared state across events: a deployment test message must never
+        # raise it (it could suppress a later real alert for a credential with the same name).
         if event["action"] == "flagged" and event.get("flag_level") and event.get("secret_ref") \
-                and not is_canary_ref(event["secret_ref"]):
+                and not is_canary_ref(event["secret_ref"]) and notice != DEPLOYMENT_TEST_NOTICE:
             superseded = not self.store.raise_flag(event["secret_ref"], event["flag_level"], now)
         extra = None
         if result.kind == CONTAINMENT_UPDATE:
-            extra = _containment_facts(facts or self.store.facts(event["agent_id"]))
-        inc = incident_mod.build(event, result, dashboard_url=self.config.dashboard_url, extra_facts=extra)
+            extra = _containment_facts(_since(facts or self.store.facts(event["agent_id"]),
+                                              event_time_ms(event["event_id"])))
+        inc = incident_mod.build(event, result, dashboard_url=self.config.dashboard_url, extra_facts=extra,
+                                 notice=notice or self.notice)
         return inc, superseded
 
     # -- entry points --------------------------------------------------------------------
-    def process_record(self, record, *, receive_count: int = 1) -> EventResult:
+    def process_record(self, record, *, receive_count: int = 1, deadline: float | None = None) -> EventResult:
         event = parse(record)
         if event is None:
             return EventResult(None)
-        return self.process_event(event, receive_count=receive_count)
+        notice = DEPLOYMENT_TEST_NOTICE if is_test_envelope(record) else None
+        return self.process_event(event, receive_count=receive_count, deadline=deadline, notice=notice)
 
-    def process_event(self, event: dict, *, receive_count: int = 1) -> EventResult:
-        inc, superseded = self.incident_for(event)
+    def _remaining(self, deadline: float | None) -> float:
+        return float("inf") if deadline is None else deadline - self.monotonic()
+
+    def process_event(self, event: dict, *, receive_count: int = 1, deadline: float | None = None,
+                      notice: str | None = None) -> EventResult:
+        """deadline: monotonic time by which this invocation must stop (Lambda timeout minus margin).
+        Destinations that would not fit are left for the redelivery, unclaimed, instead of being cut off
+        mid-send by the Lambda timeout."""
+        inc, superseded = self.incident_for(event, notice)
         result = EventResult(event["event_id"], inc.category, inc.severity.label)
         last_chance = receive_count >= self.max_receives
         for dest in self.config.destinations:
+            if self._remaining(deadline) < DEST_BUDGET and route(dest, inc) is not None:
+                result.outcomes.append(Outcome(dest.id, st.RETRYING, "deadline"))
+                continue
             try:
-                outcome = self._deliver_one(event, inc, dest, superseded, last_chance)
+                outcome = self._deliver_one(event, inc, dest, superseded, last_chance, deadline)
             except Exception as exc:  # never let one destination break the others
                 log.error("destination %s internal error %s", dest.id, type(exc).__name__)
                 outcome = self._finish(event, inc, dest, st.FAILED if last_chance else st.RETRYING,
@@ -131,7 +170,8 @@ class Processor:
         return result
 
     # -- per destination -----------------------------------------------------------------
-    def _deliver_one(self, event, inc: Incident, dest: Destination, superseded: bool, last_chance: bool):
+    def _deliver_one(self, event, inc: Incident, dest: Destination, superseded: bool, last_chance: bool,
+                     deadline: float | None = None):
         decision = route(dest, inc)
         if decision is None:
             return None
@@ -154,7 +194,7 @@ class Processor:
                 dest.id, int(now // 60), dest.rate_per_minute, now):
             wait = 60 - (now % 60) + 1
             return self._retry_or_fail(event, inc, dest, "local_rate_limit", wait, last_chance)
-        return self._send(event, inc, dest, last_chance)
+        return self._send(event, inc, dest, last_chance, deadline)
 
     def _aggregatable(self, inc: Incident) -> bool:
         from .policy import NEVER_AGGREGATE
@@ -164,10 +204,11 @@ class Processor:
         start = int(now // seconds * seconds)
         sample = {"event_id": inc.event_id, "ts": inc.ts, "severity": inc.severity.label, "category": inc.category,
                   "kind": inc.kind, "title": inc.title, "summary": inc.summary, "agent_id": inc.agent_id,
-                  "role": inc.role}
+                  "role": inc.role, "notice": inc.notice}
         return self.store.window_add(dest.id, key, start, start + seconds, sample, now)
 
-    def _send(self, event, inc: Incident, dest: Destination, last_chance: bool) -> Outcome:
+    def _send(self, event, inc: Incident, dest: Destination, last_chance: bool,
+              deadline: float | None = None) -> Outcome:
         provider = self.providers[dest.provider]
         try:
             secret = self.secrets.get(dest.secret_ref) if provider.needs_secret else None
@@ -185,7 +226,8 @@ class Processor:
             try:
                 ack = provider.send(prepared, dest, secret)
             except DeliveryError as err:
-                quick = err.retryable and attempt == 1 and (err.retry_after or 0) <= QUICK_RETRY_MAX_WAIT
+                quick = (err.retryable and attempt == 1 and (err.retry_after or 0) <= QUICK_RETRY_MAX_WAIT
+                         and self._remaining(deadline) > DEST_BUDGET / 2)
                 if quick:
                     sleep_for(err.retry_after if err.retry_after is not None else backoff(1, base=0.5, cap=1.0))
                     continue
@@ -206,7 +248,8 @@ class Processor:
         base_facts = [list(f) for f in inc.facts if f[0] not in ("Owned credentials", "Shared credentials")]
         sample = {"event_id": inc.event_id, "ts": inc.ts, "severity": inc.severity.label, "category": inc.category,
                   "kind": inc.kind, "title": "Containment summary", "summary": inc.summary,
-                  "agent_id": inc.agent_id, "role": inc.role, "session_id": inc.session_id, "facts": base_facts}
+                  "agent_id": inc.agent_id, "role": inc.role, "session_id": inc.session_id, "facts": base_facts,
+                  "notice": inc.notice}
         try:
             self.store.window_add(dest.id, f"containment#{inc.agent_id}#{inc.event_id}", int(now),
                                   int(now + SUMMARY_DELAY), sample, now)
@@ -224,10 +267,12 @@ class Processor:
         return Outcome(dest.id, status, category, retry_after)
 
     # -- aggregation / digest flush (scheduled) ------------------------------------------
-    def flush_windows(self) -> list[Outcome]:
+    def flush_windows(self, deadline: float | None = None) -> list[Outcome]:
         now = self.clock()
         outcomes = []
         for window in self.store.due_windows(now):
+            if self._remaining(deadline) < DEST_BUDGET:
+                break  # the rest stay due; the next scheduled flush continues
             dest_id = window["destination_id"]
             try:
                 dest = self.config.destination(dest_id)
@@ -252,16 +297,19 @@ class Processor:
             claim = self.store.claim(inc.event_id, dest.id, dest.provider, now, self.config.delivery_ttl_days)
             if not claim.won:
                 continue
-            outcomes.append(self._send(pseudo_event, inc, dest, last_chance=True))
+            outcome = self._send(pseudo_event, inc, dest, last_chance=claim.attempts >= self.max_receives)
+            if outcome.status == st.RETRYING:
+                self.store.reopen_window(window["pk"])  # the next flush tries again (bounded by attempts)
+            outcomes.append(outcome)
             self.flushed.append((dest.id, inc))
         return outcomes
 
     def _containment_summary(self, window: dict) -> Incident | None:
         sample = window["sample"]
-        facts = self.store.facts(sample["agent_id"])
-        if not (facts.rotated or facts.flagged or facts.rotation_failed or facts.rotation_deferred):
-            return None  # nothing recorded beyond the revoke: the first update already said it all
-        rows = [tuple(f) for f in sample.get("facts", [])] + _containment_facts(facts)
+        facts = _since(self.store.facts(sample["agent_id"]), event_time_ms(sample["event_id"]))
+        # Always sent: "nothing recorded since the revoke" is itself an outcome a person must check
+        # (a manual burn whose rotation errors writes no event at all).
+        rows = [tuple(f) for f in sample.get("facts", [])] + _containment_facts(facts, final=True)
         return Incident(
             event_id="agg_" + hashlib.sha256(window["pk"].encode()).hexdigest()[:24],
             incident_id=incident_mod.incident_id("summary:" + sample["event_id"]), ts=sample["ts"],
@@ -271,7 +319,7 @@ class Processor:
                     "Counts cover events received so far.",
             agent_id=sample["agent_id"], session_id=sample.get("session_id"), role=sample.get("role"),
             flag_level=None, facts=tuple(rows), priority=bool(facts.rotation_failed),
-            dashboard_url=self.config.dashboard_url)
+            dashboard_url=self.config.dashboard_url, notice=sample.get("notice") or self.notice)
 
     def _summary_incident(self, window: dict, suppressed: int, is_digest: bool) -> Incident:
         sample = window["sample"]
@@ -281,7 +329,7 @@ class Processor:
             event_id="agg_" + hashlib.sha256(window["pk"].encode()).hexdigest()[:24], incident_id="", ts=sample["ts"], severity=Severity.parse(sample["severity"]),
             category=sample["category"], kind=sample["kind"], title=sample["title"], summary=sample["summary"],
             agent_id=sample["agent_id"], session_id=None, role=sample.get("role"), flag_level=None,
-            dashboard_url=self.config.dashboard_url)
+            dashboard_url=self.config.dashboard_url, notice=sample.get("notice") or self.notice)
         if is_digest:
             base = replace(base, title="Low-severity digest", category="digest",
                            agent_id="multiple instances", role=None)

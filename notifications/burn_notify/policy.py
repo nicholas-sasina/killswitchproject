@@ -57,6 +57,7 @@ CATEGORIES: dict[str, Severity] = {
     "flag_reported": Severity.HIGH,
     "disclosure_blocked": Severity.HIGH,
     "flag_attempted": Severity.MEDIUM,
+    "replacement_failed": Severity.MEDIUM,   # burned instance stays burned; its task needs a person
     "flag_review": Severity.MEDIUM,
     "unregistered_access": Severity.MEDIUM,
     "agent_burned": Severity.MEDIUM,          # containment update after a targeted burn
@@ -88,6 +89,7 @@ _ROTATION_FAILED = "rotation failed:"
 _ROTATION_DEFERRED = "rotation deferred:"
 _CANARY_NOT_CONTAINED = "canary incident not contained:"
 _REPORT_ONLY_MARK = "is report-only"
+_REPLACEMENT_NOT_RECORDED = "replacement not recorded"
 _SESSIONS_REVOKED_RE = re.compile(r"^(\d{1,6}) session\(s\) revoked")
 
 
@@ -171,7 +173,16 @@ def classify(event: dict) -> Classification:
                       "Burn could not verify who the canary belonged to, so it did not contain anything "
                       "automatically. A person must review the incident.",
                       [("Containment", "Not performed - human review required")], priority=True)
+        if detail.startswith(_REPLACEMENT_NOT_RECORDED):
+            return _c("replacement_failed", ALERT, "Replacement not recorded for a burned instance",
+                      "The instance stays burned, but Burn could not record its replacement, so its launcher will "
+                      "not replace it. Restart its task by hand.",
+                      [("Status", "Burned; replacement not recorded"), ("Action", "Restart the task manually")])
         if level == "reported":
+            if source == "provider":
+                return _c("flag_reported", ALERT, "Flagged credential presented at monitored provider",
+                          "A credential already under review was presented at a monitored provider, so its flag "
+                          "was raised to `reported`. Its owner should rotate it.", [("Flag level", "reported")])
             return _c("flag_reported", ALERT, "Credential flag escalated to reported",
                       "A credential this agent does not own reached review level `reported`. Its owner should "
                       "rotate or dismiss it.", [("Flag level", "reported")])

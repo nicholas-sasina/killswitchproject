@@ -18,6 +18,8 @@ EventBridge schedule (1 min) ─▶ Lambda burn-notify-flush ─▶ aggregate su
 DynamoDB burn-notify-state: delivery claims and history, ordering facts, windows (TTL)
 ```
 
+Guides: [live testing with real channels](docs/LIVE_TESTING.md) · [deployment runbook](docs/DEPLOYMENT.md).
+
 **Why a Pipe instead of a Lambda on the stream:** the Pipe filters to INSERTs and drops them on SQS
 with no code. SQS then provides per-message retries, a visibility timeout we can set from
 `Retry-After`, and a DLQ. A Lambda reading the stream directly would block the shard on a slow
@@ -46,7 +48,9 @@ provider and retry whole batches. The cost is one more managed resource and its 
 | HIGH | `canary_contained` (containment update) | `revoked` with a canary `secret_ref` |
 | HIGH | `flag_reported` | `flagged`, `flag_level` `reported` |
 | HIGH | `disclosure_blocked` | `blocked` carrying a known credential |
+| HIGH | `flag_reported` (provider) | the provider's `flagged` `reported`: a flagged credential presented at a monitored provider |
 | MEDIUM | `flag_attempted`, `unregistered_access`, `agent_burned` (update), `stale_key_rejected`, `egress_blocked`, `canary_used_in_burn` | |
+| MEDIUM | `replacement_failed` | `flagged` "replacement not recorded …": the instance stays burned, and its task needs a person |
 | LOW | `flag_seen`, `credential_rotated`, `flag_dismissed`, `access_refused`, `instance_replaced`, `task_resumed` | |
 | INFO | `activity` (`recorded`, `issued`, `inherited`, `started`, `exited`) | not sent by default |
 
@@ -64,15 +68,19 @@ below HIGH. The wording follows the evidence:
 2. **`revoked`** (canary ref): *BURN CONTAINMENT UPDATE*, with Status: Session revoked and Other
    instances: No broad containment requested. Burn writes `revoked` before the rotation results, so
    at this point it shows what it knows so far, for example "Rotation not yet confirmed".
-3. **Containment summary**: about a minute later the flush sends the rotations and flags recorded
-   since, for example "Rotated where confirmed (N rotation event(s) so far)" and "Flagged for review".
-   If a `rotation failed` event arrived instead, it shows "NOT rotated" and goes out as CRITICAL. It
-   never states that other workers are healthy.
+3. **Containment summary**: about a minute later the flush sends what was recorded **since this
+   revoke**, within 10 minutes of it. For example: "Rotated where confirmed (N rotation event(s) so
+   far)" and "Flagged for review".
+   - If a `rotation failed` event arrived, it shows "NOT rotated" and goes out as CRITICAL.
+   - If nothing was recorded, it says so ("No rotation recorded since the revoke - verify in the
+     dashboard"). A manual burn whose rotation errors writes no event at all, so this case matters.
+   - Results from earlier incidents of the same agent are not counted.
+   - It never states that other workers are healthy.
 
 ### Delivery guarantees
 - **Deduplication.** Each (event_id, destination_id) has one delivery item. A worker may send only
   after it wins a conditional claim. `delivered`, `permanently_failed` and `suppressed` are final.
-  `sending` carries a 60 s lease, so a worker that crashes is retried once the lease expires.
+  `sending` carries a lease (90 s deployed, longer than the Lambda timeout), so a worker that crashes is retried once the lease expires.
 - **Retries.**
   - A short network error or a `Retry-After` of 2 s or less gets one immediate retry.
   - Anything else marks the destination `retrying` and fails the SQS message. Its visibility is set to
@@ -80,6 +88,11 @@ below HIGH. The wording follows the evidence:
     destinations that already succeeded are skipped.
   - On the 5th receive the remaining destinations are recorded as `permanently_failed:
     retries_exhausted`, and the message goes to the DLQ.
+  - **Lambda deadline.** Each invocation handles one message (batch size 1, 60 s timeout). A
+    destination that would not fit in the remaining time is left unclaimed for the redelivery instead
+    of being cut off mid-send. Claims carry a 90 s lease, longer than the timeout, so two live workers
+    never send the same message.
+  - Summaries and digests that fail transiently are retried at the next flush, up to 5 attempts.
 - **Permanent errors are not retried:** 401/403, 404/410, 400/413/422, an invalid token or recipient,
   a retired Teams connector URL, an unsafe URL, a redirect, or a missing secret.
 - **Ordering.**
@@ -159,53 +172,37 @@ Public social networks are not supported, on purpose.
 
 ## Run it
 ```bash
-cd notifications
-uv run pytest -q                                   # unit + local AWS emulation (moto); no network
+cd notifications && uv sync --all-groups
+uv run pytest -q                                   # unit, moto, real-socket TLS, BURN-code demo; no network
 uv run --group infra pytest -q tests/test_infra.py # synth the proposed stack
-uv run python -m burn_notify dry-run --demo        # canary alert -> containment update -> summary
-uv run python -m burn_notify dry-run --fixture blocked --fixture rotation_failed --config config.example.json
+uv run python -m burn_notify dry-run --demo        # fixtures: canary alert -> update -> summary
+uv run python demo/backend_demo.py                 # BURN's real containment code on emulated AWS -> notifications
+uv run python demo/backend_demo.py --scenario rotation-failure
+uv run python -m burn_notify live-check --dry-run --inject-failure   # the live check, no network
 ```
-The dry run prints redacted previews of every provider payload, followed by the local delivery
-table. No message leaves the machine.
+Dry runs print redacted previews and contacts nothing. Every synthetic message is labelled `[TEST]`.
 
-Live checks against **authorized test channels** are opt-in. They need both switches:
+**Live delivery** to authorized test channels needs both `--live` and `BURN_NOTIFY_LIVE=1`. Setup for
+each platform and the full sequence are in [docs/LIVE_TESTING.md](docs/LIVE_TESTING.md):
 ```bash
-BURN_NOTIFY_LIVE=1 uv run python -m burn_notify send --config test.json --destination slack-test --live
-BURN_NOTIFY_LIVE=1 BURN_NOTIFY_CONFIG=test.json uv run pytest -m live tests/test_live.py
+BURN_NOTIFY_LIVE=1 uv run python -m burn_notify live-check --config ~/burn-notify-test.json --live --inject-failure
+BURN_NOTIFY_LIVE=1 uv run python demo/backend_demo.py --live --config ~/burn-notify-test.json
+BURN_NOTIFY_PROBE=1 uv run pytest -m live tests/test_live_probe.py   # negative probes: invalid creds, nothing delivered
 ```
 
 ## Deploying (needs the infrastructure owner)
-Nothing here is deployed. Deploying takes these steps:
+Not deployed. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the exact commands, IAM, secrets,
+environment, resources and costs (about $2–3 a month), verification, and rollback and teardown.
 
-1. **Enable the stream on `burn-events`.** This is the only change to an existing resource. In
-   `infra/burn_infra/data.py`, `table()` gets a `stream` argument, and `burn-events` is created with
-   `stream=ddb.StreamViewType.NEW_IMAGE`. Event writing does not change.
-2. **Deploy `BurnNotifications`** from [`infra/notifications_stack.py`](infra/notifications_stack.py),
-   passing `-c burn:events_stream_arn=… -c burn:notify_config=… -c burn:notify_ses_identity=…
-   -c burn:dashboard_origin=…`. It creates:
-   - SQS `burn-notify` (SSE, 180 s visibility, redrive after 5 receives) and `burn-notify-dlq`
-     (14 days).
-   - EventBridge Pipe `burn-events-to-notify`: stream → queue, INSERT filter, `LATEST`.
-   - DynamoDB `burn-notify-state`: `pk` S, TTL `ttl`, sparse GSI `due` (`due` S, `window_end` N).
-   - Lambdas `burn-notify` (SQS, batch 10, `ReportBatchItemFailures`) and `burn-notify-flush`
-     (1-minute schedule). Both run Python 3.12, 256 MB, 30 s, with reserved concurrency 5.
-   - CloudWatch alarms for a non-empty DLQ, worker errors and queue age over 5 minutes. EMF metrics
-     go to the `Burn/Notifications` namespace (`Delivered`, `DeliveryFailed`, `DeliverySkipped`,
-     `SendLatency`).
-3. **IAM, least privilege:**
-   - Pipe role: `dynamodb:DescribeStream`, `GetRecords` and `GetShardIterator` on the stream ARN,
-     `dynamodb:ListStreams`, and `sqs:SendMessage` on `burn-notify`.
-   - Lambda role:
-     - read/write on `burn-notify-state` only
-     - `secretsmanager:GetSecretValue` on `secret:burn-notify/*` only
-     - `ses:SendEmail` on the one identity
-     - consume and `ChangeMessageVisibility` on `burn-notify`
-
-   Neither role gets access to any BURN table or to `burn/*` / `burn-system/*` secrets.
-4. **Create the secrets** `burn-notify/<destination>` (webhook URLs, bot token). Reference them as
-   `aws-sm:burn-notify/slack#webhook_url` and so on. The deployed Lambda refuses `env:` refs
-   (`BURN_NOTIFY_ALLOW_ENV_SECRETS=0`).
-5. The Lambda needs outbound internet. It runs outside a VPC, or needs a NAT gateway inside one.
+In short:
+1. **Enable the stream on `burn-events`.** This is the only change to an existing resource: branch
+   `ws/notifications-infra`, an in-place update with no interruption.
+2. **Deploy the new `BurnNotifications` stack** from `infra/app.py`.
+   - EventBridge Pipe (INSERT filter, its own DLQ).
+   - SQS queue and DLQ.
+   - Two Lambdas: batch 1, 60 s, no reserved concurrency, at most 2 concurrent.
+   - The state table, plus 3 alarms.
+3. **IAM is least privilege.** Neither role can touch a BURN table or a BURN secret.
 
 ## Security
 - **Allowlisted fields only.** Messages are built from the `Incident` allowlist.
@@ -231,4 +228,7 @@ Nothing here is deployed. Deploying takes these steps:
 - Classifying containment failures depends on the Burn API's fixed detail prefixes. If they change,
   `tests/test_policy.py` and the fixtures must change too. A structured outcome field in the contract
   would remove this coupling.
-- The deployed stack has not been exercised yet. It is synth-tested only.
+- The deployed stack has not run in AWS. It is checked by `cdk synth`, the template diff and
+  `tests/test_infra.py`.
+- Teams rendering of escaped text, and visible delivery on every platform, are confirmed only by a
+  live test in a real channel (docs/LIVE_TESTING.md).

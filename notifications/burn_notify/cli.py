@@ -82,7 +82,8 @@ class _Clock:
 def dry_run_processor(cfg, clock=time.time) -> Processor:
     providers = {name: cls(transport=_RecordingTransport(name)) for name, cls in REGISTRY.items() if name != "email"}
     providers["email"] = REGISTRY["email"](ses_client=_FakeSES())
-    return Processor(cfg, MemoryStore(), providers=providers, secrets=_DummySecrets(), clock=clock)
+    return Processor(cfg, MemoryStore(), providers=providers, secrets=_DummySecrets(), clock=clock,
+                     notice="SYNTHETIC TEST - dry run, nothing was sent")
 
 
 def _print_preview(proc: Processor, event: dict, out) -> None:
@@ -148,12 +149,52 @@ def cmd_send(args, out=sys.stdout) -> int:
     dest = cfg.destination(args.destination)
     test_dest = replace(dest, min_severity="info")  # a test send always routes
     single = replace(cfg, destinations=(test_dest,))
-    proc = Processor(single, MemoryStore())
+    from .livecheck import NOTICE
+    proc = Processor(single, MemoryStore(), notice=NOTICE)
     event = fixtures.ALL[args.fixture]()
     result = proc.process_event(event)
     for outcome in result.outcomes:
         out.write(f"{outcome.destination_id}: {outcome.status} {outcome.category or ''}\n")
     return 0 if all(o.status == "delivered" for o in result.outcomes) else 1
+
+
+def cmd_live_check(args, out=sys.stdout) -> int:
+    from . import livecheck
+    if args.dry_run:
+        cfg = config_mod.load({**os.environ, "BURN_NOTIFY_CONFIG": args.config}) if args.config \
+            else config_mod.parse(DEMO_CONFIG, environ={})
+        proc = dry_run_processor(cfg)
+        report = livecheck.run(cfg, inject_failure=args.inject_failure, secrets=_DummySecrets(),
+                               providers=proc.providers)
+    else:
+        if not args.live or os.environ.get("BURN_NOTIFY_LIVE") != "1":
+            out.write("refusing to send: pass --live and set BURN_NOTIFY_LIVE=1 (authorized test channels only)\n")
+            return 2
+        if not args.config:
+            out.write("--config is required for a live check\n")
+            return 2
+        cfg = config_mod.load({**os.environ, "BURN_NOTIFY_CONFIG": args.config})
+        report = livecheck.run(cfg, inject_failure=args.inject_failure)
+    out.write(livecheck.render(report) + "\n")
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, indent=2, default=str)
+        out.write(f"report written to {args.report}\n")
+    ok = report.get("duplicate_sent_nothing") and all(
+        r["status"] in ("delivered", "suppressed") or r["status"].startswith("skipped_") or
+        (s["step"].startswith("6a") and r["status"] == "retrying")
+        for s in report["steps"] for r in s["results"])
+    checks_ok = all(r.get("payload_check") == "pass" for s in report["steps"] for r in s["results"])
+    out.write(f"overall: {'PASS' if ok and checks_ok else 'FAIL'}"
+              f"{' (dry run: no message left this machine)' if args.dry_run else ''}\n")
+    return 0 if ok and checks_ok else 1
+
+
+def cmd_test_message(args, out=sys.stdout) -> int:
+    """Print an SQS message body for checking a deployment: always delivered labelled [TEST]."""
+    from .events import TEST_ENVELOPE_KEY
+    out.write(json.dumps({TEST_ENVELOPE_KEY: True, "event": fixtures.ALL[args.fixture]()}) + "\n")
+    return 0
 
 
 def main(argv=None, out=None) -> int:
@@ -170,5 +211,14 @@ def main(argv=None, out=None) -> int:
     send.add_argument("--destination", required=True)
     send.add_argument("--fixture", default="canary_used", choices=sorted(fixtures.ALL))
     send.add_argument("--live", action="store_true")
+    live = sub.add_parser("live-check", help="step-by-step verification against authorized test destinations")
+    live.add_argument("--config", help="config JSON naming ONLY authorized test destinations")
+    live.add_argument("--live", action="store_true")
+    live.add_argument("--dry-run", action="store_true", help="same sequence with recording transports, no network")
+    live.add_argument("--inject-failure", action="store_true", help="also test retry after controlled failures")
+    live.add_argument("--report", help="write the JSON report (no secrets) to this path")
+    msg = sub.add_parser("test-message", help="print an SQS body that checks a deployed stack ([TEST] label)")
+    msg.add_argument("--fixture", default="canary_used", choices=sorted(fixtures.ALL))
     args = parser.parse_args(argv)
-    return cmd_dry_run(args, out) if args.cmd == "dry-run" else cmd_send(args, out)
+    return {"dry-run": cmd_dry_run, "send": cmd_send, "live-check": cmd_live_check,
+            "test-message": cmd_test_message}[args.cmd](args, out)

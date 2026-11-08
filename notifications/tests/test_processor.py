@@ -205,8 +205,10 @@ def test_delayed_lower_flag_level_is_superseded():
 
 def test_containment_update_never_overstates_after_late_failure():
     proc = make_processor()
-    proc.process_event(fixtures.rotation_failed())
-    inc, _ = proc.incident_for(fixtures.canary_revoked())
+    revoke = fixtures.canary_revoked()
+    failure = fixtures.rotation_failed(offset_ms=5)  # written after the revoke ...
+    proc.process_event(failure)                       # ... but delivered first (SQS does not keep order)
+    inc, _ = proc.incident_for(revoke)
     assert dict(inc.facts)["Owned credentials"].startswith("NOT rotated")
 
 

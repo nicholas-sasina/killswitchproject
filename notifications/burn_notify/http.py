@@ -102,24 +102,35 @@ def system_resolver(host: str) -> list[str]:
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """Connects to a vetted IP, verifies TLS against the original hostname."""
 
-    def __init__(self, host: str, ip: str, timeout: float, context: ssl.SSLContext):
-        super().__init__(host, 443, timeout=timeout, context=context)
+    def __init__(self, host: str, ip: str, timeout: float, context: ssl.SSLContext, port: int = 443):
+        super().__init__(host, port, timeout=timeout, context=context)
         self._ip = ip
         self._ctx = context
 
     def connect(self):  # noqa: D401 - http.client API
-        sock = socket.create_connection((self._ip, 443), self.timeout)
-        self.sock = self._ctx.wrap_socket(sock, server_hostname=self.host)
+        sock = socket.create_connection((self._ip, self.port), self.timeout)
+        try:
+            self.sock = self._ctx.wrap_socket(sock, server_hostname=self.host)
+        except Exception:
+            sock.close()
+            raise
 
 
 class SafeTransport:
     """Real transport used in Lambda. Construct with the provider's allowlist."""
 
     def __init__(self, *, exact: frozenset[str] = frozenset(), suffixes: tuple[str, ...] = (),
-                 path_prefixes: tuple[str, ...] = ("/",), resolver: Resolver = system_resolver):
+                 path_prefixes: tuple[str, ...] = ("/",), resolver: Resolver = system_resolver,
+                 address_ok: Callable[[str], bool] = is_public_address, context: ssl.SSLContext | None = None,
+                 port: int = 443):
+        """resolver, address_ok, context and port exist so tests can point the real socket code at a
+        local TLS server; production always uses the defaults (system DNS, public addresses only,
+        the system CA store with hostname checking, port 443)."""
         self.exact, self.suffixes, self.path_prefixes = exact, suffixes, path_prefixes
         self.resolver = resolver
-        self.context = ssl.create_default_context()
+        self.address_ok = address_ok
+        self.context = context or ssl.create_default_context()
+        self.port = port
 
     def vet(self, url: str) -> tuple[str, str, str]:
         host, path = check_url(url, exact=self.exact, suffixes=self.suffixes, path_prefixes=self.path_prefixes)
@@ -127,7 +138,7 @@ class SafeTransport:
             addresses = self.resolver(host)
         except OSError as exc:
             raise ConnectionError("DNS resolution failed") from exc
-        if not addresses or not all(is_public_address(a) for a in addresses):
+        if not addresses or not all(self.address_ok(a) for a in addresses):
             raise UnsafeURL("host resolves to a non-public address")
         return host, path, addresses[0]
 
@@ -135,7 +146,7 @@ class SafeTransport:
         if len(body) > MAX_REQUEST_BYTES:
             raise UnsafeURL("request body too large")
         host, path, ip = self.vet(url)
-        conn = _PinnedHTTPSConnection(host, ip, timeout, self.context)
+        conn = _PinnedHTTPSConnection(host, ip, timeout, self.context, self.port)
         try:
             conn.request("POST", path, body=body, headers={**headers, "Host": host,
                                                           "User-Agent": "burn-notify/1.0"})

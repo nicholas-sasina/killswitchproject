@@ -15,6 +15,7 @@ BURN_NOTIFY_MAX_RECEIVES (must match the queue's maxReceiveCount), BURN_DASHBOAR
 from __future__ import annotations
 
 import os
+import time
 
 from . import config as config_mod
 from .events import InvalidEvent
@@ -24,6 +25,7 @@ from .redact import get_logger
 from .store import DynamoStore
 
 log = get_logger()
+DEADLINE_MARGIN = 3.0  # seconds kept free to record outcomes before the Lambda timeout
 _processor: Processor | None = None
 _sqs = None
 
@@ -32,8 +34,9 @@ def processor() -> Processor:
     global _processor
     if _processor is None:
         cfg = config_mod.load()
-        _processor = Processor(cfg, DynamoStore(os.environ["BURN_NOTIFY_STATE_TABLE"]),
-                               max_receives=int(os.environ.get("BURN_NOTIFY_MAX_RECEIVES", "5")))
+        store = DynamoStore(os.environ["BURN_NOTIFY_STATE_TABLE"],
+                            lease_seconds=int(os.environ.get("BURN_NOTIFY_LEASE_SECONDS", "90")))
+        _processor = Processor(cfg, store, max_receives=int(os.environ.get("BURN_NOTIFY_MAX_RECEIVES", "5")))
     return _processor
 
 
@@ -57,10 +60,13 @@ def _delay(receipt: str, arn: str, seconds: int) -> None:
 def queue_handler(event, context=None, *, proc: Processor | None = None, delay=_delay):
     proc = proc or processor()
     failures = []
+    deadline = None
+    if context is not None and hasattr(context, "get_remaining_time_in_millis"):
+        deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - DEADLINE_MARGIN
     for record in event.get("Records", []):
         receives = int((record.get("attributes") or {}).get("ApproximateReceiveCount", "1"))
         try:
-            result = proc.process_record(record, receive_count=receives)
+            result = proc.process_record(record, receive_count=receives, deadline=deadline)
         except InvalidEvent as exc:
             # Not a ledger event; retrying cannot fix it. Logged without content and dropped.
             log.error("dropping invalid record %s: %s", record.get("messageId"), exc)
@@ -83,5 +89,8 @@ def queue_handler(event, context=None, *, proc: Processor | None = None, delay=_
 
 def flush_handler(event=None, context=None, *, proc: Processor | None = None):
     proc = proc or processor()
-    outcomes = proc.flush_windows()
+    deadline = None
+    if context is not None and hasattr(context, "get_remaining_time_in_millis"):
+        deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000 - DEADLINE_MARGIN
+    outcomes = proc.flush_windows(deadline=deadline)
     return {"flushed": len(outcomes), "delivered": sum(o.status == "delivered" for o in outcomes)}

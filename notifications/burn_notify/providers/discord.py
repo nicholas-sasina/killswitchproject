@@ -30,6 +30,14 @@ def _iso(ts: str) -> str | None:
             return None
 
 
+def _cap(text: str, limit: int) -> str:
+    """Discord's hard limits apply to the escaped text, so cut after escaping (never inside an escape)."""
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    return (cut[:-1] if cut.endswith("\\") else cut) + "\u2026"
+
+
 class DiscordProvider(Provider):
     name = "discord"
     exact_hosts = frozenset({"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"})
@@ -46,10 +54,10 @@ class DiscordProvider(Provider):
         esc = escape.discord
         embed: dict = {
             "title": escape.clean(f"{incident.header}: {incident.title}", 256),
-            "description": esc(incident.summary, 2000),
+            "description": _cap(esc(incident.summary, 2000), 4096),
             "color": UPDATE_COLOR if incident.is_update else COLORS[incident.severity],
-            "fields": [{"name": esc(label, 250), "value": esc(value, 1000) or "-", "inline": len(value) < 40}
-                       for label, value in incident.fields()][:25],
+            "fields": [{"name": _cap(esc(label, 250), 256), "value": _cap(esc(value, 1000), 1024) or "-",
+                        "inline": len(value) < 40} for label, value in incident.fields()][:25],
             "footer": {"text": "BURN ledger event; no credential values included"},
         }
         timestamp = _iso(incident.ts)
@@ -57,7 +65,7 @@ class DiscordProvider(Provider):
             embed["timestamp"] = timestamp
         if incident.dashboard_url:
             embed["url"] = incident.dashboard_url
-        body = {"username": "BURN", "content": "", "embeds": [embed], "allowed_mentions": {"parse": []}}
+        body = {"username": "BURN", "embeds": [embed], "allowed_mentions": {"parse": []}}
         return PreparedRequest(url_ref=dest.secret_ref, body=body, preview={"provider": self.name, "body": body})
 
     def send(self, prepared: PreparedRequest, dest: Destination, secret: str | None) -> Ack:

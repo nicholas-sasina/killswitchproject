@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import random
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -133,6 +134,10 @@ class Provider:
             return self.transport.post(url, data, {"Content-Type": "application/json"}, timeout=self.timeout)
         except UnsafeURL:
             raise DeliveryError("unsafe_url", retryable=False) from None
+        except ssl.SSLCertVerificationError:
+            # Untrusted or wrong-host certificate: recorded distinctly (possible interception), retried in
+            # case it is transient, never bypassed.
+            raise DeliveryError("tls_verification_failed", retryable=True) from None
         except (TimeoutError, ConnectionError, OSError):
             raise DeliveryError("network_error", retryable=True) from None
 

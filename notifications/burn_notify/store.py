@@ -74,6 +74,7 @@ class Store:
                    now: float) -> int: ...
     def due_windows(self, now: float) -> list[dict]: ...
     def claim_window(self, window_pk: str, now: float) -> dict | None: ...
+    def reopen_window(self, window_pk: str) -> None: ...
     # rate limiting
     def rate_take(self, dest_id: str, minute: int, limit: int, now: float) -> bool: ...
 
@@ -172,6 +173,11 @@ class MemoryStore(Store):
             item["flushed"] = True
             return dict(item)
 
+    def reopen_window(self, pk):
+        with self._lock:
+            if pk in self._items:
+                self._items[pk]["flushed"] = False
+
     def rate_take(self, dest_id, minute, limit, now):
         with self._lock:
             item = self._items.setdefault(f"rate#{dest_id}#{minute}", {"n": 0})
@@ -187,7 +193,9 @@ class DynamoStore(Store):
 
     DUE_INDEX = "due"
 
-    def __init__(self, table_name: str, *, resource=None):
+    def __init__(self, table_name: str, *, resource=None, lease_seconds: int | None = None):
+        if lease_seconds is not None:
+            self.lease_seconds = lease_seconds  # must exceed the Lambda timeout (see handler.py)
         if resource is None:
             import boto3
             resource = boto3.resource("dynamodb")
@@ -303,6 +311,11 @@ class DynamoStore(Store):
         except self._conditional:
             return None
         return _window(out["Attributes"])
+
+    def reopen_window(self, pk):
+        self.table.update_item(Key={"pk": pk}, UpdateExpression="SET #due = :pending",
+                               ConditionExpression="attribute_exists(pk)", ExpressionAttributeNames={"#due": "due"},
+                               ExpressionAttributeValues={":pending": "pending"})
 
     def rate_take(self, dest_id, minute, limit, now):
         try:

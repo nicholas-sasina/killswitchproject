@@ -49,6 +49,7 @@ class Incident:
     priority: bool = False
     dashboard_url: str | None = None
     aggregated_count: int = 1
+    notice: str | None = None  # synthetic/test sends: shown first, header prefixed [TEST]
 
     @property
     def is_update(self) -> bool:
@@ -57,14 +58,17 @@ class Incident:
     @property
     def header(self) -> str:
         if self.is_update:
-            return "BURN CONTAINMENT UPDATE"
-        if self.aggregated_count > 1:
-            return f"BURN ALERT SUMMARY — {self.severity.label}"
-        return f"BURN SECURITY ALERT — {self.severity.label}"
+            text = "BURN CONTAINMENT UPDATE"
+        elif self.aggregated_count > 1:
+            text = f"BURN ALERT SUMMARY — {self.severity.label}"
+        else:
+            text = f"BURN SECURITY ALERT — {self.severity.label}"
+        return f"[TEST] {text}" if self.notice else text
 
     def fields(self) -> list[tuple[str, str]]:
         """Ordered (label, value) pairs every channel shows."""
-        rows: list[tuple[str, str]] = [("Severity", self.severity.label), ("Affected instance", self.agent_id)]
+        rows: list[tuple[str, str]] = [("Notice", self.notice)] if self.notice else []
+        rows += [("Severity", self.severity.label), ("Affected instance", self.agent_id)]
         if self.session_id:
             rows.append(("Session", self.session_id))
         if self.role:
@@ -82,11 +86,12 @@ class Incident:
 
     def subject(self) -> str:
         tag = "UPDATE" if self.is_update else self.severity.label
-        return f"[BURN][{tag}] {self.title} — {self.agent_id}"[:200]
+        test = "[TEST]" if self.notice else ""
+        return f"{test}[BURN][{tag}] {self.title} — {self.agent_id}"[:200]
 
 
 def build(event: dict, result: Classification, *, dashboard_url: str | None,
-          extra_facts: list[tuple[str, str]] | None = None) -> Incident:
+          extra_facts: list[tuple[str, str]] | None = None, notice: str | None = None) -> Incident:
     facts = list(result.facts)
     for label, value in extra_facts or []:
         facts = [(lab, val) for lab, val in facts if lab != label] + [(label, value)]
@@ -95,7 +100,7 @@ def build(event: dict, result: Classification, *, dashboard_url: str | None,
         severity=result.severity, category=result.category, kind=result.kind, title=result.title,
         summary=result.summary, agent_id=event["agent_id"], session_id=event.get("session_id"),
         role=event.get("role"), flag_level=event.get("flag_level"), facts=tuple(facts),
-        priority=result.priority, dashboard_url=dashboard_url,
+        priority=result.priority, dashboard_url=dashboard_url, notice=notice,
     )
 
 

@@ -3,7 +3,7 @@
     burn-events DynamoDB stream (NEW_IMAGE)          <- needs the one-line change in docs/infra-integration.md
       -> EventBridge Pipe (filter: eventName = INSERT)
       -> SQS burn-notify (SSE, redrive to burn-notify-dlq after 5 receives)
-      -> Lambda burn-notify (ReportBatchItemFailures) -> Slack / Telegram / Discord / Teams / SES
+      -> Lambda burn-notify (batch 1, ReportBatchItemFailures) -> Slack / Telegram / Discord / Teams / SES
     EventBridge schedule (1 min) -> Lambda burn-notify-flush (aggregate summaries, digests)
     DynamoDB burn-notify-state (delivery claims + history, TTL)
 
@@ -12,10 +12,12 @@ Context values (all optional except the stream ARN):
     burn:notify_config        path to the notifications config JSON (secret_refs only, no secrets)
     burn:notify_ses_identity  verified SES identity name (domain or address) the Lambda may send from
     burn:dashboard_origin     https origin of the hosted dashboard (links go to <origin>/#/alerts)
+    burn:ses_sandbox          "true" (default) also allows the configured recipient identities, as the
+                              SES sandbox requires; "false" once the account has production access
 
 Least privilege: the Pipe role can read only the burn-events stream and send only to
 the queue; the Lambda role can read only secrets named burn-notify/*, use only its
-own state table, and send email only from the one SES identity. Nothing here can
+own state table, and send email only from the configured sender address. Nothing here can
 write to any BURN table.
 """
 from __future__ import annotations
@@ -37,10 +39,12 @@ from constructs import Construct
 
 NOTIFICATIONS = pathlib.Path(__file__).resolve().parents[1]
 MAX_RECEIVES = 5
-LAMBDA_TIMEOUT = 30
+LAMBDA_TIMEOUT = 60          # one event x up to 5 destinations x (5 s timeout + one quick retry) fits
+LEASE_SECONDS = LAMBDA_TIMEOUT + 30  # a claim outlives the worker that holds it, so no two live senders
+ENV_LIMIT = 3500             # Lambda allows 4 KB of environment in total
 STATE_TABLE = "burn-notify-state"
 SECRET_PREFIX = "burn-notify/"
-CODE_EXCLUDE = ["tests", "infra", "docs", ".venv", ".pytest_cache", "**/__pycache__", "*.md", "uv.lock",
+CODE_EXCLUDE = ["tests", "infra", "docs", "demo", ".venv", ".pytest_cache", "**/__pycache__", "*.md", "uv.lock",
                 "pyproject.toml", "*.json"]
 
 
@@ -52,8 +56,10 @@ class BurnNotificationsStack(cdk.Stack):
         if not stream_arn:
             raise ValueError("pass -c burn:events_stream_arn=<burn-events stream ARN> (enable the stream first)")
         config_path = ctx("burn:notify_config")
-        config_json = json.dumps(json.loads(pathlib.Path(config_path).read_text())) if config_path else \
-            json.dumps({"destinations": []})
+        config_doc = json.loads(pathlib.Path(config_path).read_text()) if config_path else {"destinations": []}
+        config_json = json.dumps(config_doc, separators=(",", ":"))
+        if len(config_json) > ENV_LIMIT:
+            raise ValueError("notifications config is too large for a Lambda environment variable")
 
         # --- state ------------------------------------------------------------------------
         state = ddb.Table(
@@ -81,45 +87,58 @@ class BurnNotificationsStack(cdk.Stack):
             resources=[stream_arn]))
         pipe_role.add_to_policy(iam.PolicyStatement(actions=["dynamodb:ListStreams"], resources=["*"]))
         queue.grant_send_messages(pipe_role)
+        dlq.grant_send_messages(pipe_role)  # records the Pipe cannot deliver are kept, not dropped
         pipes.CfnPipe(
             self, "EventsToQueue", name="burn-events-to-notify", role_arn=pipe_role.role_arn,
             source=stream_arn, target=queue.queue_arn,
             source_parameters=pipes.CfnPipe.PipeSourceParametersProperty(
                 dynamo_db_stream_parameters=pipes.CfnPipe.PipeSourceDynamoDBStreamParametersProperty(
                     starting_position="LATEST", batch_size=10, maximum_batching_window_in_seconds=1,
-                    maximum_retry_attempts=10),
+                    maximum_retry_attempts=10,
+                    dead_letter_config=pipes.CfnPipe.DeadLetterConfigProperty(arn=dlq.queue_arn)),
                 filter_criteria=pipes.CfnPipe.FilterCriteriaProperty(filters=[
                     pipes.CfnPipe.FilterProperty(pattern=json.dumps({"eventName": ["INSERT"]}))])))
 
         # --- Lambdas ----------------------------------------------------------------------
         env = {"BURN_NOTIFY_STATE_TABLE": STATE_TABLE, "BURN_NOTIFY_CONFIG_JSON": config_json,
                "BURN_NOTIFY_MAX_RECEIVES": str(MAX_RECEIVES), "BURN_NOTIFY_ALLOW_ENV_SECRETS": "0",
-               "BURN_NOTIFY_METRICS": "1"}
+               "BURN_NOTIFY_METRICS": "1", "BURN_NOTIFY_LEASE_SECONDS": str(LEASE_SECONDS)}
         if ctx("burn:dashboard_origin"):
             env["BURN_DASHBOARD_ORIGIN"] = ctx("burn:dashboard_origin")
         code = lambda_.Code.from_asset(str(NOTIFICATIONS), exclude=CODE_EXCLUDE)
+
+        # SES: send only from the configured sender(s) of the verified identity. In the SES sandbox, SES also
+        # authorizes against each recipient identity, so their identity ARNs are listed too (sandbox only).
+        identity = ctx("burn:notify_ses_identity")
+        emails = [d for d in config_doc.get("destinations", []) if d.get("provider") == "email"]
+        from_addresses = {d.get("options", {}).get("from_address") for d in emails} - {None}
+        ses_arn = f"arn:{cdk.Aws.PARTITION}:ses:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:identity/"
+        ses_resources = [ses_arn + identity] if identity and from_addresses else []
+        if ses_resources and str(ctx("burn:ses_sandbox") or "true").lower() == "true":
+            recipients = {r.strip() for d in emails for r in str(d.get("recipient", "")).split(",") if r.strip()}
+            ses_resources += [ses_arn + r for r in sorted(recipients)]
 
         def fn(name: str, handler: str) -> lambda_.Function:
             f = lambda_.Function(
                 self, name, function_name=name.lower().replace("notifyflush", "notify-flush"),
                 runtime=lambda_.Runtime.PYTHON_3_12, handler=handler, code=code,
-                timeout=cdk.Duration.seconds(LAMBDA_TIMEOUT), memory_size=256, environment=env,
-                reserved_concurrent_executions=5)
+                timeout=cdk.Duration.seconds(LAMBDA_TIMEOUT), memory_size=256, environment=env)
+            # No reserved concurrency: it is taken from the account pool (new accounts have 10 in total, and
+            # reserving below the unreserved minimum fails the deploy). The SQS mapping caps concurrency instead.
             state.grant_read_write_data(f)
             f.add_to_role_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[f"arn:{cdk.Aws.PARTITION}:secretsmanager:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:"
                            f"secret:{SECRET_PREFIX}*"]))
-            identity = ctx("burn:notify_ses_identity")
-            if identity:
+            if ses_resources:
                 f.add_to_role_policy(iam.PolicyStatement(
-                    actions=["ses:SendEmail"],
-                    resources=[f"arn:{cdk.Aws.PARTITION}:ses:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:identity/{identity}"]))
+                    actions=["ses:SendEmail"], resources=ses_resources,
+                    conditions={"StringEquals": {"ses:FromAddress": sorted(from_addresses)}}))
             return f
 
         worker = fn("Burn-Notify", "burn_notify.handler.queue_handler")
         worker.add_event_source(sources.SqsEventSource(
-            queue, batch_size=10, max_batching_window=cdk.Duration.seconds(1), report_batch_item_failures=True))
+            queue, batch_size=1, report_batch_item_failures=True, max_concurrency=2))
         queue.grant_consume_messages(worker)  # includes ChangeMessageVisibility for Retry-After
 
         flush = fn("Burn-NotifyFlush", "burn_notify.handler.flush_handler")

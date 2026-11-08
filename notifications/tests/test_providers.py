@@ -44,7 +44,7 @@ def test_slack_block_kit_payload():
     fields = [f["text"] for b in body["blocks"] if b["type"] == "section" and "fields" in b for f in b["fields"]]
     assert all(len(b.get("fields", [])) <= 10 for b in body["blocks"])
     joined = "\n".join(fields)
-    for needle in ("Affected instance", "agent-worker-3fa9c1", "Containment", "Awaiting verified outcome", "Time",
+    for needle in ("Affected instance", "agent-synthetic-000000", "Containment", "Awaiting verified outcome", "Time",
                    "Event ID"):
         assert needle in joined
     button = next(b for b in body["blocks"] if b["type"] == "actions")["elements"][0]
@@ -97,7 +97,7 @@ def test_telegram_send_message_payload():
     assert body["chat_id"] == CHAT and body["parse_mode"] == "HTML"
     assert body["link_preview_options"] == {"is_disabled": True}
     assert body["text"].startswith("\U0001F6A8 <b>BURN SECURITY ALERT")  # high-priority style
-    assert "<b>Affected instance:</b> <code>agent-worker-3fa9c1</code>" in body["text"]
+    assert "<b>Affected instance:</b> <code>agent-synthetic-000000</code>" in body["text"]
     assert body["reply_markup"]["inline_keyboard"][0][0]["url"] == "https://burn.example.com/#/alerts"
     ack = p.send(prepared, TG, TELEGRAM_TOKEN)
     assert ack.provider_ref == "77"
@@ -237,7 +237,7 @@ def test_ses_email_generation():
     body = prepared.body
     simple = body["Content"]["Simple"]
     assert simple["Subject"]["Data"].startswith("[BURN][HIGH] Canary credential presented")
-    assert "Affected instance: agent-worker-3fa9c1" in simple["Body"]["Text"]["Data"]
+    assert "Affected instance: agent-synthetic-000000" in simple["Body"]["Text"]["Data"]
     assert "<table>" in simple["Body"]["Html"]["Data"]
     assert body["Destination"]["ToAddresses"] == ["secops@example.com", "lead@example.com"]
     ack = p.send(prepared, EMAIL, None)

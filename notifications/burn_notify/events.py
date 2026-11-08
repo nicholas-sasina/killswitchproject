@@ -128,7 +128,36 @@ def validate(row: dict) -> dict:
     return event
 
 
+TEST_ENVELOPE_KEY = "burn_notify_test"
+
+
 def parse(record: Any) -> dict | None:
     """unwrap + validate. None means "not an insert, nothing to do"."""
     row = unwrap(record)
+    if isinstance(row, dict) and TEST_ENVELOPE_KEY in row:
+        row = row.get("event")
+        if not isinstance(row, dict):
+            raise InvalidEvent("test envelope has no event")
     return None if row is None else validate(row)
+
+
+def is_test_envelope(record: Any) -> bool:
+    """A deployment check message (see `burn_notify test-message`): always delivered labelled [TEST]."""
+    try:
+        row = unwrap(record)
+    except InvalidEvent:
+        return False
+    return isinstance(row, dict) and row.get(TEST_ENVELOPE_KEY) is True
+
+
+_CROCKFORD = {c: i for i, c in enumerate("0123456789ABCDEFGHJKMNPQRSTVWXYZ")}
+
+
+def event_time_ms(event_id: str) -> int | None:
+    """Milliseconds encoded in an evt_<ULID> id (its first 10 characters), or None."""
+    if not isinstance(event_id, str) or not EVENT_ID_RE.match(event_id):
+        return None
+    value = 0
+    for char in event_id[4:14]:
+        value = value * 32 + _CROCKFORD[char]
+    return value

@@ -21,7 +21,7 @@ _PERMANENT_BODIES = {"invalid_token", "action_prohibited", "no_service", "no_ser
 class SlackProvider(Provider):
     name = "slack"
     exact_hosts = frozenset({"hooks.slack.com"})
-    path_prefixes = ("/services/", "/triggers/")
+    path_prefixes = ("/services/",)  # incoming webhooks; Workflow Builder /triggers/ take a different payload
 
     @classmethod
     def validate_destination(cls, dest: Destination) -> None:

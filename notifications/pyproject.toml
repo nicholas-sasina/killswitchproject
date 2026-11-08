@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = ["boto3"]
 
 [dependency-groups]
-dev = ["pytest", "moto[dynamodb,sqs,ses,sesv2,secretsmanager]>=5", "burn-contracts", "jsonschema"]
+dev = ["pytest", "moto[dynamodb,sqs,ses,sesv2,secretsmanager,iam]>=5", "burn-contracts", "jsonschema", "trustme"]
 infra = ["aws-cdk-lib>=2.220.0", "constructs>=10.0.0"]
 
 [tool.uv]
