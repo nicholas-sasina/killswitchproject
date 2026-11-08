@@ -1,7 +1,10 @@
 """The local endpoint where the agent asks its supervisor for things, on one port:
 
 - POST /spawn {role, command} -> {session_id, agent_id}: start a child instance;
-- POST /progress {item, state} -> {queued}: report task progress, sent with the next heartbeat (when given a queue).
+- POST /progress {item, state}: report task progress, sent with the next heartbeat (when given a queue).
+  "done" is answered at once. "started" is answered once Burn has recorded it, because the agent must not act on
+  an item Burn does not know it touched: 200 recorded, 409 the instance was burned, 400 Burn refused it, or 503
+  when Burn has not confirmed it in time (it stays queued). Only a 200 means go ahead.
 """
 import hmac
 import json
@@ -17,8 +20,9 @@ from .progress import ProgressQueue
 
 class SpawnEndpoint:
     def __init__(self, spawn: Callable[[str, list[str]], dict], local_token: str = "",
-                 progress: ProgressQueue | None = None):
+                 progress: ProgressQueue | None = None, progress_wait: float = 15.0):
         self._spawn, self._local_token, self._progress = spawn, local_token, progress
+        self._progress_wait = progress_wait  # how long a start may wait to be recorded
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self._server.daemon_threads = True
         base = f"http://127.0.0.1:{self._server.server_port}"
@@ -66,9 +70,20 @@ class SpawnEndpoint:
                 if not isinstance(body, dict):
                     return self._send(400, {"error": "expected a JSON object {item, state}"})
                 try:
-                    self._send(200, {"queued": outer._progress.add(body)})
+                    queued = outer._progress.add(body)
                 except ProgressError as exc:
-                    self._send(400, {"error": str(exc)})  # names the broken rule
+                    return self._send(400, {"error": str(exc)})  # names the broken rule
+                if body["state"] != "started":
+                    return self._send(200, {"queued": queued})
+                outcome, detail = outer._progress.wait_recorded(body["item"], outer._progress_wait)
+                if outcome == "recorded":
+                    return self._send(200, {"queued": queued, "recorded": True})
+                if outcome == "gone":
+                    return self._send(409, {"error": "the instance was burned or has exited: do not start this item"})
+                if outcome == "refused":
+                    return self._send(400, {"error": f"Burn refused this start ({detail}): do not start this item"})
+                self._send(503, {"error": "Burn has not recorded this start yet (it stays queued): "
+                                          "do not start this item"})
 
             def _send(self, status: int, body: dict):
                 data = json.dumps(body).encode()

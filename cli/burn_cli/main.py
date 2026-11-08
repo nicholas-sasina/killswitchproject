@@ -20,7 +20,7 @@ burn run joins with a join token (--token or BURN_JOIN_TOKEN), fetches the insta
 starts COMMAND with only those, and with only an allow-list of your environment (PATH, LANG, LC_*, TZ, TERM,
 the AWS region and CA-bundle variables): every other variable, credentials included, is removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
 (POST {role, command} to start a child instance), BURN_PROGRESS_URL (POST {item, state} to report task
-progress, sent with the next heartbeat), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE. BURN_TASK and BURN_RESUME
+progress; a start is answered once Burn has recorded it), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE. BURN_TASK and BURN_RESUME
 are passed on from your environment only if they hold item ids; otherwise burn run refuses to start.
 It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
 

@@ -95,8 +95,11 @@ burn env            # what an instance's environment would hold (values hidden; 
    `{session_id, agent_id}`. Children stop when their parent's `burn run` ends.
    `BURN_PROGRESS_URL` is on the same port: `POST {"item": "<id>", "state": "started" | "done"}` reports task
    progress. It is checked with the same rules as the API (item ids match `^[A-Za-z0-9_.:-]{1,64}$`, at most 500
-   items per instance) and answered 200 `{"queued": true}`, or `{"queued": false}` for a repeat that changes
-   nothing, or 400 with the broken rule.
+   items per instance); a broken rule is a 400 that names it. A `done` is answered at once, 200 `{"queued": true}`
+   (`false` for a repeat that changes nothing), and sent with the next heartbeat. A `started` is answered only
+   once Burn has recorded it, because the agent must not act on an item Burn does not know it touched: 200
+   `{"queued": ..., "recorded": true}` means go ahead; 409 means the instance was burned, 400 that Burn refused
+   the start, and 503 that Burn has not confirmed it within 15 s (it stays queued). Only a 200 means go ahead.
 6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL
    after 5 s) and `burn run` exits with 3. A normal exit posts `/instances/{id}/exit`. SIGINT and SIGTERM are
    forwarded to the agent. Queued progress goes in the heartbeat body, `{"progress": [...]}`, oldest first and at
@@ -170,6 +173,9 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
   a clean replacement, which skips the items finished before the breach. Progress is how Burn knows which those
   are: the agent posts item ids to `BURN_PROGRESS_URL` and they reach Burn with the next heartbeat, stamped with
   Burn's own clock. Only item ids are sent, never free text.
+- **Why does reporting "started" take a moment?** It returns only once Burn has recorded it, usually within one
+  heartbeat. If the instance were burned between the agent starting an item and Burn hearing of it, a replacement
+  would do that item again. Waiting closes that gap. Treat anything but a 200 as "stop, do not start this item".
 - **Why does `burn run` refuse to start with my `BURN_TASK` or `BURN_RESUME`?** They must hold item ids only:
   `BURN_TASK` a JSON list such as `["item-01", "item-02"]` (at most 500), `BURN_RESUME` exactly
   `{"done": [...], "quarantined": [...]}`. The error names the variable and the rule. An empty value counts as unset.

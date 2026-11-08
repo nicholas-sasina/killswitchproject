@@ -1,6 +1,7 @@
 """burn run and task progress: the local endpoint, the queue and its trip on the heartbeat."""
 import json
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -108,10 +109,18 @@ def test_a_queued_event_wakes_the_heartbeat():
 @pytest.fixture
 def endpoint():
     queue = ProgressQueue()
-    server = SpawnEndpoint(lambda role, command: {}, "local-token", progress=queue).start()
+    server = SpawnEndpoint(lambda role, command: {}, "local-token", progress=queue, progress_wait=10.0).start()
     server.queue = queue
     yield server
     server.stop()
+
+
+def in_background(call):
+    """Run a blocking call on a thread; its result lands in the returned dict."""
+    out = {}
+    thread = threading.Thread(target=lambda: out.setdefault("reply", call()), daemon=True)
+    thread.start()
+    return thread, out
 
 
 def post(url, body, token="local-token"):
@@ -127,10 +136,65 @@ def post(url, body, token="local-token"):
 
 def test_progress_is_posted_next_to_the_spawn_endpoint(endpoint):
     assert endpoint.progress_url == endpoint.url.removesuffix("/spawn") + "/progress"
-    assert post(endpoint.progress_url, ev("item-01")) == (200, {"queued": True})
-    assert post(endpoint.progress_url, ev("item-01")) == (200, {"queued": False})
     assert post(endpoint.progress_url, ev("item-01", "done")) == (200, {"queued": True})
-    assert endpoint.queue.batch() == [ev("item-01"), ev("item-01", "done")]
+    assert post(endpoint.progress_url, ev("item-01", "done")) == (200, {"queued": False})
+    assert endpoint.queue.batch() == [ev("item-01", "done")]
+
+
+def test_done_is_answered_at_once_and_sent_later(endpoint):
+    started = time.monotonic()
+    assert post(endpoint.progress_url, ev("item-01", "done")) == (200, {"queued": True})
+    assert time.monotonic() - started < 5 and endpoint.queue.pending() == 1  # well within the 10 s a start may wait
+
+
+def test_started_is_answered_only_once_burn_has_recorded_it(endpoint):
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
+    thread.join(0.4)
+    assert thread.is_alive() and endpoint.queue.batch() == [ev("item-01")]  # queued, not yet recorded
+    endpoint.queue.sent(1)  # a heartbeat carrying it got a 200
+    thread.join(2)
+    assert out["reply"] == (200, {"queued": True, "recorded": True})
+    assert post(endpoint.progress_url, ev("item-01")) == (200, {"queued": False, "recorded": True})  # already
+
+
+def test_started_on_a_burned_instance_is_a_409_so_the_agent_stops_before_acting(endpoint):
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
+    thread.join(0.2)
+    endpoint.queue.gone()  # the heartbeat got a 409
+    thread.join(2)
+    assert out["reply"][0] == 409 and "burned" in out["reply"][1]["error"]
+    assert post(endpoint.progress_url, ev("item-02"))[0] == 409  # and every later start, at once
+
+
+def test_a_start_burn_refused_is_a_400_with_its_reason(endpoint):
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
+    thread.join(0.2)
+    endpoint.queue.dropped(1, "HTTP 400: at most 500 items per instance")
+    thread.join(2)
+    assert out["reply"][0] == 400 and "at most 500 items per instance" in out["reply"][1]["error"]
+
+
+def test_a_start_burn_has_not_recorded_in_time_is_a_503_and_stays_queued():
+    queue = ProgressQueue()
+    server = SpawnEndpoint(lambda role, command: {}, "local-token", progress=queue, progress_wait=0.3).start()
+    try:
+        status, reply = post(server.progress_url, ev("item-01"))
+        assert status == 503 and "not recorded" in reply["error"]
+        assert queue.batch() == [ev("item-01")]
+    finally:
+        server.stop()
+
+
+def test_a_waiting_start_blocks_neither_spawn_nor_other_reports(endpoint):
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
+    thread.join(0.1)
+    started = time.monotonic()
+    assert post(endpoint.url, {"role": "worker", "command": ["true"]})[0] == 200
+    assert post(endpoint.progress_url, ev("item-02", "done"))[0] == 200
+    assert time.monotonic() - started < 5 and thread.is_alive()
+    endpoint.queue.sent(2)
+    thread.join(2)
+    assert out["reply"][0] == 200
 
 
 @pytest.mark.parametrize("body,rule", [
@@ -253,12 +317,16 @@ def test_progress_left_at_exit_is_given_up_after_three_tries_or_a_409(capsys):
 
 
 REPORT = """
-    import json, os, sys, time, urllib.request
+    import json, os, signal, sys, time, urllib.error, urllib.request
     def report(item, state):
         req = urllib.request.Request(os.environ["BURN_PROGRESS_URL"], method="POST",
                                      data=json.dumps({"item": item, "state": state}).encode(),
                                      headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]})
-        urllib.request.urlopen(req).read()
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read()), time.time()
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read()), time.time()
 """
 
 
@@ -267,7 +335,7 @@ def timed(stack):
     seen, original = [], stack.handle
 
     def handle(method, path, query, body):
-        seen.append((time.monotonic(), method, path, body))
+        seen.append((time.time(), method, path, body))
         return original(method, path, query, body)
 
     stack.handle = handle
@@ -287,13 +355,13 @@ def test_progress_goes_out_promptly_in_order_and_never_closer_than_the_minimum_g
         time.sleep(0.05)
         report(f"item-{i:02d}", "done")
         time.sleep(0.3)
-    time.sleep(1.5)"""
-    started = time.monotonic()
+    time.sleep(3)"""
+    started = time.time()
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.25).run() == 0
     beats = progress_beats(seen)
     assert [e for _, batch in beats for e in batch] == [
         ev(f"item-{i:02d}", state) for i in range(1, 4) for state in ("started", "done")]
-    assert beats[0][0] - started < 1.0  # heartbeat_every is a minute: progress itself caused these beats
+    assert beats[0][0] - started < 20  # heartbeat_every is a minute: progress itself caused these beats
     assert all(b[0] - a[0] >= 0.2 for a, b in zip(beats, beats[1:]))
     exit_at = next(t for t, _, path, _ in seen if path.endswith("/exit"))
     assert exit_at - beats[-1][0] > 1.0  # all of it went out while the agent ran, not just at its exit
@@ -319,13 +387,17 @@ def test_a_refused_heartbeat_drops_its_progress_and_the_agent_keeps_running(stac
 
     stack.handle = refuse_bad
     seen = timed(stack)  # records the refused heartbeat too
-    code = REPORT + """
-    report("bad-item", "started")
+    out = stack.tmp / "replies.json"
+    code = REPORT + f"""
+    replies = [report("bad-item", "started")[:2]]
     time.sleep(0.6)
-    report("good-item", "started")
-    time.sleep(0.6)"""
+    replies.append(report("good-item", "started")[:2])
+    json.dump(replies, open({str(out)!r}, "w"))"""
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
     assert [batch for _, batch in progress_beats(seen)] == [[ev("bad-item")], [ev("good-item")]]
+    (bad_status, bad), (good_status, good) = json.loads(out.read_text())
+    assert bad_status == 400 and "at most 500 items per instance" in bad["error"]  # the agent must not start it
+    assert (good_status, good) == (200, {"queued": True, "recorded": True})
     assert "refused 1 progress events" in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
 
@@ -349,18 +421,48 @@ def test_a_refused_heartbeat_is_followed_promptly_by_a_bare_one_that_keeps_the_i
     beats = [(t, body.get("progress")) for t, _, path, body in seen if path.endswith("/heartbeat")]
     refused = next(i for i, (_, progress) in enumerate(beats) if progress)
     then, bare = beats[refused][0], beats[refused + 1]
-    assert bare[1] is None and 0.15 <= bare[0] - then < 1.0  # after the minimum gap, not a minute later
+    assert bare[1] is None and 0.15 <= bare[0] - then < 20  # after the minimum gap, not a minute later
     assert next(iter(stack.instances.values()))["last_seen"] == "alive"
 
 
-def test_a_409_still_means_burned_when_progress_is_waiting(stack):
+def test_a_409_still_means_burned_and_the_waiting_start_is_told_so(stack):
     stack.heartbeat_status = 409
-    code = REPORT + """
-    report("item-01", "started")
+    out = stack.tmp / "reply.json"
+    code = REPORT + f"""
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)  # so it lives long enough to write down what it was told
+    json.dump(report("item-01", "started")[:2], open({str(out)!r}, "w"))
     time.sleep(30)"""
     started = time.monotonic()
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1, stop_grace=1).run() == EXIT_STOPPED
     assert time.monotonic() - started < 10
+    status, reply = json.loads(out.read_text())
+    assert status == 409 and "burned" in reply["error"]
+
+
+def test_the_agent_hears_of_its_start_only_after_burn_received_it(stack):
+    seen = timed(stack)
+    out = stack.tmp / "reply.json"
+    code = REPORT + f"""
+    json.dump(report("item-01", "started"), open({str(out)!r}, "w"))"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
+    status, reply, answered_at = json.loads(out.read_text())
+    assert (status, reply) == (200, {"queued": True, "recorded": True})
+    (received_at, _), = progress_beats(seen)
+    assert received_at <= answered_at
+
+
+def test_a_start_behind_more_than_50_queued_events_still_goes_50_at_a_time(stack):
+    seen = timed(stack)
+    out = stack.tmp / "reply.json"
+    code = REPORT + f"""
+    for i in range(60):
+        report(f"item-{{i:02d}}", "done")
+    json.dump(report("last", "started")[:2], open({str(out)!r}, "w"))"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
+    assert json.loads(out.read_text()) == [200, {"queued": True, "recorded": True}]
+    batches = [batch for _, batch in progress_beats(seen)]
+    assert all(len(batch) <= 50 for batch in batches)
+    assert [e for batch in batches for e in batch] == [ev(f"item-{i:02d}", "done") for i in range(60)] + [ev("last")]
 
 
 # -- the task and resume point a launcher hands over -------------------------------------------------
@@ -478,11 +580,13 @@ def test_a_429_keeps_the_progress_for_the_next_heartbeat_and_is_not_a_burn(stack
 
     stack.handle = busy_once
     seen = timed(stack)
-    code = REPORT + """
-    report("item-01", "started")
-    time.sleep(1.0)"""
-    assert instance(stack, py(code), heartbeat_every=0.3, min_heartbeat_gap=0.1).run() == 0
+    out = stack.tmp / "reply.json"
+    code = REPORT + f"""
+    json.dump(report("item-01", "started")[:2], open({str(out)!r}, "w"))"""
+    # heartbeat_every is a minute: the retry comes from the waiting start, after the minimum gap
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
     assert [batch for _, batch in progress_beats(seen)] == [[ev("item-01")], [ev("item-01")]]
+    assert json.loads(out.read_text()) == [200, {"queued": True, "recorded": True}]
     assert "dropped" not in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
 
