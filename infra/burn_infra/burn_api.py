@@ -71,6 +71,11 @@ class BurnApiStack(cdk.Stack):
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:{names.DEMO_TOKEN_SECRET}-*"],
         ))
+        role.add_to_policy(iam.PolicyStatement(  # a role instance's own values, handed to it once at join
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/api_key-*",
+                       f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/aws_key-*"],
+        ))
         role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge
             actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/*/badge-*"],

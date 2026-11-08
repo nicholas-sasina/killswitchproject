@@ -136,6 +136,9 @@ minted for the instance), `last_seen`, `exited_at`.
   credentials are the role's intersected with the parent's; its egress is the role's list
   intersected with the parent's (null on one side means take the other side's list).
 - The session row's `tools` comes from the role, so the Gateway enforces it as before.
+- A role instance's `POST /sessions` reply carries its own secret values once (`secrets`: badge, api_key,
+  aws_key), so the host needs only the token. A join token is therefore a credential (it yields
+  credentials once): keep it out of shell history, logs and files.
 - A role's `egress` list narrows every outbound destination except Burn's own Gateway, which it never
   blocks: the Gateway already checks tools per role. Model endpoints such as Bedrock are narrowed like any
   other host, so a role that calls a model lists it.
