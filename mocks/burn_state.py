@@ -21,6 +21,7 @@ class BurnState:
         for shared in scenario.get("shared_credentials", []):
             self.minter.handle({"method": "POST", "path": "/shared/credentials", "body": shared})
         self.ticks = 0
+        self.flags = {}  # secret_ref -> one flag per credential (contracts/README.md)
 
     def emit(self, agent_id, source, action, **fields):
         event = make_event(agent_id=agent_id, source=source, action=action, **fields)
@@ -79,6 +80,47 @@ class BurnState:
                           encoding=ENCODINGS[self.ticks % len(ENCODINGS)],
                           destination="webhook.localhost", detail="Mock outbound credential blocked.")
 
+    def flag(self, ref, agent_id, level="seen"):
+        row, now = self.minter.credentials.rows[ref], utc_now_iso()
+        flag = self.flags.setdefault(ref, {
+            "secret_ref": ref, "secret_type": row["type"], "owner_agent_id": row["owner_agent_id"] or "shared",
+            "flag_level": level, "instances": set(), "state": "open", "flagged_at": now, "updated_at": now,
+            "evidence": {level: {"source": "burn", "agent_id": agent_id}}, "resolution": None})
+        rank = ("seen", "attempted", "reported").index
+        if rank(level) > rank(flag["flag_level"]):
+            flag["flag_level"], flag["state"] = level, "open"
+        flag["evidence"].setdefault(level, {"source": "burn", "agent_id": agent_id})
+        flag["instances"].add(agent_id)
+        flag["updated_at"] = now
+
+    def _flag_view(self, flag):
+        return {key: value for key, value in flag.items() if key != "instances"} | {
+            "instance_count": len(flag["instances"])}
+
+    def flag_list(self):
+        rank = ("seen", "attempted", "reported").index
+        return sorted((self._flag_view(f) for f in self.flags.values()), key=lambda f: -rank(f["flag_level"]))
+
+    def resolve_flag(self, ref, action, reason, by):
+        flag = self.flags.get(ref)
+        if flag is None:
+            return None
+        flag["resolution"] = {"action": action, "reason": reason, "by": by, "at": utc_now_iso(),
+                              "level": flag["flag_level"]}
+        version = None
+        if action == "rotate":
+            row = self.minter.credentials.rows[ref]
+            row["version"] = version = row["version"] + 1
+            flag["state"] = "rotated"
+            del self.flags[ref]
+            self.emit("system", "burn", "rotated", secret_ref=ref, secret_type=row["type"],
+                      detail="Mock owner rotation of a flagged credential.")
+        else:
+            flag["state"] = "dismissed"
+            self.emit("system", "burn", "dismissed", secret_ref=ref, flag_level=flag["flag_level"],
+                      detail="Mock flag dismissed by its owner.")
+        return {"flag": self._flag_view(flag), "rotated_to_version": version}
+
     def burn(self, agent_id):
         revoked = []
         for session in self.sessions.values():
@@ -100,4 +142,6 @@ class BurnState:
                         ledger[ref]["status"] = action
                         if action == "flagged":  # a burn flags what the agent saw at level seen
                             ledger[ref]["flag_level"] = "seen"
+                if action == "flagged":
+                    self.flag(ref, agent_id)
         return {"agent_id": agent_id, "revoked": True, "sessions_revoked": revoked, **result}

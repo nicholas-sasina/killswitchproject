@@ -17,8 +17,9 @@ ACTIONS = {
     "refused", "issued", "inherited", "rejected",
     # instance lifecycle (source "instance"), and a badge Burn never issued (source "gateway")
     "started", "exited", "unregistered",
-    # a session's canary was presented to the mock provider (source "provider")
-    "canary_used",
+    # a session's canary was presented to the mock provider (source "provider"),
+    # and an owner dismissed a flagged credential after review (source "burn")
+    "canary_used", "dismissed",
 }
 SECRET_TYPES = {"aws_key", "api_key", "other"}
 OWNERS = {"agent", "shared", "unknown"}

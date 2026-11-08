@@ -145,3 +145,35 @@ def test_all_http_contract_routes_are_registered(client):
         paths = yaml.safe_load((CONTRACTS / contract).read_text())["paths"]
         expected = {(path, method) for path, operations in paths.items() for method in operations}
         assert expected <= routes
+
+
+def test_flags_one_per_credential_with_instance_count_and_owner_decisions(client, scenario):
+    agents = [agent["id"] for agent in scenario[1]["agents"]]
+    shared = shared_secret_ref(scenario[1]["shared_credentials"][0]["name"])
+    state = client.app.state.mock
+    for agent_id in agents[:2]:
+        start(client, agent_id)
+        state.record(agent_id, shared, tool="read_config")
+        check(client.post("/burn", json={"agent_id": agent_id}), "/burn", "post")
+    flags = check(client.get("/flags"), "/flags")["flags"]
+    [flag] = [f for f in flags if f["secret_ref"] == shared]  # one flag, however many instances saw it
+    assert (flag["flag_level"], flag["instance_count"], flag["state"]) == ("seen", 2, "open")
+    assert client.post("/flags/resolve", json={"secret_ref": shared, "action": "dismiss"}).status_code == 422
+    done = check(client.post("/flags/resolve", json={"secret_ref": shared, "action": "dismiss",
+                                                     "reason": "test fixture", "by": "sec-team"}),
+                 "/flags/resolve", "post")
+    assert done["flag"]["state"] == "dismissed" and done["flag"]["resolution"]["reason"] == "test fixture"
+    rotated = check(client.post("/flags/resolve", json={"secret_ref": shared, "action": "rotate",
+                                                        "reason": "rotate anyway"}), "/flags/resolve", "post")
+    assert rotated["flag"]["state"] == "rotated" and rotated["rotated_to_version"] == 2
+    assert all(f["secret_ref"] != shared for f in check(client.get("/flags"), "/flags")["flags"])
+    assert client.post("/flags/resolve", json={"secret_ref": shared, "action": "dismiss",
+                                               "reason": "gone"}).status_code == 404
+    actions = [e["action"] for e in check(client.get("/events"), "/events")["events"]]
+    assert "dismissed" in actions
+
+
+def test_roles_carry_canaries_and_auto_burn(client):
+    body = {"name": "helper", "tools": ["read_ticket"], "auto_burn": False}
+    role = check(client.post("/roles", json=body), "/roles", "post", 201)
+    assert (role["canaries"], role["auto_burn"]) == (True, False)
