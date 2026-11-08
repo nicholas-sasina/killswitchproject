@@ -111,7 +111,11 @@ function setup(
       });
     });
   const api = createApi(
-    { burnUrl: "http://localhost:8700", demoToken: crypto.randomUUID() },
+    {
+      burnUrl: "http://localhost:8700",
+      localDev: true,
+      demoToken: crypto.randomUUID(),
+    },
     () => {},
     fetcher,
   );

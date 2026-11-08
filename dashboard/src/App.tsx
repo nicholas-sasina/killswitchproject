@@ -21,6 +21,8 @@ import { BurnedView } from "./components/BurnedView";
 import { Collapsible } from "./components/Collapsible";
 import { PageHead } from "./components/PageHead";
 import { SwarmPanel } from "./components/SwarmPanel";
+import { SignIn, ConfigurationNotice } from "./components/SignIn";
+import type { PeopleAuth } from "./auth";
 
 const NAV: Record<View, { label: string; hint: string }> = {
   overview: { label: "Overview", hint: "Live agents and roles" },
@@ -29,6 +31,18 @@ const NAV: Record<View, { label: string; hint: string }> = {
 };
 
 export function App({ config = readConfig() }: { config?: ApiConfig }) {
+  // Follow the system theme on the sign-in screen as well as every view.
+  useSystemTheme();
+  return config.localDev ? (
+    <Dashboard config={config} />
+  ) : (
+    <SignIn config={config}>
+      {(auth) => <Dashboard config={config} auth={auth} />}
+    </SignIn>
+  );
+}
+
+function Dashboard({ config, auth }: { config: ApiConfig; auth?: PeopleAuth }) {
   const [mock, setMock] = useState(false);
   const observeResponse = useCallback(
     (headers: Headers) =>
@@ -36,15 +50,15 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
     [],
   );
   const api = useMemo(
-    () => createApi(config, observeResponse),
-    [config.burnUrl, config.demoToken, observeResponse],
+    () => createApi(config, observeResponse, fetch, auth),
+    [config.burnUrl, config.demoToken, config.localDev, auth, observeResponse],
   );
-  const configured = Boolean(config.burnUrl && config.demoToken);
+  const configured = Boolean(
+    config.burnUrl && (config.localDev ? config.demoToken : auth?.idToken()),
+  );
   const { state, error, updatedAt } = useEventFeed(api, configured);
   const events = useMemo(() => newestEvents(state), [state]);
   const view = useView();
-  // Applies the operating system's light or dark setting and follows it.
-  useSystemTheme();
   // The navigation marker counts anything above "noted", so the operator can
   // stay on another view and still know the queue is filling.
   const pending = useMemo(() => attentionCount(toAlerts(events)), [events]);
@@ -203,6 +217,21 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
             ))}
           </nav>
           <div className="sidebar-foot">
+            {auth && (
+              <p className="muted">
+                {auth.getSession()?.email}
+                {" · "}
+                <a
+                  href={auth.logoutUrl()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    auth.signOut();
+                  }}
+                >
+                  Sign out
+                </a>
+              </p>
+            )}
             <div
               className={`connection ${error ? "connection-error" : updatedAt ? "connection-live" : ""}`}
             >
@@ -220,17 +249,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
         </aside>
 
         <div className="content">
-          {!configured && (
-            <section className="setup panel" role="status">
-              <h2>Connect the dashboard</h2>
-              <p>
-                Set <code>VITE_BURN_API_URL</code> and{" "}
-                <code>VITE_BURN_DEMO_TOKEN</code> in{" "}
-                <code>dashboard/.env.local</code>, then restart Vite. Use{" "}
-                <code>.env.example</code> for the configuration fields.
-              </p>
-            </section>
-          )}
+          {!configured && <ConfigurationNotice />}
           <ErrorMessage
             message={
               error

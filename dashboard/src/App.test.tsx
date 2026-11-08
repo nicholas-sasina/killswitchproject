@@ -83,6 +83,7 @@ describe("containment dashboard", () => {
         <App
           config={{
             burnUrl: "https://burn.example.test",
+            localDev: true,
             demoToken: crypto.randomUUID(),
           }}
         />,
@@ -217,6 +218,7 @@ describe("containment dashboard", () => {
         <App
           config={{
             burnUrl: "https://burn.example.test",
+            localDev: true,
             demoToken: crypto.randomUUID(),
           }}
         />,
@@ -292,6 +294,7 @@ describe("containment dashboard", () => {
         <App
           config={{
             burnUrl: "https://burn.example.test",
+            localDev: true,
             demoToken: crypto.randomUUID(),
           }}
         />,
@@ -355,6 +358,7 @@ describe("containment dashboard", () => {
         <App
           config={{
             burnUrl: "https://burn.example.test",
+            localDev: true,
             demoToken: crypto.randomUUID(),
           }}
         />,
@@ -424,6 +428,7 @@ describe("containment dashboard", () => {
           <App
             config={{
               burnUrl: "https://burn.example.test",
+              localDev: true,
               demoToken: crypto.randomUUID(),
             }}
           />,

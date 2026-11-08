@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-import { createApi } from "./api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApi, readConfig } from "./api";
+
+afterEach(() => vi.unstubAllEnvs());
 
 function setup(
   response = () => new Response(JSON.stringify({ events: [], agents: [] })),
 ) {
   const config = {
     burnUrl: "https://burn.example.test/",
+    localDev: true,
     demoToken: crypto.randomUUID(),
   };
   const fetcher = vi
@@ -67,7 +70,7 @@ describe("API client", () => {
         }),
     );
     await expect(api.events()).rejects.toThrow(
-      "Request denied (HTTP 403). Check the demo token.",
+      "Request denied (HTTP 403). Check the local development token.",
     );
     expect(observe.mock.calls[0][0].get("x-burn-mock")).toBe("true");
   });
@@ -131,5 +134,144 @@ describe("API client", () => {
     await expect(api.events()).rejects.toThrow("API returned invalid JSON.");
     fetcher.mockRejectedValueOnce(new Error(crypto.randomUUID()));
     await expect(api.events()).rejects.toThrow("API unreachable.");
+  });
+});
+
+describe("people API authentication", () => {
+  function setupPeople(statuses = [200]) {
+    let token: string | undefined = crypto.randomUUID();
+    const firstToken = token;
+    const nextToken = crypto.randomUUID();
+    const auth = {
+      idToken: () => token,
+      refresh: vi.fn(async (): Promise<string | undefined> => {
+        token = nextToken;
+        return token;
+      }),
+      clear: vi.fn(() => {
+        token = undefined;
+      }),
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ events: [], agents: [] }), {
+          status: statuses.shift() ?? 200,
+        }),
+    );
+    const api = createApi(
+      { burnUrl: "https://burn.example.test", demoToken: crypto.randomUUID() },
+      () => {},
+      fetcher,
+      auth,
+    );
+    return { api, auth, fetcher, firstToken, nextToken };
+  }
+
+  it("sends only the ID bearer token, never a demo token outside local-dev mode", async () => {
+    const fixture = setupPeople();
+    await fixture.api.events();
+    const headers = new Headers(fixture.fetcher.mock.calls[0][1]?.headers);
+    expect(headers.get("Authorization")).toBe(`Bearer ${fixture.firstToken}`);
+    expect(headers.has("x-burn-demo-token")).toBe(false);
+    expect(fixture.auth.refresh).not.toHaveBeenCalled();
+  });
+
+  it("refreshes on 401 and retries the original POST once with the new ID token", async () => {
+    const fixture = setupPeople([401, 200]);
+    const body = { scope: "role" as const, id: "worker" };
+    await fixture.api.burnScope(body);
+    expect(fixture.auth.refresh).toHaveBeenCalledTimes(1);
+    expect(fixture.fetcher).toHaveBeenCalledTimes(2);
+    expect(
+      fixture.fetcher.mock.calls.map(([, init]) =>
+        new Headers(init?.headers).get("Authorization"),
+      ),
+    ).toEqual([`Bearer ${fixture.firstToken}`, `Bearer ${fixture.nextToken}`]);
+    for (const [, init] of fixture.fetcher.mock.calls) {
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual(body);
+    }
+    expect(fixture.auth.clear).not.toHaveBeenCalled();
+  });
+
+  it("clears sign-in after the retry is denied without refreshing or retrying again", async () => {
+    const fixture = setupPeople([401, 401]);
+    await expect(fixture.api.events()).rejects.toThrow(
+      "Session expired. Sign in again.",
+    );
+    expect(fixture.auth.refresh).toHaveBeenCalledTimes(1);
+    expect(fixture.fetcher).toHaveBeenCalledTimes(2);
+    expect(fixture.auth.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["missing", "rejected"])(
+    "clears sign-in when the refresh is %s",
+    async (mode) => {
+      const fixture = setupPeople([401]);
+      if (mode === "missing") fixture.auth.refresh.mockResolvedValue(undefined);
+      else
+        fixture.auth.refresh.mockRejectedValue(new Error(crypto.randomUUID()));
+      await expect(fixture.api.events()).rejects.toThrow(
+        "Session expired. Sign in again.",
+      );
+      expect(fixture.fetcher).toHaveBeenCalledTimes(1);
+      expect(fixture.auth.clear).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not refresh or clear the session for a forbidden request", async () => {
+    const fixture = setupPeople([403]);
+    await expect(fixture.api.events()).rejects.toThrow(
+      "Request denied (HTTP 403).",
+    );
+    expect(fixture.auth.refresh).not.toHaveBeenCalled();
+    expect(fixture.auth.clear).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to demo credentials when a people session is missing", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const api = createApi(
+      { burnUrl: "https://burn.example.test", demoToken: crypto.randomUUID() },
+      () => {},
+      fetcher,
+    );
+    await expect(api.events()).rejects.toThrow(
+      "Sign in to access the Burn API.",
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("uses only demo credentials with explicit local-dev mode and does not refresh a 401", async () => {
+    const fixture = setupPeople([401]);
+    const demoToken = crypto.randomUUID();
+    const api = createApi(
+      { burnUrl: "http://localhost:8700", localDev: true, demoToken },
+      () => {},
+      fixture.fetcher,
+      fixture.auth,
+    );
+    await expect(api.events()).rejects.toThrow(
+      "Check the local development token.",
+    );
+    const headers = new Headers(fixture.fetcher.mock.calls[0][1]?.headers);
+    expect(headers.get("x-burn-demo-token")).toBe(demoToken);
+    expect(headers.has("Authorization")).toBe(false);
+    expect(fixture.auth.refresh).not.toHaveBeenCalled();
+  });
+
+  it("opts in to local development only with VITE_BURN_LOCAL_DEV=1", () => {
+    vi.stubEnv("VITE_BURN_DEMO_TOKEN", crypto.randomUUID());
+    vi.stubEnv("VITE_BURN_PEOPLE_DOMAIN", "people.example.test");
+    vi.stubEnv("VITE_BURN_PEOPLE_CLIENT_ID", "public-client");
+    for (const flag of ["", "0", "true"]) {
+      vi.stubEnv("VITE_BURN_LOCAL_DEV", flag);
+      expect(readConfig().localDev).toBe(false);
+      expect(readConfig().demoToken).toBe("");
+    }
+    vi.stubEnv("VITE_BURN_LOCAL_DEV", "1");
+    expect(readConfig().localDev).toBe(true);
+    expect(readConfig().demoToken).toBe(import.meta.env.VITE_BURN_DEMO_TOKEN);
+    expect(readConfig().peopleDomain).toBe("people.example.test");
+    expect(readConfig().peopleClientId).toBe("public-client");
   });
 });
