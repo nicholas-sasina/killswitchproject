@@ -641,7 +641,106 @@ main {
   color: var(--c-ink-3);
 }
 
-/* --- Agents -------------------------------------------------------------- */
+/* --- Agents --------------------------------------------------------------
+   One scrollable list rather than a grid of cards. A card grid is fine for
+   three scenario agents and useless for a swarm: the same markup is laid out
+   as dense rows here so a hundred active agents stay scannable.
+   ----------------------------------------------------------------------- */
+
+.agent-list {
+  max-height: 26rem;
+  overflow: auto;
+  scrollbar-color: var(--c-rule-bright) var(--c-module);
+}
+.agent-list .agent-card {
+  display: grid;
+  /* name, session, exposures, burn. The first three live inside the select
+     button, which spans them as a subgrid so the row stays one line. */
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.3fr) auto auto;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-3) 0 0;
+  border-bottom: 1px solid var(--c-rule);
+}
+.agent-list .agent-card:last-child {
+  border-bottom: 0;
+}
+.agent-list .agent-select {
+  display: grid;
+  grid-column: 1 / 4;
+  grid-template-columns: subgrid;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) 0 var(--s-2) var(--s-3);
+}
+/* Role and status ride above the name instead of taking their own column. */
+.agent-list .card-top {
+  grid-row: 1;
+  grid-column: 1;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  order: -1;
+}
+.agent-list .agent-card h2 {
+  margin: 0;
+  font-size: 0.88rem;
+  grid-column: 1;
+}
+.agent-list .session {
+  grid-column: 2;
+  min-width: 0;
+}
+.agent-list .session > span {
+  display: none;
+}
+.agent-list .exposure {
+  grid-column: 3;
+  flex-wrap: nowrap;
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.agent-list .exposure > strong {
+  font-size: 1rem;
+}
+.agent-list .exposure > .inspect {
+  display: none;
+}
+.agent-list .agent-card > .burn-button {
+  grid-column: 4;
+  width: auto;
+  margin: 0;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 0.66rem;
+}
+.agent-list .burn-summary {
+  grid-column: 1 / -1;
+  margin: 0 0 var(--s-2) var(--s-3);
+}
+.agent-list .agent-card.selected::before {
+  width: 3px;
+}
+@media (max-width: 860px) {
+  .agent-list .agent-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .agent-list .agent-select {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+  }
+  .agent-list .session,
+  .agent-list .exposure {
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+  .agent-list .agent-card > .burn-button {
+    grid-column: 2;
+  }
+}
 
 .agents-section {
   min-width: 0;

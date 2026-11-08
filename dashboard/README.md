@@ -4,11 +4,14 @@
 
 Three views in a sidebar, each a bookmarkable location.
 
-**Overview** (`#/overview`) is the live fleet in one place: every agent running right now, the
-credentials the selected one has seen, and the roles and instances they joined through. The roster
-covers swarm workers and probes, not just the scenario agents, because it is built from `/events`
-and `/instances` merged rather than `/events` alone. Finished instances stay out of the roster,
-which is for what is running, but they are counted beside it and listed in Roles and instances. Burned
+**Overview** (`#/overview`) is the live fleet in one place. **Active agents** is a collapsible,
+scrollable list of every agent running right now, swarm workers and probes included, because it is
+built from `/events` and `/instances` merged rather than `/events` alone. It is a list of rows, not
+a grid of cards: a card grid suits three scenario agents and fails at a hundred. Selecting a row
+fills the containment detail below it. Burned agents appear nowhere on this view, including the
+roles table, which starts filtered to `active`; its Status filter still offers every state.
+Finished instances stay out of the roster, which is for what is running, but they are counted
+beside it and remain in Roles and instances. Burned
 agents are not on this roster, so it always reflects what is actually running; a count links to
 Contained. The agent you just burned stays in the containment detail so you can read the outcome
 without changing view.

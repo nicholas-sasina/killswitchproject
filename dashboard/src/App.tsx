@@ -18,6 +18,7 @@ import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
 import { BurnedView } from "./components/BurnedView";
+import { Collapsible } from "./components/Collapsible";
 import { PageHead } from "./components/PageHead";
 import { SwarmPanel } from "./components/SwarmPanel";
 
@@ -253,27 +254,28 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 />
                 <div className="workspace-grid">
                   <div className="detail-column">
-                    <section
-                      aria-labelledby="agents-title"
+                    <Collapsible
                       className="agents-section"
+                      label="Active agents"
+                      defaultOpen
+                      summary={[
+                        `${liveAgents.length} running`,
+                        exitedCount ? `${exitedCount} finished` : "",
+                        revokedCount ? `${revokedCount} contained` : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     >
-                      <div className="section-heading">
-                        <h2 id="agents-title">Active agents</h2>
-                        <span className="muted">
-                          {[
-                            `${liveAgents.length} running`,
-                            exitedCount ? `${exitedCount} finished` : "",
-                            revokedCount ? `${revokedCount} contained` : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </div>
                       {liveAgents.length ? (
-                        <div className="agent-grid">
+                        <div
+                          className="agent-list"
+                          role="region"
+                          aria-label="Active agents"
+                          tabIndex={0}
+                        >
                           {liveAgents.map((agent) => (
                             <AgentCard
-                              key={agent.agent_id}
+                              key={agent.session_id || agent.agent_id}
                               agent={agent}
                               selected={
                                 selectedAgent?.agent_id === agent.agent_id
@@ -289,15 +291,15 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                           ))}
                         </div>
                       ) : (
-                        <div className="empty panel">
+                        <div className="empty">
                           {!updatedAt
                             ? "Agents will appear when the API connects."
                             : revokedCount
-                              ? "Every agent has been contained. Re-add one from Contained, or add a new agent below."
-                              : "No agents running. Add one below, or start a scenario."}
+                              ? "Nothing running. Every agent has been contained; re-add one from Contained, or add a new agent below."
+                              : "Nothing running. Add an agent below, or start a scenario."}
                         </div>
                       )}
-                    </section>
+                    </Collapsible>
                     {selectedResult && <BurnOutcome result={selectedResult} />}
                     <div className="forensics">
                       <div className="section-heading">
@@ -324,6 +326,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                         key={`${config.burnUrl}:${config.demoToken}`}
                         api={api}
                         enabled={configured}
+                        defaultStatus="active"
                       />
                     </section>
                   </div>
