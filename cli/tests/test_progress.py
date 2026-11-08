@@ -8,6 +8,7 @@ import urllib.request
 
 import pytest
 
+from burn_contracts import progress as rules
 from burn_contracts.progress import ProgressError
 import burn_cli.runner.run as runmod
 from burn_cli.api import ApiError
@@ -115,6 +116,14 @@ def endpoint():
     server.stop()
 
 
+def until(condition, timeout=10.0):
+    """Poll for a condition instead of sleeping a fixed time, which flakes on a loaded machine."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "timed out waiting"
+        time.sleep(0.01)
+
+
 def in_background(call):
     """Run a blocking call on a thread; its result lands in the returned dict."""
     out = {}
@@ -149,7 +158,7 @@ def test_done_is_answered_at_once_and_sent_later(endpoint):
 
 def test_started_is_answered_only_once_burn_has_recorded_it(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.4)
+    until(endpoint.queue.waiting)
     assert thread.is_alive() and endpoint.queue.batch() == [ev("item-01")]  # queued, not yet recorded
     endpoint.queue.sent(1)  # a heartbeat carrying it got a 200
     thread.join(2)
@@ -159,19 +168,25 @@ def test_started_is_answered_only_once_burn_has_recorded_it(endpoint):
 
 def test_started_on_a_burned_instance_is_a_409_so_the_agent_stops_before_acting(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.2)
+    until(endpoint.queue.waiting)
     endpoint.queue.gone()  # the heartbeat got a 409
     thread.join(2)
     assert out["reply"][0] == 409 and "burned" in out["reply"][1]["error"]
     assert post(endpoint.progress_url, ev("item-02"))[0] == 409  # and every later start, at once
 
 
-def test_a_start_burn_refused_is_a_400_with_its_reason(endpoint):
+def test_a_start_in_a_refused_batch_is_told_it_may_succeed_if_reported_again(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.2)
-    endpoint.queue.dropped(1, "HTTP 400: at most 500 items per instance")
-    thread.join(2)
-    assert out["reply"][0] == 400 and "at most 500 items per instance" in out["reply"][1]["error"]
+    until(endpoint.queue.waiting)
+    endpoint.queue.dropped(1, "HTTP 400: item id must match")  # another event in the same batch broke the rule
+    thread.join(5)
+    status, reply = out["reply"]
+    assert status == 503 and "report it again" in reply["error"] and "item id must match" in reply["error"]
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))  # and it does succeed
+    until(endpoint.queue.waiting)
+    endpoint.queue.sent(1)
+    thread.join(5)
+    assert out["reply"] == (200, {"queued": True, "recorded": True})
 
 
 def test_a_start_burn_has_not_recorded_in_time_is_a_503_and_stays_queued():
@@ -187,7 +202,7 @@ def test_a_start_burn_has_not_recorded_in_time_is_a_503_and_stays_queued():
 
 def test_a_waiting_start_blocks_neither_spawn_nor_other_reports(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.1)
+    until(endpoint.queue.waiting)
     started = time.monotonic()
     assert post(endpoint.url, {"role": "worker", "command": ["true"]})[0] == 200
     assert post(endpoint.progress_url, ev("item-02", "done"))[0] == 200
@@ -225,17 +240,23 @@ def test_without_a_queue_there_is_no_progress_endpoint():
 
 # -- progress on the heartbeat --------------------------------------------------------------------
 class RecordingApi:
-    """Heartbeats only; `statuses` are the replies in turn (200 or an error status, 0 for unreachable)."""
+    """Heartbeats only; `statuses` are the replies in turn (200 or an error status, 0 for unreachable).
 
-    def __init__(self, *statuses):
-        self.bodies, self.statuses = [], list(statuses)
+    A 200 answers like the API: the instance with its progress counts. `old_style` answers without them.
+    """
+
+    def __init__(self, *statuses, old_style=False):
+        self.bodies, self.statuses, self.old_style, self.progress = [], list(statuses), old_style, {}
 
     def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
         self.bodies.append(progress)
         status = self.statuses.pop(0) if self.statuses else 200
         if status != 200:
             raise ApiError(f"POST /instances/{session_id}/heartbeat failed with HTTP {status}", status or None)
-        return {}
+        if self.old_style:
+            return {"session_id": session_id, "status": "active"}
+        self.progress = rules.apply(self.progress, rules.check_events(progress or []), "2026-11-08T00:00:00Z")
+        return {"session_id": session_id, "status": "active", **rules.counts(self.progress)}
 
 
 def supervisor(api):
@@ -396,7 +417,7 @@ def test_a_refused_heartbeat_drops_its_progress_and_the_agent_keeps_running(stac
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
     assert [batch for _, batch in progress_beats(seen)] == [[ev("bad-item")], [ev("good-item")]]
     (bad_status, bad), (good_status, good) = json.loads(out.read_text())
-    assert bad_status == 400 and "at most 500 items per instance" in bad["error"]  # the agent must not start it
+    assert bad_status == 503 and "report it again" in bad["error"]  # not recorded: the agent must not start it yet
     assert (good_status, good) == (200, {"queued": True, "recorded": True})
     assert "refused 1 progress events" in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
@@ -722,28 +743,328 @@ def test_a_409_during_the_exit_flush_means_burned():
     assert inst._stopped_by_api
 
 
-def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack):
-    stack.heartbeat_status = 409
+def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack, capsys):
+    original, beats = stack.handle, []
+
+    def burned_after_one_failure(method, path, query, body):
+        if path.endswith("/heartbeat"):
+            beats.append(body.get("progress"))
+            # The loop's beat fails, and nothing waits on a "done", so the loop does not try again: only the
+            # exit flush can learn of the burn.
+            return (503, {"error": "busy"}) if len(beats) == 1 else (409, {"error": "Instance is revoked"})
+        return original(method, path, query, body)
+
+    stack.handle = burned_after_one_failure
     code = REPORT + """
     report("item-01", "done")"""
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == EXIT_STOPPED
+    assert beats == [[ev("item-01", "done")], [ev("item-01", "done")]]
     assert not stack.calls("POST", "/instances/" + next(iter(stack.instances)) + "/exit")
+    err = capsys.readouterr().err
+    assert "the instance was burned or has exited" in err and "the agent was stopped" not in err  # the flush's path
 
 
-def test_a_connection_dropped_mid_heartbeat_counts_as_unreachable():
+@pytest.fixture
+def hangs_up():
+    """A server that reads each request, then closes the connection without answering: http.client raises
+    RemoteDisconnected, which urllib does not wrap."""
     import socket
+    import types
+    sock = socket.create_server(("127.0.0.1", 0))
+    server = types.SimpleNamespace(connections=0, url=f"http://127.0.0.1:{sock.getsockname()[1]}")
+
+    def serve():
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            server.connections += 1
+            conn.recv(65536)
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    yield server
+    sock.close()
+
+
+@pytest.mark.parametrize("call", ["heartbeat", "exit"])
+def test_a_connection_dropped_mid_heartbeat_or_exit_counts_as_unreachable(hangs_up, call):
     from burn_cli.runner.instance_api import InstanceApi
-    server = socket.create_server(("127.0.0.1", 0))
+    with pytest.raises(ApiError, match="cannot reach the Burn API") as caught:
+        getattr(InstanceApi(hangs_up.url), call)("sess_1", "token")
+    assert caught.value.status is None and caught.value.retryable  # both are safe to send again
 
-    def hang_up():
-        conn, _ = server.accept()
-        conn.recv(65536)
-        conn.close()  # no status line: http.client raises RemoteDisconnected, which urllib does not wrap
 
-    threading.Thread(target=hang_up, daemon=True).start()
+@pytest.mark.parametrize("call", ["join", "spawn"])
+def test_a_join_or_spawn_whose_connection_dropped_is_never_retried(hangs_up, call):
+    from burn_cli import retry
+    from burn_cli.runner.instance_api import InstanceApi
+    api = InstanceApi(hangs_up.url)
+    send = {"join": lambda: api.join("worker", "bjt_token"), "spawn": lambda: api.spawn("worker", "sess_1", "t")}[call]
+    with pytest.raises(ApiError, match="not retried") as caught:
+        retry.call(send, sleep=lambda _: None)
+    assert not caught.value.retryable and hangs_up.connections == 1  # it may have used a join token already
+
+
+
+# -- an API that took the heartbeat but not the progress ------------------------------------------------
+@pytest.mark.parametrize("reply", [
+    {"session_id": "sess_1", "status": "active"},  # an API from before progress: no counts at all
+    {"session_id": "sess_1", "status": "active", "items_started": 0, "items_done": 0},  # counts that miss it
+    {"session_id": "sess_1", "status": "active", "items_started": 1, "items_done": 0},  # the start, not the done
+])
+def test_progress_counts_as_recorded_only_when_the_reply_shows_it(reply, capsys):
+    class Api(RecordingApi):
+        def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+            self.bodies.append(progress)
+            return reply
+
+    inst = supervisor(Api())
+    inst._progress.add(ev("a"))
+    inst._progress.add(ev("a", "done"))
+    assert inst._beat() not in (200, 400)
+    assert inst._progress.pending() == 2  # kept, and sent again
+    assert inst._progress.wait_recorded("a", 0.01) == ("timeout", "")  # a waiting start is not told to go ahead
+    inst._beat()
+    assert capsys.readouterr().err.count("did not confirm") == 1  # said once, not on every beat
+
+
+def test_a_reply_that_shows_the_progress_records_it():
+    inst = supervisor(RecordingApi())
+    inst._progress.add(ev("a"))
+    assert inst._beat() == 200 and inst._progress.wait_recorded("a", 0.01) == ("recorded", "")
+
+
+def test_a_start_against_an_api_that_ignores_progress_is_a_503(stack):
+    original = stack.handle
+
+    def old_api(method, path, query, body):
+        if path.endswith("/heartbeat"):
+            return 200, {}  # took the heartbeat, said nothing about progress
+        return original(method, path, query, body)
+
+    stack.handle = old_api
+    out = stack.tmp / "reply.json"
+    code = REPORT + f"""
+    json.dump(report("item-01", "started")[:2], open({str(out)!r}, "w"))"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1, progress_wait=1.0).run() == 0
+    status, reply = json.loads(out.read_text())
+    assert status == 503 and "not recorded" in reply["error"]
+
+
+def test_a_hanging_heartbeat_in_flight_cannot_hold_the_flush_past_its_deadline(monkeypatch):
+    class HangingApi(RecordingApi):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.release = threading.Event(), threading.Event()
+
+        def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+            if not self.entered.is_set():
+                self.entered.set()
+                self.release.wait(30)  # the loop's beat, stuck on a silent API
+            return super().heartbeat(session_id, session_token, progress, timeout)
+
+    api = HangingApi()
+    inst = supervisor(api)
+    inst.min_gap = 0.0
+    inst._progress.add(ev("a", "done"))
+    in_flight = threading.Thread(target=inst._beat, daemon=True)
+    in_flight.start()
+    assert api.entered.wait(5)
+    monkeypatch.setattr(runmod, "FLUSH_DEADLINE", 1.0)
+    started = time.monotonic()
+    inst._flush_progress()
+    took = time.monotonic() - started
+    api.release.set()
+    in_flight.join(5)
+    assert took < 3.0  # one second's deadline; without the bound it waited for the stuck beat
+
+
+ADMIN = "AdminSecretValue-0123456789"
+
+
+@pytest.mark.parametrize("item", [
+    "adminsecretvalue-0123456789",  # the same token in another case
+    "pre-" + ADMIN,  # the token inside a longer item
+    "x-" + "b" * 43,  # a join token's secret part (after the dot), without its prefix
+])
+def test_an_item_holding_a_held_token_in_any_case_or_inside_it_is_refused(item):
+    host = {"BURN_TASK": json.dumps(["item-01", item]), "BURN_DEMO_TOKEN": ADMIN}
+    with pytest.raises(BadTask, match="holds a credential") as caught:
+        Instance(RecordingApi(), "worker", ["true"], gateway_url="http://gateway", host_env=host, enroll_token=A_JOIN_TOKEN)
+    assert item not in str(caught.value) and ADMIN not in str(caught.value)
+
+
+def test_a_short_held_secret_is_refused_only_as_a_whole_item():
+    assert task_values({"BURN_TASK": json.dumps(["shorter", "unshortened"])}, secrets=("short",))
+    with pytest.raises(BadTask, match="holds a credential"):
+        task_values({"BURN_TASK": json.dumps(["SHORT"])}, secrets=("short",))
+
+
+def test_the_admin_token_from_dotenv_is_refused_as_an_item_too(stack, capsys, monkeypatch):
+    monkeypatch.delenv("BURN_DEMO_TOKEN")
+    dotenv = stack.tmp / ".env"
+    dotenv.write_text(f"BURN_DEMO_TOKEN={ADMIN}\n")
+    monkeypatch.setenv("BURN_TASK", json.dumps(["item-01", ADMIN]))
+    assert cli(["run", "--role", "worker", "--", "true"], dotenv=dotenv) == 2
+    err = capsys.readouterr().err
+    assert "holds a credential" in err and ADMIN not in err
+    assert not stack.calls("POST", "/instances")
+
+
+# -- a shorter gap while a start waits ------------------------------------------------------------------
+def beats_on_fake_clock(events, waiting, beats=4):
+    """Run the real heartbeat loop on a fake clock; returns when each heartbeat began, in fake seconds."""
+    clock = [1000.0]
+    api = SlowApi(clock, takes=0.0)
+    inst = on_fake_clock(api, clock)
+    inst.min_gap, inst.heartbeat_every = 3.0, 60.0
+    inst._progress.waiting = lambda: waiting  # a start is (or is not) blocked on the next beat
+
+    def fake_wait(timeout):  # what threading.Event.wait does, with time passing only on the fake clock
+        if inst._activity.is_set() or len(api.calls) >= beats:
+            if len(api.calls) >= beats:
+                inst._done.set()
+            return True
+        clock[0] += timeout
+        return False
+
+    inst._wait = fake_wait
+    for event in events:
+        inst._progress.add(event)
+    inst._heartbeat_loop()
+    return [at for at, _ in api.calls][:beats]
+
+
+def test_with_a_start_waiting_the_next_beat_goes_after_the_short_gap():
+    starts = beats_on_fake_clock([ev(f"item-{i:03d}") for i in range(200)], waiting=True)
+    assert [round(b - a, 6) for a, b in zip(starts, starts[1:])] == [runmod.START_GAP] * 3 == [1.0] * 3
+
+
+def test_with_no_start_waiting_the_normal_gap_applies_even_to_a_backlog():
+    starts = beats_on_fake_clock([ev(f"item-{i:03d}", "done") for i in range(200)], waiting=False)
+    assert [round(b - a, 6) for a, b in zip(starts, starts[1:])] == [3.0] * 3
+
+
+def test_a_burst_of_starts_sends_no_faster_than_one_beat_per_short_gap():
+    starts = beats_on_fake_clock([ev(f"item-{i:03d}") for i in range(500)], waiting=True, beats=10)
+    assert len(starts) == 10 and all(b - a >= 1.0 - 1e-9 for a, b in zip(starts, starts[1:]))
+
+
+def test_a_start_that_begins_waiting_wakes_the_loop_to_use_the_short_gap():
+    woken = []
+    queue = ProgressQueue(on_change=lambda: woken.append(1))
+    queue.add(ev("a"))
+    assert queue.wait_recorded("a", 0.01) == ("timeout", "") and len(woken) == 2  # the add, then the wait
+
+
+def test_an_agent_that_hangs_up_before_its_reply_costs_no_traceback(capfd, caplog):
+    import logging
+    import socket
+    import struct
+    caplog.set_level(logging.DEBUG, logger="burn_cli.runner.spawn_endpoint")
+    queue = ProgressQueue()
+    server = SpawnEndpoint(lambda role, command: {}, "local-token", progress=queue, progress_wait=0.5).start()
     try:
-        with pytest.raises(ApiError, match="cannot reach the Burn API") as caught:
-            InstanceApi(f"http://127.0.0.1:{server.getsockname()[1]}").heartbeat("sess_1", "token")
-        assert caught.value.status is None  # transient, like any unreachable API: the heartbeat thread lives on
+        port = int(server.progress_url.split(":")[2].split("/")[0])
+        body = json.dumps(ev("item-01")).encode()
+        client = socket.create_connection(("127.0.0.1", port))
+        client.sendall(b"POST /progress HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer local-token\r\n"
+                       b"Content-Length: %d\r\n\r\n%s" % (len(body), body))
+        until(queue.waiting)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        client.close()  # a reset: the 503 that comes at the deadline has nowhere to go
+        until(lambda: any("hung up" in r.getMessage() for r in caplog.records))
     finally:
-        server.close()
+        server.stop()
+    err = capfd.readouterr().err
+    assert "Traceback" not in err and "Exception occurred" not in err
+
+
+# -- the egress proxy refuses the heartbeat ------------------------------------------------------------
+PROXY_SAYS = "the egress proxy refused the connection to the Burn API (Tunnel connection failed: 403 Forbidden)"
+
+
+def test_a_tunnel_403_from_the_proxy_is_its_own_error():
+    import socket
+    import urllib.request
+    from burn_cli.runner.instance_api import InstanceApi, ProxyRefused
+    proxy = socket.create_server(("127.0.0.1", 0))
+
+    def refuse():
+        conn, _ = proxy.accept()
+        conn.recv(65536)  # CONNECT burn-api.example:443
+        conn.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+        conn.close()
+
+    threading.Thread(target=refuse, daemon=True).start()
+    port = proxy.getsockname()[1]
+    urllib.request.install_opener(urllib.request.build_opener(
+        urllib.request.ProxyHandler({"https": f"http://127.0.0.1:{port}"})))
+    try:
+        with pytest.raises(ProxyRefused, match="Tunnel connection failed: 403") as caught:
+            InstanceApi("https://burn-api.example").heartbeat("sess_1", "token")
+        assert caught.value.status is None and caught.value.retryable  # not proof of a burn: retried
+    finally:
+        urllib.request.install_opener(None)
+        proxy.close()
+
+
+class ProxyRefusingApi(RecordingApi):
+    def __init__(self):
+        super().__init__()
+        self.refuse = True
+
+    def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+        if self.refuse:
+            self.bodies.append(progress)
+            from burn_cli.runner.instance_api import ProxyRefused
+            raise ProxyRefused(PROXY_SAYS)
+        return super().heartbeat(session_id, session_token, progress, timeout)
+
+
+def test_a_proxy_refusal_answers_every_waiting_start_at_once():
+    inst = supervisor(ProxyRefusingApi())
+    inst._progress.add(ev("a"))
+    inst._progress.add(ev("b"))
+    waiters = [in_background(lambda item=item: inst._progress.wait_recorded(item, 60)) for item in ("a", "b")]
+    until(lambda: inst._progress._waiting == 2)
+    assert inst._beat() == 0  # like unreachable: retried, never a burn
+    for thread, out in waiters:
+        thread.join(10)
+        assert out["reply"] == ("interrupted", "proxy refused the heartbeat")  # at once, not after 60 s
+    assert inst._progress.pending() == 2 and not inst._stopped_by_api  # kept for the next beat
+
+
+def test_a_plain_unreachable_api_still_lets_a_start_wait_for_its_deadline():
+    inst = supervisor(RecordingApi(0))
+    inst._progress.add(ev("a"))
+    thread, out = in_background(lambda: inst._progress.wait_recorded("a", 1.0))
+    until(inst._progress.waiting)
+    assert inst._beat() == 0
+    assert inst._progress.waiting()  # nothing told it to stop waiting
+    thread.join(10)
+    assert out["reply"] == ("timeout", "")
+
+
+def test_a_proxy_refusal_is_logged_once_per_streak(capsys):
+    api = ProxyRefusingApi()
+    inst = supervisor(api)
+    for _ in range(3):
+        inst._beat()
+    api.refuse = False
+    inst._beat()
+    api.refuse = True
+    inst._beat()
+    assert capsys.readouterr().err.count("the egress proxy refused the heartbeat") == 2
+
+
+def test_a_start_interrupted_by_a_proxy_refusal_is_a_503_with_the_reason(endpoint):
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
+    until(endpoint.queue.waiting)
+    endpoint.queue.interrupt("proxy refused the heartbeat")
+    thread.join(5)
+    status, reply = out["reply"]
+    assert status == 503 and "proxy refused the heartbeat" in reply["error"] and "report it again" in reply["error"]
+    assert endpoint.queue.batch() == [ev("item-01")]  # still queued

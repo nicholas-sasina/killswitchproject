@@ -25,6 +25,7 @@ class ProgressQueue:
         self._on_change, self._lock = on_change, threading.Lock()
         self._changed = threading.Condition(self._lock)  # notified when the API took, refused or ended something
         self._gone, self._refusal, self._waiting = False, "", 0
+        self._interrupts, self._interruption = 0, ""  # bumped to answer every start waiting at that moment
         self._queue: list[tuple[str, str]] = []
         self._accepted: dict = {}  # what the API took, built with the shared rules
         self._view: dict = {}  # _accepted plus the queue: what the API will hold once the queue is sent
@@ -55,6 +56,17 @@ class ProgressQueue:
         with self._lock:
             return self._waiting > 0
 
+    def confirmed_by(self, n: int, reply) -> bool:
+        """True when a heartbeat reply's progress counts show the API holds the first n events.
+
+        An API that took the heartbeat but ignored its progress (one from before progress existed) must not
+        count as having recorded it, or a waiting start would be told to go ahead on a start Burn never saw.
+        """
+        with self._lock:
+            expected = rules.counts(rules.apply(self._accepted, self._queue[:n], _UNSTAMPED))
+        return isinstance(reply, dict) and all(
+            isinstance(reply.get(key), int) and reply[key] >= count for key, count in expected.items())
+
     def sent(self, n: int) -> None:
         """The API took the first n events."""
         with self._lock:
@@ -76,12 +88,22 @@ class ProgressQueue:
             self._gone = True
             self._changed.notify_all()
 
+    def interrupt(self, reason: str) -> None:
+        """Answer every start waiting now as not recorded, for `reason`, without waiting for its deadline.
+        Their events stay queued."""
+        with self._lock:
+            self._interrupts += 1
+            self._interruption = reason
+            self._changed.notify_all()
+
     def wait_recorded(self, item: str, timeout: float) -> tuple[str, str]:
         """Wait until the API has recorded `item` as started. Returns (outcome, detail), the outcome one of
-        "recorded", "gone" (burned or exited), "refused" (a 400 dropped it; detail says why) or "timeout"."""
-        deadline = time.monotonic() + timeout
+        "recorded", "gone" (burned or exited), "refused" (a 400 dropped it; detail says why), "interrupted"
+        (see interrupt(); detail says why) or "timeout"."""
+        deadline, told = time.monotonic() + timeout, False
         with self._changed:
             self._waiting += 1
+            interrupts = self._interrupts
             try:
                 while True:
                     if item in self._accepted:
@@ -90,9 +112,14 @@ class ProgressQueue:
                         return "gone", ""
                     if item not in self._view:
                         return "refused", self._refusal
+                    if self._interrupts != interrupts:
+                        return "interrupted", self._interruption
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         return "timeout", ""
+                    if not told:  # a start now waits: the heartbeat may go after the shorter gap
+                        told = True
+                        self._on_change()
                     self._changed.wait(remaining)
             finally:
                 self._waiting -= 1

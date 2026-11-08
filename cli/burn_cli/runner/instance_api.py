@@ -7,10 +7,32 @@ supervisor: it is passed per call and never put in the agent's environment, argv
 """
 import http.client
 import json
+import re
 import urllib.error
 import urllib.request
 
 from ..api import ApiError
+
+
+# What http.client raises (inside urllib's URLError) when the proxy answers CONNECT with a 403.
+TUNNEL_REFUSED = re.compile(r"Tunnel connection failed: 403\b")
+
+
+class ProxyRefused(ApiError):
+    """The egress proxy refused to open a tunnel to the Burn API (CONNECT answered 403): the API never saw the call.
+
+    The proxy shuts out a burned instance, but a misconfigured proxy answers the same, so this is not proof of a
+    burn. It is retried like an unreachable API (status None). It is told apart so waiting starts hear it at once.
+    """
+
+
+class SentButUnanswered(ApiError):
+    """The connection dropped after the request was sent, so it may have taken effect. Never retried: a join
+    sent again could use up another of its token's uses, and a spawn could start a second child."""
+
+    @property
+    def retryable(self) -> bool:
+        return False
 
 
 class InstanceApi:
@@ -18,7 +40,7 @@ class InstanceApi:
         self.base_url = base_url.rstrip("/")
 
     def _request(self, method: str, path: str, body: dict | None = None, session_token: str = "",
-                 timeout: float = 60.0) -> dict:
+                 timeout: float = 60.0, idempotent: bool = False) -> dict:
         headers = {"content-type": "application/json"}
         if session_token:
             headers["authorization"] = f"Bearer {session_token}"
@@ -34,10 +56,19 @@ class InstanceApi:
                 detail = ""
             raise ApiError(f"{method} {path} failed with HTTP {err.code}" + (f": {detail}" if detail else ""),
                            err.code) from None
-        # OSError and HTTPException: urllib passes some through unwrapped, such as RemoteDisconnected when the
-        # connection drops before the status line, or IncompleteRead. Left uncaught, one would end the heartbeat.
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError, http.client.HTTPException) as exc:
-            raise ApiError(f"cannot reach the Burn API ({getattr(exc, 'reason', exc)})") from None
+        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+            reason = getattr(exc, "reason", exc)
+            if TUNNEL_REFUSED.search(str(reason)):
+                raise ProxyRefused(f"the egress proxy refused the connection to the Burn API ({reason})") from None
+            raise ApiError(f"cannot reach the Burn API ({reason})") from None
+        # urllib passes some failures through unwrapped once the request was sent: RemoteDisconnected when the
+        # connection drops before the status line, IncompleteRead. A heartbeat or an exit is safe to send again
+        # (left uncaught, one would end the heartbeat thread); a join or a spawn may already have happened.
+        except (OSError, http.client.HTTPException) as exc:
+            if idempotent:
+                raise ApiError(f"cannot reach the Burn API ({exc})") from None
+            raise SentButUnanswered(f"{method} {path}: the connection dropped after the request was sent ({exc}); "
+                                    "not retried, because it may have taken effect") from None
 
     def join(self, role: str, enroll_token: str) -> dict:
         """Start an instance of a role. No auth header: the join token is the authority."""
@@ -51,7 +82,7 @@ class InstanceApi:
                   timeout: float = 60.0) -> dict:
         """Keep the instance alive; `progress` (oldest first, at most 50) goes in the body when there is any."""
         return self._request("POST", f"/instances/{session_id}/heartbeat",
-                             {"progress": progress} if progress else None, session_token, timeout)
+                             {"progress": progress} if progress else None, session_token, timeout, idempotent=True)
 
     def exit(self, session_id: str, session_token: str) -> dict:
-        return self._request("POST", f"/instances/{session_id}/exit", session_token=session_token)
+        return self._request("POST", f"/instances/{session_id}/exit", session_token=session_token, idempotent=True)

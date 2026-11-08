@@ -98,15 +98,18 @@ burn env            # what an instance's environment would hold (values hidden; 
    items per instance); a broken rule is a 400 that names it. A `done` is answered at once, 200 `{"queued": true}`
    (`false` for a repeat that changes nothing), and sent with the next heartbeat. A `started` is answered only
    once Burn has recorded it, because the agent must not act on an item Burn does not know it touched: 200
-   `{"queued": ..., "recorded": true}` means go ahead; 409 means the instance was burned, 400 that Burn refused
-   the start, and 503 that Burn has not confirmed it within 15 s (it stays queued). Only a 200 means go ahead.
+   `{"queued": ..., "recorded": true}` means go ahead; 409 means the instance was burned; 503 means it was not
+   recorded: Burn has not confirmed it within 15 s (it stays queued), or Burn refused the heartbeat that carried
+   it, usually over another event (report it again). Only a 200 means go ahead.
 6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL
    after 5 s) and `burn run` exits with 3. A normal exit posts `/instances/{id}/exit`. SIGINT and SIGTERM are
    forwarded to the agent. Queued progress goes in the heartbeat body, `{"progress": [...]}`, oldest first and at
    most 50 events per heartbeat. New progress sends a heartbeat at once, but never sooner than the minimum gap
-   after the last one. A 400 means a progress rule was broken: that batch is logged and dropped, the agent keeps
+   after the last one (3 s; 1 s while a start waits to be recorded, since the agent is blocked on it). A 400 means a progress rule was broken: that batch is logged and dropped, the agent keeps
    running, and a heartbeat without progress follows at once, because the refused one did not count. A 429 or any
-   other transient failure keeps the batch for the next heartbeat. If a batch fails twice in a row, one heartbeat
+   other transient failure keeps the batch for the next heartbeat. When the egress proxy refuses the heartbeat (a
+   403 to its tunnel), it is retried the same way and never taken as a burn, since a misconfigured proxy answers
+   alike; but every start waiting on it is answered 503 at once instead of at its deadline. If a batch fails twice in a row, one heartbeat
    goes without it, so the instance is never swept as idle while only its progress fails. Progress still queued
    when the agent exits is sent before the exit is reported, keeping the minimum gap, for at most 10 s. A 409 then
    means burned, and `burn run` exits with 3.

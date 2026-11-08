@@ -16,7 +16,7 @@ from ..api import ApiError
 from .badge import BadgeToken
 from . import credentials as creds_mod
 from .env import TASK_NAMES, child_env, task_values
-from .instance_api import InstanceApi
+from .instance_api import InstanceApi, ProxyRefused
 from .mcp_proxy import McpProxy
 from . import privs
 from .privs import Drop
@@ -26,8 +26,10 @@ from .spawn_endpoint import SpawnEndpoint
 EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # how a supervisor receives the secrets of a session someone else started
 STOP_GRACE = 5.0  # seconds between SIGTERM and SIGKILL when stopping the agent
+START_GAP = 1.0  # the minimum gap instead, while a start waits for Burn: the agent is blocked on that beat
 BARE_AFTER = 2  # failed sends of a batch in a row before one heartbeat goes without it
 FLUSH_DEADLINE = 10.0  # seconds the exit may wait for the progress still queued
+UNCONFIRMED = 1  # _beat's result when the API took a heartbeat but its reply does not show the progress
 
 
 def log(message: str) -> None:
@@ -40,15 +42,17 @@ class Instance:
                  secrets: dict | None = None,
                  proxy_url: str = "", heartbeat_every: float = 15.0, min_heartbeat_gap: float = 3.0,
                  stop_grace: float = STOP_GRACE, drop: Drop | None = None, user_arg: str | None = None, stdin_devnull: bool = False,
-                 progress_wait: float = 15.0,
+                 progress_wait: float = 15.0, held_secrets: tuple = (),
                  sleep: Callable[[float], None] = time.sleep):
         self.api, self.role, self.command = api, role, command
         self._secrets = secrets  # handed over by the parent supervisor or the launcher; never kept on self.session
         self._token = ""  # this instance's session token: supervisor memory only, never in the agent's env or argv
         self.gateway_url, self.host_env = gateway_url, dict(os.environ if host_env is None else host_env)
         admin = self.host_env.pop("BURN_DEMO_TOKEN", None)  # an instance never uses the admin token, nor passes it on
-        # Raises BadTask before anything starts. No item may be a credential this supervisor holds.
-        self._task = task_values(self.host_env, secrets=(admin, enroll_token, self.host_env.get("BURN_JOIN_TOKEN")))
+        # Raises BadTask before anything starts. No item may be a credential this supervisor holds. held_secrets
+        # are more of them (the admin token from .env), passed in only to be refused here, never used or kept.
+        self._task = task_values(self.host_env, secrets=(admin, enroll_token, self.host_env.get("BURN_JOIN_TOKEN"),
+                                                         *held_secrets))
         for name in TASK_NAMES:  # the task is this instance's: a child it spawns gets none
             self.host_env.pop(name, None)
         self.enroll_token, self.session, self.proxy_url = enroll_token, session, proxy_url
@@ -65,6 +69,9 @@ class Instance:
         self._bare_next = False  # after a refused batch: the API recorded nothing, not even that we are alive
         self._batch_failures = 0  # heartbeats in a row whose batch failed: past BARE_AFTER, liveness goes first
         self._clock, self._last_beat = time.monotonic, 0.0  # when the last heartbeat began
+        self._wait = self._activity.wait  # how the loop waits for activity; tests drive it on a fake clock
+        self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
+        self._proxy_refusing = False  # within a streak of proxy refusals, logged once at its start
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -193,19 +200,29 @@ class Instance:
         except ApiError as exc:
             log(f"could not report the exit ({exc})")
 
+    def _gap_left(self) -> float:
+        """Seconds until the next heartbeat may go: the minimum gap, or the shorter START_GAP while the agent
+        waits for a start to be recorded. Every other beat, done-only batches included, keeps the normal gap."""
+        gap = min(START_GAP, self.min_gap) if self._progress.waiting() else self.min_gap
+        return gap - (self._clock() - self._last_beat)
+
     def _heartbeat_loop(self) -> None:
         while not self._done.is_set():
-            woke = self._activity.wait(self.heartbeat_every)  # MCP activity and new progress wake the loop early
+            woke = self._wait(self.heartbeat_every)  # MCP activity, new progress and waiting starts wake it early
             if self._done.is_set():
                 return
             if woke:
                 self._activity.clear()
-                gap_left = self.min_gap - (self._clock() - self._last_beat)
-                if gap_left > 0:
+                if self._gap_left() > 0:
                     if not (self._progress.pending() or self._bare_next):
                         continue  # MCP activity just after a beat: that beat already showed the instance alive
-                    if self._done.wait(gap_left):  # progress goes out as soon as the minimum gap allows
-                        return
+                    # Progress goes out as soon as the gap allows. A start that begins waiting meanwhile wakes
+                    # this wait, and the gap is worked out again (it may now be the shorter one).
+                    while (left := self._gap_left()) > 0:
+                        if self._wait(left):
+                            self._activity.clear()
+                        if self._done.is_set():
+                            return
             status = self._beat()
             if status in (404, 409):  # burned, exited or gone: the agent must not keep running
                 self._stopped_by_api = True
@@ -217,35 +234,70 @@ class Instance:
                 self._activity.set()  # the next beat goes after the minimum gap: a bare one, the next 50, or a retry
             # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
 
-    def _beat(self, liveness_first: bool = True, timeout: float = 60.0) -> int:
+    def _beat(self, liveness_first: bool = True, deadline: float | None = None) -> int:
         """One heartbeat with the oldest queued progress, at most 50 events, or none when liveness goes first
         (after a refused batch, or a batch that keeps failing). The exit flush passes False: an exit follows.
 
-        Returns 200, or the failed call's status (0 when the API was unreachable).
+        Returns 200, the failed call's status (0 when the API was unreachable), or UNCONFIRMED when the reply
+        does not show the progress it carried, which is kept and sent again like after any failure.
+        With a deadline (the exit flush's), neither waiting for a beat still in flight nor the call itself may
+        outlast it; running out counts as unreachable.
         """
-        with self._beat_lock:
-            bare = self._bare_next and liveness_first
-            self._bare_next = False  # one bare try each time, whatever its outcome
-            batch = [] if bare else self._progress.batch()
-            self._last_beat = self._clock()
-            try:
-                self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
-            except ApiError as exc:
-                if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
-                    self._progress.dropped(len(batch), str(exc))
-                    self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
-                    log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
-                elif batch and exc.status not in (404, 409):
-                    # The batch is kept. If only progress keeps failing, a bare beat in between keeps the
-                    # instance from being swept as idle; then the batch is tried again.
-                    self._batch_failures += 1
-                    if self._batch_failures >= BARE_AFTER:
-                        self._batch_failures, self._bare_next = 0, True
-                return exc.status or 0
-            if batch:
-                self._batch_failures = 0
-            self._progress.sent(len(batch))
-            return 200
+        if deadline is None:
+            self._beat_lock.acquire()
+        elif not self._beat_lock.acquire(timeout=max(0.0, deadline - self._clock())):
+            return 0  # the loop's beat is still in flight past the deadline
+        try:
+            return self._beat_locked(liveness_first, 60.0 if deadline is None else deadline - self._clock())
+        finally:
+            self._beat_lock.release()
+
+    def _beat_locked(self, liveness_first: bool, timeout: float) -> int:
+        if timeout <= 0:
+            return 0  # nothing left of the deadline for the call itself
+        bare = self._bare_next and liveness_first
+        self._bare_next = False  # one bare try each time, whatever its outcome
+        batch = [] if bare else self._progress.batch()
+        self._last_beat = self._clock()
+        try:
+            reply = self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
+        except ApiError as exc:
+            self._proxy_refused(isinstance(exc, ProxyRefused), exc)
+            if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
+                self._progress.dropped(len(batch), str(exc))
+                self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
+                log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
+            elif batch and exc.status not in (404, 409):
+                self._batch_failed()
+            return exc.status or 0
+        self._proxy_refusing = False
+        if batch and not self._progress.confirmed_by(len(batch), reply):
+            if not self._told_unconfirmed:
+                self._told_unconfirmed = True
+                log("the Burn API took a heartbeat but did not confirm its progress (an older API?); "
+                    "the progress is kept and sent again, and starts are not confirmed to the agent")
+            self._batch_failed()
+            return UNCONFIRMED
+        if batch:
+            self._batch_failures = 0
+        self._progress.sent(len(batch))
+        return 200
+
+    def _proxy_refused(self, refused: bool, exc: ApiError) -> None:
+        """A proxy refusal is retried like an unreachable API and never taken as a burn (a misconfigured proxy
+        answers the same), but a start waiting on this beat is answered at once instead of at its deadline."""
+        if refused:
+            if not self._proxy_refusing:
+                log(f"the egress proxy refused the heartbeat ({exc}); retrying, and waiting starts are told")
+            self._progress.interrupt("proxy refused the heartbeat")
+        self._proxy_refusing = refused
+
+    def _batch_failed(self) -> None:
+        """The batch is kept. If only progress keeps failing, a bare beat in between keeps the instance from
+        being swept as idle; then the batch is tried again."""
+        self._batch_failures += 1
+        if self._batch_failures >= BARE_AFTER:
+            self._batch_failures, self._bare_next = 0, True
 
     def _flush_progress(self) -> None:
         """Send the progress still queued when the agent exits, so the instance's record is complete.
@@ -263,7 +315,7 @@ class Instance:
                 break
             if wait > 0:
                 self._sleep(wait)
-            status = self._beat(liveness_first=False, timeout=deadline - self._clock())
+            status = self._beat(liveness_first=False, deadline=deadline)
             if status in (404, 409):  # burned (or gone) after all: burn run exits as it does for any burn
                 self._stopped_by_api = True
                 self._progress.gone()

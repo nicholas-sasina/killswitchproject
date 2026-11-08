@@ -3,11 +3,13 @@
 - POST /spawn {role, command} -> {session_id, agent_id}: start a child instance;
 - POST /progress {item, state}: report task progress, sent with the next heartbeat (when given a queue).
   "done" is answered at once. "started" is answered once Burn has recorded it, because the agent must not act on
-  an item Burn does not know it touched: 200 recorded, 409 the instance was burned, 400 Burn refused it, or 503
-  when Burn has not confirmed it in time (it stays queued). Only a 200 means go ahead.
+  an item Burn does not know it touched: 200 recorded, 409 the instance was burned, or 503 not recorded: not
+  confirmed in time (it stays queued), or refused along with its heartbeat (report it again). Only a 200 means go
+  ahead.
 """
 import hmac
 import json
+import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
@@ -16,6 +18,8 @@ from burn_contracts.progress import ProgressError
 
 from ..api import ApiError
 from .progress import ProgressQueue
+
+_log = logging.getLogger(__name__)
 
 
 class SpawnEndpoint:
@@ -81,17 +85,27 @@ class SpawnEndpoint:
                 if outcome == "gone":
                     return self._send(409, {"error": "the instance was burned or has exited: do not start this item"})
                 if outcome == "refused":
-                    return self._send(400, {"error": f"Burn refused this start ({detail}): do not start this item"})
+                    # The whole batch was refused, very likely for another event in it: this start passed the
+                    # same rules here, so it may well succeed if reported again.
+                    return self._send(503, {"error": f"not recorded: Burn refused the heartbeat that carried it "
+                                                     f"({detail}). Do not start this item yet; report it again"})
+                if outcome == "interrupted":  # e.g. the egress proxy refused the heartbeat: no point waiting
+                    return self._send(503, {"error": f"not recorded: {detail}. Do not start this item yet; "
+                                                     "report it again"})
                 self._send(503, {"error": "Burn has not recorded this start yet (it stays queued): "
                                           "do not start this item"})
 
             def _send(self, status: int, body: dict):
                 data = json.dumps(body).encode()
-                self.send_response(status)
-                self.send_header("content-type", "application/json")
-                self.send_header("content-length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.send_response(status)
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    # The agent gave up first, for example on a start that waited: nothing to tell, no traceback.
+                    _log.debug("the agent hung up before its %s reply to %s", status, self.path)
 
             def log_message(self, *args):
                 pass
