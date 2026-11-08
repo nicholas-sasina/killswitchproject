@@ -26,19 +26,17 @@ import tokens
 SCOPES = ("instance", "role", "lineage", "token")
 BURN_WORKERS = 10
 BURN_BUDGET_SECONDS = 24
-MAX_DEPTH = 50  # lineage depth guard; a real tree is a handful of levels
 
 
 def _lineage(root_id: str) -> list[dict]:
-    found, seen, frontier = [instances.get_session(root_id)], {root_id}, [root_id]
-    for _ in range(MAX_DEPTH):
+    found, seen, frontier = [instances.get_session(root_id, consistent=True)], {root_id}, [root_id]
+    while True:  # ends when a level has no new children; `seen` also breaks any cycle
         children = [s for s in db.sessions_for_parents(frontier) if s["session_id"] not in seen]
         if not children:
-            break
+            return found
         found += children
         seen.update(s["session_id"] for s in children)
         frontier = [s["session_id"] for s in children]
-    return found
 
 
 def _role_sessions(role: str) -> list[dict]:
@@ -67,34 +65,77 @@ def burn_scope(scope: str, ident: str, reason: str = "", budget: float = BURN_BU
     if not isinstance(ident, str) or not ident:
         raise errors.ApiError(400, "id is required")
     deadline = time.monotonic() + budget
-    active = {s["session_id"]: s for s in targets(scope, ident) if s["status"] == "active"}
+    found = targets(scope, ident)
 
-    revoked: dict[str, list[str]] = {}
-    for session in active.values():
-        if sessions.end_session(session, "revoked"):
-            revoked.setdefault(session["agent_id"], []).append(session["session_id"])
-    agent_ids = list(dict.fromkeys(s["agent_id"] for s in active.values()))
-
-    burned, failed = [], []
     pool = ThreadPoolExecutor(max_workers=BURN_WORKERS)
+    try:
+        revoked, agent_ids, revoke_failed = _revoke_all(pool, scope, ident, found, deadline)
+        burned, failed = _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return {"scope": scope, "id": ident, "burned": burned, "failed": failed}
+
+
+def _revoke_all(pool, scope, ident, found, deadline):
+    """Revoke every active target session, in the pool, before anything slow runs.
+
+    A lineage is scanned again after each pass: a child that was being spawned during the first
+    scan either shows up now or sees its revoked parent when it re-checks (sessions.py), so it
+    cannot escape. Returns (session ids revoked per agent, every agent id, agents whose revoke
+    did not finish).
+    """
+    revoked: dict[str, list[str]] = {}
+    agent_ids: dict[str, None] = {}
+    revoke_failed: set[str] = set()
+    handled: set[str] = set()
+    while True:
+        fresh = [s for s in found if s["status"] == "active" and s["session_id"] not in handled]
+        if not fresh:
+            break
+        handled.update(s["session_id"] for s in fresh)
+        futures = {pool.submit(sessions.end_session, s, "revoked"): s for s in fresh}
+        done, _ = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
+        for future, session in futures.items():
+            agent_ids.setdefault(session["agent_id"])
+            try:
+                if future in done and future.result():
+                    revoked.setdefault(session["agent_id"], []).append(session["session_id"])
+                elif future not in done:
+                    revoke_failed.add(session["agent_id"])
+            except Exception:
+                # The burn below revokes this agent's sessions again; it is only reported if that fails too.
+                revoke_failed.add(session["agent_id"])
+        if scope != "lineage" or time.monotonic() >= deadline:
+            break
+        found = targets(scope, ident)
+    return revoked, list(agent_ids), revoke_failed
+
+
+def _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed):
+    """Burn each distinct agent once (exactly like POST /burn). Failures are collected, not raised."""
+    burned, failed = [], []
     futures = {pool.submit(burn.burn_agent, agent_id, reason): agent_id for agent_id in agent_ids}
-    done, pending = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
-    pool.shutdown(wait=False, cancel_futures=True)
+    _, pending = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
     for future, agent_id in futures.items():
         if future in pending:
-            failed.append({"agent_id": agent_id, "error": "timed out; instance is revoked, retry POST /burn"})
+            failed.append({"agent_id": agent_id, "error": _describe(None, agent_id in revoke_failed)})
             continue
         try:
             result = future.result()
         except Exception as exc:
-            # Never put exception text in the response: it may carry request details.
-            failed.append({"agent_id": agent_id, "error": _describe(exc)})
+            failed.append({"agent_id": agent_id, "error": _describe(exc, agent_id in revoke_failed)})
             continue
-        burned.append(result | {"sessions_revoked": revoked.get(agent_id, [])})
-    return {"scope": scope, "id": ident, "burned": burned, "failed": failed}
+        burned.append(result | {"sessions_revoked": sorted(set(revoked.get(agent_id, [])) | set(result["sessions_revoked"]))})
+    return burned, failed
 
 
-def _describe(exc: Exception) -> str:
-    if errors.is_throttle(exc):
-        return "rate limited; instance is revoked, retry POST /burn"
-    return f"{type(exc).__name__}; instance is revoked, retry POST /burn"
+def _describe(exc: Exception | None, revoke_unconfirmed: bool) -> str:
+    """What happened, without exception text (it may carry request details)."""
+    if exc is None:
+        what = "timed out"
+    elif errors.is_throttle(exc):
+        what = "rate limited"
+    else:
+        what = type(exc).__name__
+    state = "revoke not confirmed" if revoke_unconfirmed else "instance is revoked"
+    return f"{what}; {state}, retry POST /burn"
