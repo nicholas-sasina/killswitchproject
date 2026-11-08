@@ -75,6 +75,12 @@ DASHBOARD_REDIRECT_URI = "http://localhost:5173/"
 
 # The public website (the BurnSite stack) publishes its address, https://<distribution domain>, here.
 SITE_URL_PARAM = "/burn/site/url"
+# The hosted dashboard (the BurnDashboard stack) publishes its address, https://<distribution domain>
+# with no trailing slash, here. Sign-in returns to that address plus "/".
+DASHBOARD_URL_PARAM = "/burn/dashboard/url"
+# Set on the deployed API once the dashboard is hosted: the hosted dashboard's origin, which the API's
+# CORS then allows next to the local dev server.
+DASHBOARD_ORIGIN_ENV = "BURN_DASHBOARD_ORIGIN"
 
 # Header mock servers add so the dashboard can show a MOCK banner.
 MOCK_HEADER = "x-burn-mock"
