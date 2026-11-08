@@ -15,6 +15,7 @@ from .. import retry
 from ..api import ApiError
 from .badge import BadgeToken
 from . import credentials as creds_mod
+from . import harness
 from .env import TASK_NAMES, child_env, task_values
 from .instance_api import InstanceApi, ProxyRefused
 from .mcp_proxy import McpProxy
@@ -73,6 +74,7 @@ class Instance:
         self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
         self._proxy_refusing = False  # within a streak of proxy refusals, logged once at its start
         self.allow_env = tuple(dict.fromkeys(allow_env))  # --allow-env names, checked by the parser; this run only
+        self.preset = harness.preset(command)  # settings and HOME files for a well-known harness, or None
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -154,8 +156,9 @@ class Instance:
         cleanups.append(lambda: shutil.rmtree(home, ignore_errors=True))  # last, so nothing recreates it behind us
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
                         spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token,
-                        progress_url=spawn.progress_url, task=self._task, allow=self.allow_env)
-        self._announce()
+                        progress_url=spawn.progress_url, task=self._task,
+                        preset_env=self.preset.env if self.preset else None, allow=self.allow_env)
+        self._announce(creds, session)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,
@@ -184,14 +187,26 @@ class Instance:
         return code if code >= 0 else 128 - code
 
     def _make_home(self) -> str:
-        """A new private HOME for the agent, owned by the agent's user and removed when the instance ends."""
+        """A new private HOME for the agent, owned by the agent's user and removed when the instance ends.
+        A harness preset's files are written into it first, before the agent's user owns it."""
         home = tempfile.mkdtemp(prefix="burn-home-")  # mode 0700
-        if self.drop:
-            os.chown(home, self.drop.uid, self.drop.gid)
+        try:
+            made = harness.write_files(self.preset, home, os.getcwd()) if self.preset else []
+            if self.drop:
+                for path in (home, *made):
+                    os.chown(path, self.drop.uid, self.drop.gid)
+        except BaseException:
+            shutil.rmtree(home, ignore_errors=True)
+            raise
         return home
 
-    def _announce(self) -> None:
-        """Say on stderr what the agent gets beyond its own values: anything passed through."""
+    def _announce(self, creds, session: dict) -> None:
+        """Say on stderr what the agent gets beyond its own values: a preset, and anything passed through."""
+        if preset := self.preset:
+            log(f"{preset.name} preset: {preset.summary}")
+            if preset.needs_aws_key and not creds.aws_access_key_id:
+                log(f"role {session.get('role', self.role)} has no aws_key, so {preset.name} has no model; "
+                    "add aws_key to the role's credentials")
         for name in self.allow_env:
             if name in self.host_env:
                 log(f"{name} passes through to the agent; a burn cannot revoke it")

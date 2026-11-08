@@ -135,13 +135,15 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
               proxy_base: str = "", home: str = "", local_token: str = "", progress_url: str = "",
-              task: dict | None = None, allow: tuple = ()) -> dict:
+              task: dict | None = None, preset_env: dict | None = None, allow: tuple = ()) -> dict:
     """Everything the agent process runs with: the allow-listed host environment plus its own values.
 
-    `allow` names host variables the user passed through with --allow-env (checked by pass_through_name). They
-    come before the instance's own values, which nothing replaces.
+    `preset_env` is a harness preset's non-secret defaults. `allow` names host variables the user passed through
+    with --allow-env (checked by pass_through_name); they win over the preset's. Both come before the instance's
+    own values, which nothing replaces.
     """
     env = scrub(host_env)
+    env.update(preset_env or {})
     env.update({k: host_env[k] for k in allow if k in host_env and not SESSION_TOKEN.search(str(host_env[k]))})
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
         env.update({"HOME": home, "XDG_CONFIG_HOME": f"{home}/.config", "XDG_CACHE_HOME": f"{home}/.cache",
