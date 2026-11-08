@@ -11,6 +11,7 @@ Time: the API has a 29 s limit. Each burn is a few DynamoDB calls plus one minte
 Burning stops waiting after BURN_BUDGET_SECONDS and reports whatever has not finished in `failed`
 (those instances are already revoked; finish them with POST /burn {agent_id}).
 """
+import contextvars
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -26,6 +27,12 @@ import tokens
 SCOPES = ("instance", "role", "lineage", "token")
 BURN_WORKERS = 10
 BURN_BUDGET_SECONDS = 24
+
+
+def _submit(pool, fn, *args):
+    """Run fn in the pool with this request's context, so its events name the same caller (caller.py).
+    One copy per task: a context cannot be entered by two threads at once."""
+    return pool.submit(contextvars.copy_context().run, fn, *args)
 
 
 def _lineage(root_id: str) -> list[dict]:
@@ -93,7 +100,7 @@ def _revoke_all(pool, scope, ident, found, deadline):
         if not fresh:
             break
         handled.update(s["session_id"] for s in fresh)
-        futures = {pool.submit(sessions.end_session, s, "revoked"): s for s in fresh}
+        futures = {_submit(pool, sessions.end_session, s, "revoked"): s for s in fresh}
         done, _ = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
         for future, session in futures.items():
             agent_ids.setdefault(session["agent_id"])
@@ -114,7 +121,7 @@ def _revoke_all(pool, scope, ident, found, deadline):
 def _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed):
     """Burn each distinct agent once (exactly like POST /burn). Failures are collected, not raised."""
     burned, failed = [], []
-    futures = {pool.submit(burn.burn_agent, agent_id, reason): agent_id for agent_id in agent_ids}
+    futures = {_submit(pool, burn.burn_agent, agent_id, reason): agent_id for agent_id in agent_ids}
     _, pending = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
     for future, agent_id in futures.items():
         if future in pending:

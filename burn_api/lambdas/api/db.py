@@ -119,7 +119,13 @@ def sessions_for_token(token_id: str) -> list[dict]:
 
 
 def write_event(**fields) -> dict:
-    """Build a schema-valid event and append it to the global stream."""
+    """Build a schema-valid event and append it to the global stream.
+
+    `actor` defaults to whoever made the current request (caller.py), so every route attributes its events.
+    """
+    import caller
+    if fields.get("actor") is None and caller.get().actor:
+        fields["actor"] = caller.get().actor
     event = make_event(**fields)
     table(names.EVENTS_TABLE).put_item(Item={"stream": names.EVENTS_STREAM, **event})
     return event
