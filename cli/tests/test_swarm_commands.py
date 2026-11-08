@@ -133,8 +133,11 @@ def test_token_create_prints_the_token_once_with_a_join_command(fake, capsys):
     code, out, _ = burn(capsys, "token", "create", "worker", "--uses", "5", "--ttl", "600")
     assert fake.calls("POST", "/roles/worker/tokens")[0][2] == {"uses": 5, "ttl": 600}
     token = next(line for line in out.splitlines() if line.startswith("bjt_"))
-    assert code == 0 and f"BURN_JOIN_TOKEN={token} burn run --role worker --" in out
+    assert code == 0 and out.count(token) == 1  # printed exactly once, on its own line
     assert API_TOKEN not in out
+    # the join commands it suggests carry no token, so they cannot land in shell history
+    assert "burn run --role worker --token-stdin" in out and "read -rs BURN_JOIN_TOKEN" in out
+    assert not [ln for ln in out.splitlines() if "burn run" in ln and "bjt_" in ln]
 
 
 def test_token_create_unknown_role(fake, capsys):
