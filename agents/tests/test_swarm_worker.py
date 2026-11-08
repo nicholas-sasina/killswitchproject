@@ -105,16 +105,17 @@ def run_task(call, task, resume=None, report=None, **kw):
     async def sleep(seconds):
         sleeps.append(seconds)
 
-    async def tool_call(tool, args):
+    tool = kw.pop("tool", "read_inbox")
+
+    async def attempt(item):  # the scripted worker's attempt: one tool call
         seen.append(("call", tool))
-        return await call(tool, args)
+        return await call(tool, {})
 
     async def default_report(item, state):
         seen.append((state, item))
 
-    kw.setdefault("tool", "read_inbox")
     kw.setdefault("interval", 3.0)
-    code = asyncio.run(work_task(tool_call, report or default_report, task=task, resume=resume or {}, sleep=sleep, **kw))
+    code = asyncio.run(work_task(attempt, report or default_report, task=task, resume=resume or {}, sleep=sleep, **kw))
     return code, seen, sleeps
 
 
@@ -253,14 +254,14 @@ def test_the_task_and_resume_come_from_the_environment_and_are_checked():
 def test_a_dead_badge_that_escapes_the_loop_is_burned_only_for_a_task_worker(monkeypatch):
     from burn_agents import swarm_worker
 
-    async def dead(env):
+    async def dead(env, **kw):
         raise RuntimeError(BADGE_DEAD)
 
     monkeypatch.setattr(swarm_worker, "main_async", dead)
     monkeypatch.delenv("BURN_TASK", raising=False)
-    assert swarm_worker.main() == 0  # no task: stopping on a dead badge is the normal end, as before
+    assert swarm_worker.main([]) == 0  # no task: stopping on a dead badge is the normal end, as before
     monkeypatch.setenv("BURN_TASK", '["w01-item-01"]')
-    assert swarm_worker.main() == 3
+    assert swarm_worker.main([]) == 3
 
 
 def test_with_a_task_it_needs_the_progress_endpoint():

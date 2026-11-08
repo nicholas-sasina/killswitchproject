@@ -97,8 +97,8 @@ mocks: ## Start the mock Burn API (:8700) and mock MCP tools (:8701), developmen
 proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
 
-swarm: ## Start N deterministic workers under `burn run` in containers (ROLE=worker N=20; ITEMS=10 gives each a task; MOCK=1 for the mock servers)
-	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) --items $(ITEMS) $(if $(MOCK),--mock)
+swarm: ## Start N AI workers (Haiku on Bedrock, real cost, capped) under `burn run` in containers; needs a loaded scenario (ROLE=worker N=20; ITEMS=10: a ticket per item; MAX_CALLS=400 caps the run; MOCK=1: scripted workers, no model)
+	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) --items $(ITEMS) $(if $(MAX_CALLS),--max-model-calls $(MAX_CALLS)) $(if $(MOCK),--mock)
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)

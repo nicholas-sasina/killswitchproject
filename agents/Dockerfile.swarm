@@ -1,11 +1,13 @@
-# Swarm workers: `burn run` (the CLI) starting the deterministic worker. Build context is the repository root.
-# No AWS access is needed: the launcher hands each container its own values. (botocore is only imported by the
-# worker's refusal check.)
+# Swarm workers: `burn run` (the CLI) starting the AI worker (Claude Haiku 4.5 on Bedrock, through Strands). Build
+# context is the repository root. The container needs none of the host's AWS access: the launcher hands each one its
+# own values, and the worker's model runs on its instance's own AWS key, which `burn run` gives it. Its model calls go
+# out through the egress proxy like everything else; each one costs money (see agents/README.md).
 FROM python:3.12-slim
 WORKDIR /app
 COPY contracts /src/contracts
 COPY cli /src/cli
-RUN pip install --no-cache-dir /src/contracts /src/cli "mcp>=1.9,<2" "httpx>=0.27" botocore
+RUN pip install --no-cache-dir /src/contracts /src/cli "mcp>=1.9,<2" "httpx>=0.27" "strands-agents==1.64.0" \
+    "boto3==1.43.126"
 # burn run is PID 1 and runs as root; it starts each worker under a numeric uid of its own, so a worker can read
 # neither burn run's environment (the API and join tokens) nor another worker's. No source tree or root home
 # is left readable by other users.

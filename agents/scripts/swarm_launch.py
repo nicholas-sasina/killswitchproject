@@ -12,6 +12,12 @@ container to task. When a worker's container exits and Burn says the instance wa
 the launcher starts the replacement: one fresh join, POST /instances/{old}/replace, and a new container with the same
 task and BURN_RESUME (what the burned instance finished, and what it touched after the breach). The task stays here:
 Burn never holds it, so a compromised agent cannot change it.
+
+Each worker is an AI agent whose model calls cost money, so the run has a hard cap on them (RunBudget): each
+container is started with its share (`--max-model-calls`), which the worker never exceeds, and the shares started
+never add up to more than the run's cap. When a worker exits, the share it did not use (its last log line says how
+many it used) goes back to the run, and a replacement continues on what is left. `--mock` runs the scripted worker,
+which makes no model calls.
 """
 import hashlib
 import json
@@ -26,8 +32,9 @@ from urllib.parse import urlsplit, urlunsplit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "cli"))  # the CLI's API client (standard library only)
 
+from burn_agents.swarm_worker import DEFAULT_WORKER_CALLS, USAGE_RE  # noqa: E402
 from burn_cli import retry  # noqa: E402
-from burn_cli.api import Api  # noqa: E402
+from burn_cli.api import Api, ApiError  # noqa: E402
 from burn_cli.runner.instance_api import InstanceApi  # noqa: E402
 from burn_contracts.names import RESUME_ENV, TASK_ENV  # noqa: E402
 
@@ -53,9 +60,78 @@ CA_FILE = "mitmproxy-ca-cert.pem"  # the proxy CA's public certificate (mitmprox
 CERT = f"/certs/{CA_FILE}"
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # must match burn_cli.runner.run.ADOPT_SECRETS
 WORKER = ["python", "-m", "burn_agents.swarm_worker"]
+DEFAULT_RUN_CALLS = 400  # model calls for a whole `make swarm`, replacements included: under $1 of Haiku
+MIN_SHARE = 5  # model calls: less than this is not enough for one ticket, so a worker is not started on it
+NEEDED_TOOLS = ("list_tickets", "read_ticket")  # a worker finds its tickets with these
 JOIN_TTL = 3600
 REPLACEMENT_JOIN_TTL = 300  # a replacement's join token is for one join, made straight away
 READS, READ_GAP = 3, 5.0  # a burned instance's replacement record can land a moment after its container exits
+
+
+class RoleError(Exception):
+    """The role exists but cannot run AI workers. The message says what to change."""
+
+
+def full_access_role(name: str) -> dict:
+    """The Full access role body, with replace on burn: every tool in contracts/mcp-tools.json and an own AWS key."""
+    tools = json.loads((REPO_ROOT / "contracts" / "mcp-tools.json").read_text())["tools"]
+    return {"name": name, "tools": [t["name"] for t in tools], "credentials": ["aws_key"], "may_message": [],
+            "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
+            "replace_on_burn": True}
+
+
+def ensure_role(api: Api, name: str, log=print) -> dict:
+    """The role the workers run as: the one that exists, or a new Full access role (with replace on burn).
+
+    An existing role must give each instance its own AWS key (the worker's model runs on it) and the tools a worker
+    finds its tickets with; otherwise RoleError, before anything starts.
+    """
+    try:
+        role = api.request("GET", f"/roles/{name}")
+    except ApiError as exc:
+        if exc.status != 404:
+            raise
+        role = api.request("POST", "/roles", full_access_role(name))
+        log(f"created role {name}: full access, its own AWS key per instance, replace on burn")
+        return role
+    if "aws_key" not in (role.get("credentials") or []):
+        raise RoleError(f"role {name} gives its instances no AWS key of their own (credentials "
+                        f"{role.get('credentials') or []}), and a worker's model runs on that key: add \"aws_key\" "
+                        f"to its credentials, or use a new role name and the swarm creates a full access role")
+    missing = [t for t in NEEDED_TOOLS if t not in (role.get("tools") or [])]
+    if missing:
+        raise RoleError(f"role {name} does not allow {', '.join(missing)}, which a worker needs to find its tickets")
+    log(f"using the existing role {name}" + ("" if role.get("replace_on_burn") else " (replace on burn is off)"))
+    return role
+
+
+class RunBudget:
+    """The run's hard cap on model calls, shared out to the workers it starts.
+
+    Every container gets a share (`--max-model-calls`) that it never exceeds, and the shares handed out never add up
+    to more than `total`. A worker's unused share comes back when it exits and says what it used.
+    """
+
+    def __init__(self, total: int, per_worker: int, count: int):
+        self.total, self.left = total, total
+        self.per_worker = min(per_worker, total // max(count, 1))
+        if self.per_worker < MIN_SHARE:
+            raise ValueError(f"a cap of {total} model calls for the run leaves {self.per_worker} for each of {count} "
+                             f"worker(s); a ticket takes about {MIN_SHARE}: raise the run's cap or start fewer")
+        self._lock = threading.Lock()
+
+    def take(self) -> int:
+        """A share for one more worker, or 0 when what is left is too little to start one."""
+        with self._lock:
+            share = min(self.per_worker, self.left)
+            if share < MIN_SHARE:
+                return 0
+            self.left -= share
+            return share
+
+    def give_back(self, calls: int) -> None:
+        with self._lock:
+            self.left += max(calls, 0)
 
 
 def task_ids(worker: int, items: int) -> list[str]:
@@ -127,9 +203,11 @@ def container_env(*, public: dict, secrets: dict, api_url: str, gateway_url: str
             env[RESUME_ENV] = json.dumps({"done": resume["done"], "quarantined": resume["quarantined"]})
     if not mock:
         identity = f"http://{public['agent_id']}:{public['session_id']}@proxy:8080"  # how the proxy tells agents apart
+        # botocore (the worker's Bedrock and STS calls) reads AWS_CA_BUNDLE, not SSL_CERT_FILE.
         env.update({"BURN_PROXY_URL": PROXY, "HTTPS_PROXY": identity, "HTTP_PROXY": identity,
                     "https_proxy": identity, "http_proxy": identity, "NO_PROXY": "127.0.0.1,localhost",
-                    "no_proxy": "127.0.0.1,localhost", "SSL_CERT_FILE": CERT, "REQUESTS_CA_BUNDLE": CERT})
+                    "no_proxy": "127.0.0.1,localhost", "SSL_CERT_FILE": CERT, "REQUESTS_CA_BUNDLE": CERT,
+                    "AWS_CA_BUNDLE": CERT})
     return env
 
 
@@ -151,8 +229,15 @@ def image_tag(root: Path = REPO_ROOT) -> str:
     return f"{IMAGE_NAME}:{digest.hexdigest()[:12]}"
 
 
+def worker_args(*, mock: bool, interval: float, model_calls: int = 0) -> list[str]:
+    """The worker's own options. `burn run` passes the worker an allow-listed environment, so they go in argv."""
+    if mock:  # the mock servers have no model: the scripted worker
+        return ["--scripted", "--interval", str(interval)]
+    return ["--interval", str(interval), "--max-model-calls", str(model_calls)]
+
+
 def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *, mock: bool, image: str,
-                    certs_dir: str = "") -> list[str]:
+                    certs_dir: str = "", args: list[str] = ()) -> list[str]:
     """`docker run` for one worker. Environment variables are passed by name; their values are not in this list."""
     # --pull never: run only the image this launcher built; if it is gone, fail rather than fetch one by that name
     argv = ["docker", "run", "-d", "--pull", "never", "--name", name, "--label", "burn-swarm=1"]
@@ -160,7 +245,7 @@ def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *,
     for env_name in env_names:
         argv += ["-e", env_name]
     # `public` is the session without its secrets: ids, role, tools. Safe to show in `ps`.
-    return argv + [image, "burn", "run", "--role", role, "--adopt", json.dumps(public), "--", *WORKER]
+    return argv + [image, "burn", "run", "--role", role, "--adopt", json.dumps(public), "--", *WORKER, *args]
 
 
 class BurnCalls:
@@ -192,22 +277,26 @@ class BurnCalls:
 
 @dataclass
 class Worker:
-    """What the launcher knows about one container: its instance and its task (empty without one)."""
+    """What the launcher knows about one container: its instance, its task (empty without one) and its share of the
+    run's model calls (0 for the scripted worker)."""
     agent_id: str
     session_id: str
     task: list[str]
+    model_calls: int = 0
 
 
 class Swarm:
     """The launcher's workers: the map of container to task, and what to do when a container exits."""
 
     def __init__(self, calls: BurnCalls, role: str, *, api_url: str, gateway_url: str, mock: bool, interval: float,
-                 certs_dir: str, docker: Callable[[list[str], dict], object], image: str, sleep=None, log=None):
-        self.calls, self.role, self.docker = calls, role, docker
+                 certs_dir: str, docker: Callable[[list[str], dict], object], image: str, sleep=None, log=None,
+                 budget: RunBudget | None = None):
+        self.calls, self.role, self.docker, self.budget = calls, role, docker, budget
         self._container = {"api_url": api_url, "gateway_url": gateway_url, "mock": mock, "interval": interval}
         self.mock, self.certs_dir, self.image = mock, certs_dir, image
         self.sleep, self.log = sleep or time.sleep, log or (lambda line: print(line, flush=True))
         self.workers: dict[str, Worker] = {}
+        self.used: dict[str, int] = {}  # model calls each container said it used (its last log line)
         self._lock = threading.Lock()  # follow() handles each worker's exit on its own thread
 
     @property
@@ -222,7 +311,8 @@ class Swarm:
         started = []
         try:
             for k in range(1, count + 1):
-                started.append(self._launch(self.calls.join(self.role, token), task_ids(k, items)))
+                started.append(self._launch(self.calls.join(self.role, token), task_ids(k, items), None,
+                                            self._share()))
         except BaseException:
             if started:  # do not leave the workers that did start running with nobody watching them
                 try:
@@ -232,14 +322,15 @@ class Swarm:
             raise
         return started
 
-    def _launch(self, reply: dict, task: list[str], resume: dict | None = None) -> str:
+    def _launch(self, reply: dict, task: list[str], resume: dict | None = None, model_calls: int = 0) -> str:
         """Start the container for a joined instance. If it does not start, the session is ended with its own token."""
         try:
             public, secrets = split_reply(reply)
             env = container_env(public=public, secrets=secrets, task=task, resume=resume, **self._container)
             name = f"burn-swarm-{self.role}-{public['agent_id'].rsplit('-', 1)[-1]}"
+            args = worker_args(mock=self.mock, interval=self._container["interval"], model_calls=model_calls)
             self.docker(docker_run_argv(name, self.role, public, sorted(env), mock=self.mock, image=self.image,
-                                        certs_dir=self.certs_dir), env)
+                                        certs_dir=self.certs_dir, args=args), env)
         except BaseException:
             try:
                 self.calls.end(reply["session_id"], (reply.get("secrets") or {}).get("session_token", ""))
@@ -247,8 +338,26 @@ class Swarm:
                 pass
             raise
         with self._lock:  # started: its supervisor owns the session now
-            self.workers[name] = Worker(public["agent_id"], public["session_id"], task)
+            self.workers[name] = Worker(public["agent_id"], public["session_id"], task, model_calls)
         return name
+
+    def _share(self) -> int:
+        """Model calls for one more AI worker (0: the run's cap leaves too few), or 0 for the scripted worker."""
+        return self.budget.take() if self.budget and not self.mock else 0
+
+    def observe(self, name: str, line: str) -> None:
+        """A line of a worker's log: notes the model calls it says it used."""
+        if match := USAGE_RE.search(line):
+            with self._lock:
+                self.used[name] = int(match[1])
+
+    def _settle(self, worker: Worker, name: str) -> None:
+        """A worker exited: the part of its share it said it did not use goes back to the run. Without its word,
+        nothing does (it may have used it all)."""
+        with self._lock:
+            used = self.used.pop(name, None)
+        if self.budget and worker.model_calls and used is not None:
+            self.budget.give_back(worker.model_calls - min(used, worker.model_calls))
 
     def on_exit(self, name: str) -> str | None:
         """A worker's container exited. Returns the name of the container that replaced it, or None.
@@ -257,6 +366,8 @@ class Swarm:
         fails is logged, and the burned instance stays pending for a person.
         """
         worker = self.workers.get(name)
+        if worker is not None:
+            self._settle(worker, name)
         if worker is None or not worker.task:
             return None  # without a task the launcher only follows logs, as it always has
         try:
@@ -281,6 +392,17 @@ class Swarm:
 
     def _replace(self, old: Worker) -> str | None:
         """One fresh join with a single-use token, link it to the burned instance, start it on the same task."""
+        share = self._share()
+        if self.budget and not self.mock and not share:
+            self.log(f"cannot replace {old.agent_id}: the run's cap of {self.budget.total} model calls is spent; "
+                     f"it stays pending")
+            return None
+        name = self._join_and_link(old, share)
+        if name is None and self.budget:  # nothing started: its share goes back to the run
+            self.budget.give_back(share)
+        return name
+
+    def _join_and_link(self, old: Worker, share: int) -> str | None:
         try:
             reply = self.calls.join(self.role, self.calls.join_token(self.role, 1, ttl=REPLACEMENT_JOIN_TTL))
         except Exception as exc:  # noqa: BLE001
@@ -297,7 +419,7 @@ class Swarm:
                 pass
             return None
         try:
-            name = self._launch(reply, old.task, linked)
+            name = self._launch(reply, old.task, linked, share)
         except BaseException as exc:  # noqa: BLE001 - docker() exits on failure; this thread must not die silently
             self.log(f"{reply['agent_id']} replaced {old.agent_id} in Burn, but its container did not start ({exc})")
             return None
@@ -323,12 +445,16 @@ def _why_not(instance: dict) -> str:
 
 def start_workers(api: Api, instances: InstanceApi, role: str, count: int, *, api_url: str, gateway_url: str,
                   mock: bool, interval: float, certs_dir: str, docker: Callable[[list[str], dict], object],
-                  image: str, items: int = 0, sleep=None, log=None) -> Swarm:
-    """Join `count` times with one join token and start one container per instance, each with a task of `items` items.
+                  image: str, items: int = 0, sleep=None, log=None, budget: RunBudget | None = None) -> Swarm:
+    """Join `count` times with one join token and start one container per instance, each with a task of `items` items
+    and, unless `mock`, its share of `budget` (the run's model calls).
 
     A session whose container could not be started is ended, so a failure does not leave instances dangling.
     """
+    if budget is None and not mock:
+        budget = RunBudget(DEFAULT_RUN_CALLS, DEFAULT_WORKER_CALLS, count)
     swarm = Swarm(BurnCalls(api, instances, sleep=sleep), role, api_url=api_url, gateway_url=gateway_url, mock=mock,
-                  interval=interval, certs_dir=certs_dir, docker=docker, image=image, sleep=sleep, log=log)
+                  interval=interval, certs_dir=certs_dir, docker=docker, image=image, sleep=sleep, log=log,
+                  budget=budget)
     swarm.start(count, items)
     return swarm

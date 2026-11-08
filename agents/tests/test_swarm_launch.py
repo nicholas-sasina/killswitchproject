@@ -97,7 +97,8 @@ def test_the_session_in_argv_has_no_secrets_field():
     argv = docker.runs[0][0]
     public = json.loads(argv[argv.index("--adopt") + 1])
     assert "secrets" not in public and public["session_id"] == "sess_1"
-    assert argv[argv.index("--") + 1:] == ["python", "-m", "burn_agents.swarm_worker"]
+    # the mock servers have no model: the scripted worker, with its options on its command line
+    assert argv[argv.index("--") + 1:] == ["python", "-m", "burn_agents.swarm_worker", "--scripted", "--interval", "3.0"]
 
 
 def test_mock_mode_points_containers_at_the_host_and_has_no_proxy_or_network():
@@ -150,6 +151,9 @@ def test_argv_helper_never_embeds_a_value():
 def run_main(monkeypatch, *args):
     captured = {}
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", *args])
+    # A real swarm asks the API for the loaded scenario and the role; test_swarm_ai_launch.py covers both.
+    monkeypatch.setattr(run_swarm, "require_scenario", lambda api: captured.setdefault("scenario_checked", True))
+    monkeypatch.setattr(run_swarm, "ensure_role", lambda api, role: captured.setdefault("role_checked", role))
     monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
     monkeypatch.setattr(run_swarm, "fetch_proxy_ca", lambda docker_out, into: captured.setdefault("ca_into", into) and "/fetched/ca")
     monkeypatch.setattr(run_swarm, "remove_other_images", lambda keep: [])  # never touch this machine's images
@@ -322,6 +326,8 @@ def test_a_real_swarm_mounts_the_ca_of_the_running_proxy_not_the_checkouts(monke
 def test_a_real_swarm_without_the_proxy_ca_stops_before_starting_anything(monkeypatch):
     _real_env(monkeypatch)
     started = []
+    monkeypatch.setattr(run_swarm, "require_scenario", lambda api: None)
+    monkeypatch.setattr(run_swarm, "ensure_role", lambda api, role: None)
 
     def no_ca(docker_out, into):
         raise swarm_launch.ProxyCaError("no egress proxy is running on burn-demo_agents_internal")

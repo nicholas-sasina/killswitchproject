@@ -16,6 +16,9 @@ AUTH_ERROR_CODES = {
     "UnrecognizedClientException", "InvalidClientTokenId", "InvalidSignatureException",
     "SignatureDoesNotMatch", "ExpiredToken", "ExpiredTokenException", "AccessDenied",
     "AccessDeniedException", "AuthFailure",
+    # The egress proxy's JSON refusal of a burned session on a connection already open: botocore finds no AWS error
+    # code in it and uses the bare HTTP status. AWS's own refusals always carry a name like AccessDenied.
+    "403",
 }
 BADGE_MARKERS = ("revoked", "unknown badge", "badge issuer refused")
 MESSAGE_MARKERS = ("Proxy Authentication Required", "security token included in the request is invalid")
@@ -38,7 +41,9 @@ def is_refusal_text(text: str) -> bool:
 def is_proxy_refusal(exc: BaseException) -> bool:
     """The egress proxy refuses a burned agent's session (HTTP 403, or 407 for bad proxy auth)."""
     proxy_errors = (httpx.ProxyError, httpcore.ProxyError, ProxyConnectionError)
-    return isinstance(exc, proxy_errors) and any(code in str(exc) for code in ("403", "407"))
+    # botocore keeps the proxy's answer out of its message, in kwargs["error"]
+    text = f"{exc} {getattr(exc, 'kwargs', {}).get('error', '')}"
+    return isinstance(exc, proxy_errors) and any(code in text for code in ("403", "407"))
 
 
 def looks_revoked(exc: BaseException) -> bool:
