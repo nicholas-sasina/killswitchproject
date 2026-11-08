@@ -5,7 +5,7 @@ import "./styles/sections.css";
 import { Hero } from "./components/Hero";
 import { Nav } from "./components/Nav";
 import { Pipeline, type PipelineHandle } from "./components/Pipeline";
-import { Aws, Closing, Footer, Limits, Why } from "./components/Sections";
+import { Aws, Closing, Footer, Why } from "./components/Sections";
 import { Swarms } from "./components/Swarms";
 
 export function App() {
@@ -21,7 +21,6 @@ export function App() {
         <Pipeline ref={pipeline} />
         <Why />
         <Swarms />
-        <Limits />
         <Aws />
         <Closing />
       </main>

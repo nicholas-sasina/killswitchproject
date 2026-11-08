@@ -36,10 +36,6 @@
   color: var(--body);
 }
 
-.body-first {
-  margin-top: 0;
-}
-
 .why-note {
   margin-top: 24px;
   padding-top: 16px;
