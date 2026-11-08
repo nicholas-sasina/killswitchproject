@@ -601,3 +601,29 @@ def test_a_bad_task_ends_a_session_the_launcher_already_started(stack, capsys, m
     (call,) = stack.calls("POST", f"/instances/{reply['session_id']}/exit")
     assert call[3]["Authorization"] == f"Bearer {launcher_secrets['session_token']}"
     assert stack.instances[reply["session_id"]]["status"] == "exited"  # ended now, not left to the idle sweep
+
+
+A_JOIN_TOKEN = "bjt_" + "0123456789abcdef" + "." + "B" * 43  # 64 characters: shaped like an item id
+
+
+@pytest.mark.parametrize("name,value", [
+    ("BURN_TASK", json.dumps(["item-01", A_JOIN_TOKEN])),
+    ("BURN_RESUME", json.dumps({"done": [A_JOIN_TOKEN], "quarantined": []})),
+    ("BURN_RESUME", json.dumps({"done": [], "quarantined": [A_JOIN_TOKEN]})),
+])
+def test_a_join_token_is_refused_although_it_fits_the_item_id_rule(name, value):
+    assert len(A_JOIN_TOKEN) == 64
+    with pytest.raises(BadTask, match="looks like a join token") as caught:
+        task_values({name: value})
+    assert A_JOIN_TOKEN not in str(caught.value)
+
+
+@pytest.mark.parametrize("where", ["admin", "enroll", "join_env"])
+def test_the_admin_and_join_tokens_this_burn_run_holds_are_refused_as_items(where):
+    secret = "plainsecretvalue-0123456789"  # item-id shaped, and not in any known token format
+    host = {"BURN_TASK": json.dumps(["item-01", secret])}
+    host.update({"admin": {"BURN_DEMO_TOKEN": secret}, "join_env": {"BURN_JOIN_TOKEN": secret}}.get(where, {}))
+    with pytest.raises(BadTask, match="holds a credential") as caught:
+        Instance(RecordingApi(), "worker", ["true"], gateway_url="http://gateway", host_env=host,
+                 enroll_token=secret if where == "enroll" else "other-token")
+    assert secret not in str(caught.value)

@@ -3,7 +3,7 @@ import json
 import re
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from burn_contracts.names import MAX_PROGRESS_ITEMS, PROGRESS_URL_ENV, RESUME_ENV, TASK_ENV, is_item_id
+from burn_contracts.names import JOIN_TOKEN_RE, MAX_PROGRESS_ITEMS, PROGRESS_URL_ENV, RESUME_ENV, TASK_ENV, is_item_id
 
 # The agent's environment is an allow-list: a variable reaches it only if it is listed here. A deny-list has to
 # know every credential name (PGPASSWORD, MYSQL_PWD, SENTRY_DSN, a proxy URL with a password in it...) and misses some.
@@ -40,29 +40,35 @@ def _json(raw: str, name: str):
         raise BadTask(f"{name} is not valid JSON") from None
 
 
-def _item_ids(value, name: str) -> list[str]:
+def _item_ids(value, name: str, secrets: set[str]) -> list[str]:
     if not isinstance(value, list) or not all(is_item_id(item) for item in value):
         raise BadTask(f"{name} must be a list of item ids (each matching ^[A-Za-z0-9_.:-]{{1,64}}$)")
     if len(value) > MAX_PROGRESS_ITEMS:
         raise BadTask(f"{name} has more than {MAX_PROGRESS_ITEMS} items, the most one instance can report")
+    # Credentials can fit the item id rule (a join token is exactly 64 characters). The messages never echo them.
     if any(SESSION_TOKEN.search(item) for item in value):
         raise BadTask(f"{name} holds something that looks like a session token")
+    if any(JOIN_TOKEN_RE.match(item) for item in value):
+        raise BadTask(f"{name} holds something that looks like a join token")
+    if secrets.intersection(value):
+        raise BadTask(f"{name} holds a credential this burn run was given (the admin or the join token)")
     return value
 
 
-def task_values(host_env: dict) -> dict:
+def task_values(host_env: dict, secrets=()) -> dict:
     """BURN_TASK and BURN_RESUME for the agent, re-encoded from what was checked. Empty or unset: not passed on.
 
-    BURN_TASK is a JSON list of item ids; BURN_RESUME is {"done": [ids], "quarantined": [ids]}.
+    BURN_TASK is a JSON list of item ids; BURN_RESUME is {"done": [ids], "quarantined": [ids]}. `secrets` are
+    credential values this burn run holds, which no item may equal.
     """
-    out = {}
+    out, secrets = {}, {value for value in secrets if value}
     if raw := host_env.get(TASK_ENV):
-        out[TASK_ENV] = json.dumps(_item_ids(_json(raw, TASK_ENV), TASK_ENV))
+        out[TASK_ENV] = json.dumps(_item_ids(_json(raw, TASK_ENV), TASK_ENV, secrets))
     if raw := host_env.get(RESUME_ENV):
         resume = _json(raw, RESUME_ENV)
         if not isinstance(resume, dict) or set(resume) != {"done", "quarantined"}:
             raise BadTask(f'{RESUME_ENV} must be {{"done": [...], "quarantined": [...]}} with item ids only')
-        out[RESUME_ENV] = json.dumps({key: _item_ids(resume[key], f"{RESUME_ENV}.{key}")
+        out[RESUME_ENV] = json.dumps({key: _item_ids(resume[key], f"{RESUME_ENV}.{key}", secrets)
                                       for key in ("done", "quarantined")})
     return out
 

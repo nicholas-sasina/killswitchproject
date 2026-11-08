@@ -44,8 +44,9 @@ class Instance:
         self._secrets = secrets  # handed over by the parent supervisor or the launcher; never kept on self.session
         self._token = ""  # this instance's session token: supervisor memory only, never in the agent's env or argv
         self.gateway_url, self.host_env = gateway_url, dict(os.environ if host_env is None else host_env)
-        self.host_env.pop("BURN_DEMO_TOKEN", None)  # an instance never uses the admin token, nor passes it on
-        self._task = task_values(self.host_env)  # raises BadTask before anything starts
+        admin = self.host_env.pop("BURN_DEMO_TOKEN", None)  # an instance never uses the admin token, nor passes it on
+        # Raises BadTask before anything starts. No item may be a credential this supervisor holds.
+        self._task = task_values(self.host_env, secrets=(admin, enroll_token, self.host_env.get("BURN_JOIN_TOKEN")))
         for name in TASK_NAMES:  # the task is this instance's: a child it spawns gets none
             self.host_env.pop(name, None)
         self.enroll_token, self.session, self.proxy_url = enroll_token, session, proxy_url
