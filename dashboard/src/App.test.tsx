@@ -113,7 +113,9 @@ describe("the console shell", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.getAttribute("aria-label") ?? link.textContent),
-    ).toEqual(["Overview", "Roles", "Incidents, 0 open", "Credentials"]);
+    ).toEqual(["Overview", "Roles", "Incidents", "Credentials"]);
+    // With nothing open there is no count at all, not a grey zero.
+    expect(nav.querySelector(".topbar-count")).toBeNull();
     expect(
       within(nav)
         .getByRole("link", { name: "Overview" })
@@ -125,9 +127,6 @@ describe("the console shell", () => {
         .getByRole("link", { name: "Roles" })
         .getAttribute("aria-current"),
     ).toBe("page");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      "worker",
-    );
     // No theme switch, and no word the console never uses.
     expect(screen.queryByRole("button", { name: /theme/i })).toBeNull();
   });
@@ -137,9 +136,10 @@ describe("the console shell", () => {
     window.history.replaceState(null, "", "/#/burned");
     await open();
     expect(window.location.hash).toBe("#/incidents");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      "Incidents",
-    );
+    // The shell's own marker: each page's heading is the page's to write.
+    expect(
+      screen.getByRole("link", { name: /^Incidents/, current: "page" }),
+    ).toBeTruthy();
     await act(async () => goTo("#/alerts"));
     expect(window.location.hash).toBe("#/overview");
     await act(async () => goTo("#/overview?instance=w1"));
@@ -201,7 +201,8 @@ describe("the console shell", () => {
       ],
     });
     await open();
-    const stats = screen.getByText("Running").closest("dl") as HTMLElement;
+    // The hero's stats, not a legend or a row that also says "Running".
+    const stats = document.querySelector("dl.hero-stats") as HTMLElement;
     expect(stats.textContent).toContain("Running2");
     expect(stats.textContent).toContain("Burned today1");
     expect(

@@ -94,23 +94,11 @@
   margin-left: 4px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--hairline-soft);
-  color: var(--muted-2);
+  background: var(--ember-tint);
+  color: var(--ember-ink);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
-}
-
-.topbar-nav a:hover .topbar-count,
-.topbar-nav a[aria-current="page"] .topbar-count {
-  background: var(--paper);
-}
-
-.topbar-count.is-open,
-.topbar-nav a:hover .topbar-count.is-open,
-.topbar-nav a[aria-current="page"] .topbar-count.is-open {
-  background: var(--ember-tint);
-  color: var(--ember-ink);
 }
 
 .topbar-spacer {

@@ -50,17 +50,15 @@ export function TopNav({
               href={routeHref({ page: section })}
               aria-current={current === section ? "page" : undefined}
               aria-label={
-                section === "incidents" && openIncidents !== undefined
+                section === "incidents" && openIncidents
                   ? `${label}, ${openIncidents} open`
                   : undefined
               }
             >
               {label}
-              {section === "incidents" && openIncidents !== undefined && (
-                <span
-                  aria-hidden="true"
-                  className={`topbar-count num${openIncidents ? " is-open" : ""}`}
-                >
+              {/* Only an open incident earns the ember count; none, none. */}
+              {section === "incidents" && !!openIncidents && (
+                <span aria-hidden="true" className="topbar-count num">
                   {openIncidents}
                 </span>
               )}
