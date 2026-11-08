@@ -6,18 +6,18 @@ needs: the HMAC key (read once per container) and the table lookup.
 
 Fingerprint cache: the whole fingerprint set is kept in memory per warm container.
 Each call reads one item, names.FINGERPRINTS_VERSION_KEY (bumped by the minter after
-every register, rotate and delete), and reloads the set only when that number
-changed. So DynamoDB cost per call no longer grows with the size of the tool output.
-The version read is consistent, so a credential minted a moment ago is recognized on
-the next call. Full reload is fine at this table's size; production would load
-incrementally (only the rows changed since the last version).
+every register, rotate and delete), and reloads the set when that number changed, so
+DynamoDB cost per call does not grow with the size of the tool output. The version
+read is consistent, so a credential minted a moment ago is recognized on the next
+call. The set is also reloaded once it is MAX_CACHE_AGE_SECONDS old, so a change whose
+version bump failed is picked up within that time anyway.
 
-Fallback: until the minter has bumped the version at least once, or if the cache
-cannot be read (e.g. no Scan permission yet), each call looks up its candidates
-directly, as before.
+If the version item does not exist yet or the cache cannot be read, each call looks up
+its candidates directly.
 """
 import functools
 import logging
+import time
 
 import boto3
 from burn_contracts.fingerprint import key_from_hex
@@ -26,7 +26,8 @@ from burn_detect import Finding, Scanner
 
 log = logging.getLogger()
 _BATCH = 100  # BatchGetItem limit per request
-_cache: dict = {"version": None, "rows": None}
+MAX_CACHE_AGE_SECONDS = 60
+_cache: dict = {"version": None, "rows": None, "loaded_at": 0.0}
 
 
 @functools.cache
@@ -35,7 +36,7 @@ def _dynamodb():
 
 
 def reset_cache() -> None:
-    _cache.update(version=None, rows=None)
+    _cache.update(version=None, rows=None, loaded_at=0.0)
 
 
 def _version() -> int | None:
@@ -62,11 +63,13 @@ def cached_rows() -> dict[str, dict] | None:
         version = _version()  # read BEFORE the scan: a bump during the scan reloads next call
         if version is None:
             return None
-        if _cache["rows"] is None or version != _cache["version"]:
-            _cache.update(rows=_load_all(), version=version)
+        stale = time.monotonic() - _cache["loaded_at"] > MAX_CACHE_AGE_SECONDS
+        if _cache["rows"] is None or version != _cache["version"] or stale:
+            loaded_at = time.monotonic()  # taken before the scan, like the version
+            _cache.update(rows=_load_all(), version=version, loaded_at=loaded_at)
             log.info("fingerprint cache loaded: version=%s rows=%d", version, len(_cache["rows"]))
         return _cache["rows"]
-    except Exception as exc:  # e.g. AccessDenied on Scan before the infra change: stay correct, just costlier
+    except Exception as exc:  # e.g. AccessDenied or throttling: stay correct, just costlier
         log.warning("fingerprint cache unavailable (%s); looking up per call", type(exc).__name__)
         return None
 

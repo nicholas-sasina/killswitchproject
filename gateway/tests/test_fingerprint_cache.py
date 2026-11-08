@@ -92,6 +92,20 @@ def test_the_set_is_reloaded_only_when_the_version_changes(aws, ddb_calls):
     assert ddb_calls["Scan"] == 2
 
 
+def test_a_change_whose_bump_failed_is_picked_up_once_the_set_is_old(aws, monkeypatch):
+    session = put_session(aws)
+    register_credential(aws, "burn/agent-alpha/api_key", "agent-alpha")
+    respond(session, "nothing here", rpc_id=1)  # cache loaded
+    # The rows are written but the minter's version bump fails.
+    fresh = register_credential(aws, "burn/shared/new_token", "shared", secret_type="other", bump=False)
+    respond(session, f"token: {fresh}", rpc_id=2)
+    assert "burn/shared/new_token" not in ledger_rows(aws, "agent-alpha")  # same version: still the old set
+    clock = detection.time.monotonic() + detection.MAX_CACHE_AGE_SECONDS + 1
+    monkeypatch.setattr(detection.time, "monotonic", lambda: clock)
+    respond(session, f"token: {fresh}", rpc_id=3)
+    assert "burn/shared/new_token" in ledger_rows(aws, "agent-alpha")
+
+
 def test_rotation_status_is_seen_after_the_bump(aws):
     register_credential(aws, "burn/agent-alpha/api_key", "agent-alpha")
     assert detection.cached_rows()
