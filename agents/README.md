@@ -12,6 +12,17 @@ Scenarios (agents, tickets, files, customers) live in YAML, so a new scenario ne
 - An agent with `list_tickets` works the ticket queue; the others poll `read_inbox`. Boot and a periodic heartbeat use the agent's own AWS and API keys, which gives CloudTrail history for the blast radius.
 - A refused call (`BURN:`), a refused token or a model auth failure logs `badge revoked/credentials rotated - stopping` and the agent stops.
 
+## Swarm workers
+`make swarm ROLE=worker N=20` starts N deterministic workers, each running under `burn run`, on the demo's
+internal Docker network behind the egress proxy (project `burn-demo`, so it can sit next to `make demo`). A worker makes no
+model calls, so a swarm costs nothing: it calls one MCP tool (`read_inbox` by default) every few seconds through
+`BURN_MCP_URL`, offset by a hash of its agent id so 20 workers do not all call at once, and stops when the Gateway
+refuses its badge. `scripts/run_swarm.py` creates a join token for the role (the role must exist: `burn apply`),
+writes it with the supervisor's settings to `.run/swarm.env` (mode 600, gitignored) and scales one `worker`
+service. The workers' own environment holds only their own credentials: `burn run` removes the supervisor's.
+`MOCK=1` runs the same containers against the mock servers on the host (`host.docker.internal`) and the fake
+credential source, without the proxy. Ctrl-C stops only the workers.
+
 ## Key files
 | File | What |
 |---|---|
@@ -21,6 +32,9 @@ Scenarios (agents, tickets, files, customers) live in YAML, so a new scenario ne
 | `burn_agents/loop.py` | Ticket and inbox loops, stop-on-revoke |
 | `burn_agents/turn.py` | One Strands agent turn, refusal watcher, local tools |
 | `burn_agents/cloud.py` | `check_cloud_access`, `check_provider` (use the agent's own keys) |
+| `burn_agents/swarm_worker.py` | The deterministic swarm worker (no model calls) |
+| `scripts/run_swarm.py`, `scripts/swarm_compose.py` | `make swarm`: join token, `.run/swarm.env`, compose override |
+| `Dockerfile.swarm` | `burn run` plus the worker (build context: repository root) |
 | `docker-compose.yml` | Proxy, sink and networks (built from `.run/detection-build`, proxy credentials from `.run/proxy.env`); agent services are generated per scenario into `.run/` |
 | `scripts/` | `load_scenario.py`, `reset.py`, `run_demo.py`, `mock_badge_issuer.py` (dev) |
 

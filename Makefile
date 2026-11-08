@@ -4,6 +4,8 @@
 SCENARIO ?= scenarios/support-desk.yaml
 AGENT ?=
 ENCODING ?= random
+ROLE ?= worker
+N ?= 20
 CDK := npx -y aws-cdk@2
 export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
@@ -12,7 +14,7 @@ export AWS_DEFAULT_REGION := us-east-1
 PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli
 
 .DEFAULT_GOAL := help
-.PHONY: burn help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval teardown
+.PHONY: burn help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm teardown
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -66,6 +68,9 @@ mocks: ## Start the mock Burn API (:8700) and mock MCP tools (:8701), developmen
 
 proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
+
+swarm: ## Start N deterministic workers under `burn run` on the demo network (ROLE=worker N=20, MOCK=1 for the mock servers)
+	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) $(if $(MOCK),--mock)
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)
