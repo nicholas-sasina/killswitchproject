@@ -10,11 +10,12 @@ so the by_source index lists every reader of a source (POST /burn/by-source), an
 message copies them to the receiver like any other row. They have no secret_ref, so a
 burn never flags them.
 
-Every sighting updates last_seen and seen_in, but only the first one per
+Every sighting updates last_seen and last_call, but only the first one per
 (agent, credential) is reported as new: an agent that reads the same file or
 gets the same sender's messages again already has that entry. The write is
 keyed by the call that caused it (trace id + JSON-RPC id), so an interceptor
-retry finds its call already in seen_in and changes nothing.
+retry finds its call in last_call and changes nothing. Only the latest call is
+kept, so a row stays the same size however often the agent reads the source.
 """
 import functools
 
@@ -87,14 +88,16 @@ def copy_entry(entry: dict, to_agent: str, *, via: str, call: str) -> bool:
                    status=entry.get("status") or "seen")
 
 
-_NOT_RETRIED = "(attribute_not_exists(seen_in) OR NOT contains(seen_in, :call))"
+# Every field the write sets is idempotent, so the latest call is enough to spot a retry. A retry that
+# arrives after a later call passes the check, but it only moves last_seen, last_call and report: never a new event.
+_NOT_RETRIED = "(attribute_not_exists(last_call) OR last_call <> :call)"
 # A row with no status was written before statuses existed, when only plaintext was ever recorded.
 _HAS_STATUS_OR_IS_NEW = "(attribute_not_exists(first_seen) OR attribute_exists(#status))"
 
 
 def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, call: str,
             status: str | None = "seen", report: str | None = None) -> bool:
-    # The first sighting decides source/via/first_seen/source_ref; later ones only add to seen_in.
+    # The first sighting decides source/via/first_seen/source_ref; later ones only move last_seen/last_call.
     first = {**fields, "source": source, "via": via, "first_seen": utc_now_iso()}
     if first.get("source_ref") is None:
         # source_ref is a key of the by_source index: a NULL there would fail the whole write.
@@ -117,15 +120,16 @@ def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, cal
     try:
         response = _table().update_item(
             Key={"agent_id": agent_id, "secret_ref_or_fp": key},
-            UpdateExpression=f"SET {', '.join(sets)}, last_seen = :now ADD seen_in :calls",
+            # REMOVE seen_in: rows written before last_call kept every call, which grew without bound.
+            UpdateExpression=f"SET {', '.join(sets)}, last_seen = :now, last_call = :call REMOVE seen_in",
             ConditionExpression=condition,
             ExpressionAttributeNames=names,
-            ExpressionAttributeValues={**values, ":now": utc_now_iso(), ":calls": {call}, ":call": call},
+            ExpressionAttributeValues={**values, ":now": utc_now_iso(), ":call": call},
             ReturnValues="ALL_OLD",
         )
     except _table().meta.client.exceptions.ConditionalCheckFailedException:
         if status != "referenced":
-            return False  # interceptor retry: this call is already in seen_in
+            return False  # interceptor retry: this call is already in last_call
         # Either a retry (the "seen" write below fails the same way) or a row without a status:
         # that agent had the plaintext, so the row says "seen" rather than becoming "referenced".
         return _upsert(agent_id, key, fields, source=source, via=via, call=call, status="seen", report=report)

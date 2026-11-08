@@ -79,7 +79,34 @@ def test_repeat_sightings_update_the_entry_without_a_new_event(aws, monkeypatch)
     assert event["action"] == "recorded"
     row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
     assert row["first_seen"] == "2026-01-01T00:00:00.000Z" and row["last_seen"] == "2026-01-01T00:05:00.000Z"
-    assert row["seen_in"] == {"Root=1-a#1", "Root=1-b#2"}
+    assert row["last_call"] == "Root=1-b#2" and "seen_in" not in row
+
+
+def test_rereading_the_same_credential_does_not_grow_its_row(aws):
+    session = put_session(aws)
+    value = register_credential(aws, "burn/agent-alpha/api_key", "agent-alpha")
+    respond(session, value, trace="Root=1-a", rpc_id=1)
+    first = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
+
+    for n in range(2, 52):
+        respond(session, value, trace=f"Root=1-{n}", rpc_id=n)
+
+    row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
+    assert set(row) == set(first) and row["last_call"] == "Root=1-51#51"
+    moving = ("last_seen", "last_call")
+    assert {k: v for k, v in row.items() if k not in moving} == {k: v for k, v in first.items() if k not in moving}
+    assert len(events(aws)) == 1
+
+
+def test_a_late_retry_of_an_earlier_call_is_not_a_new_sighting(aws):
+    session = put_session(aws)
+    value = register_credential(aws, "burn/agent-alpha/api_key", "agent-alpha")
+    respond(session, value, trace="Root=1-a", rpc_id=1)
+    respond(session, value, trace="Root=1-b", rpc_id=2)
+    respond(session, value, trace="Root=1-a", rpc_id=1)  # the interceptor retries the first call late
+
+    assert len(events(aws)) == 1
+    assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["status"] == "referenced"
 
 
 def test_same_credential_seen_by_another_agent_is_recorded_for_it(aws):

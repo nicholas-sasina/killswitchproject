@@ -132,7 +132,7 @@ def record_tool_output(event: dict, session: dict, tool: str, status: int, reply
                                status="referenced" if referenced else "seen", source_ref=source_ref,
                                report=report if finding.secret_ref in target_refs else None)
         if not is_new:
-            continue  # already in the ledger: last_seen/seen_in updated, nothing new to announce
+            continue  # already in the ledger: last_seen/last_call updated, nothing new to announce
         suffix = "; the agent got a reference" if referenced else ""
         if report and finding.secret_ref in target_refs:
             suffix = f"; report mode: {report}"

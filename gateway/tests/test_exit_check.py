@@ -82,7 +82,7 @@ def test_clean_message_passes_and_receiver_inherits_the_senders_ledger(aws):
     # Later messages hand over nothing new: the entries are updated, no event is repeated.
     send(session, "send_message", {"to": "agent-beta", "text": "any update?"}, trace="Root=1-b")
     assert len(events(aws)) == 2
-    assert all(r["seen_in"] == {"Root=1-a#1", "Root=1-b#1"} for r in ledger_rows(aws, "agent-beta").values())
+    assert all(r["last_call"] == "Root=1-b#1" for r in ledger_rows(aws, "agent-beta").values())
 
 
 def test_receiver_inherits_only_what_it_does_not_have(aws):
