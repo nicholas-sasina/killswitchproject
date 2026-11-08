@@ -17,6 +17,7 @@ from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 from .assets import REPO, lambda_asset
+from .dashboard import hosted_dashboard_url
 
 # Fixed resource names live in the contracts package; infra has no dependency on it, so add its path.
 sys.path.insert(0, str(REPO / "contracts" / "python"))
@@ -132,12 +133,19 @@ class BurnApiStack(cdk.Stack):
             )
             fn.add_environment(names.PEOPLE_AUTH_ENV, "1")
 
+        origins = [DASHBOARD_ORIGIN]
+        hosted = hosted_dashboard_url(self)  # None unless burn:dashboard_hosted=on
+        if hosted:
+            # The hosted dashboard's origin, for API Gateway's CORS and for the Lambda's own preflight answer.
+            origins.append(hosted)
+            fn.add_environment(names.DASHBOARD_ORIGIN_ENV, hosted)
+
         api = apigw.HttpApi(
             self, "Api", api_name="burn-api",
             default_integration=integration,
             default_authorizer=authorizer,
             cors_preflight=apigw.CorsPreflightOptions(
-                allow_origins=[DASHBOARD_ORIGIN],
+                allow_origins=origins,
                 allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.PUT,
                                apigw.CorsHttpMethod.DELETE, apigw.CorsHttpMethod.OPTIONS],
                 allow_headers=["content-type", "authorization", names.DEMO_TOKEN_HEADER],

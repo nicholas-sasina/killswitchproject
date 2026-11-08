@@ -6,7 +6,8 @@ Separate from the burn-badges pool (machine clients for agent sessions), which i
 - A managed login domain whose prefix embeds the account id, like the badges domain.
 - A public app client for the CLI and the dashboard: no secret, authorization-code grant
   (the clients use PKCE), scopes openid, email and profile, and the two loopback addresses as
-  callback and sign-out URLs. It accepts no password flow.
+  callback and sign-out URLs, plus the hosted dashboard's root with burn:dashboard_hosted=on.
+  It accepts no password flow.
 - A confidential app client, burn-automation, for scripts that run without a person (e2e, smoke).
   It accepts only the admin password flow (AdminInitiateAuth, which needs AWS credentials) and
   refresh, and no OAuth flow.
@@ -21,6 +22,7 @@ from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 from .assets import REPO
+from .dashboard import hosted_dashboard_url
 
 # Fixed resource names live in the contracts package; infra has no dependency on it, so add its path.
 sys.path.insert(0, str(REPO / "contracts" / "python"))
@@ -51,6 +53,10 @@ class BurnPeopleStack(cdk.Stack):
             cognito_domain=cognito.CognitoDomainOptions(domain_prefix=f"burn-people-{cdk.Aws.ACCOUNT_ID}"),
         )
 
+        redirects = list(REDIRECTS)
+        hosted = hosted_dashboard_url(self)  # None unless burn:dashboard_hosted=on
+        if hosted:
+            redirects.append(f"{hosted}/")  # the hosted dashboard signs in and out at its root
         public = pool.add_client(
             "Public",
             user_pool_client_name="burn-people",
@@ -61,8 +67,8 @@ class BurnPeopleStack(cdk.Stack):
             o_auth=cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(authorization_code_grant=True, implicit_code_grant=False),
                 scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
-                callback_urls=REDIRECTS,
-                logout_urls=REDIRECTS,
+                callback_urls=redirects,
+                logout_urls=redirects,
             ),
             supported_identity_providers=[cognito.UserPoolClientIdentityProvider.COGNITO],
             id_token_validity=cdk.Duration.hours(1),

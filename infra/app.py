@@ -13,6 +13,7 @@ import os
 import aws_cdk as cdk
 
 from burn_infra.burn_api import BurnApiStack
+from burn_infra.dashboard import DASHBOARD_HOSTED_CONTEXT, BurnDashboardStack
 from burn_infra.data import BurnDataStack
 from burn_infra.egress import BurnEgressStack
 from burn_infra.gateway import BurnGatewayStack
@@ -36,6 +37,10 @@ api = BurnApiStack(app, "BurnApi", env=env)      # Burn API
 if app.node.try_get_context("burn:people_auth") == "on":
     api.add_stack_dependency(people)  # deploy order only: with sign-in on, the API reads the people values from SSM
 BurnSiteStack(app, "BurnSite", env=env)          # public website (S3 + CloudFront)
+dashboard = BurnDashboardStack(app, "BurnDashboard", env=env)  # hosted dashboard (S3 + CloudFront)
+if app.node.try_get_context(DASHBOARD_HOSTED_CONTEXT) == "on":
+    for stack in (people, api):
+        stack.add_stack_dependency(dashboard)  # deploy order only: both read the dashboard's address from SSM
 
 for stack in app.node.children:
     if isinstance(stack, cdk.Stack):

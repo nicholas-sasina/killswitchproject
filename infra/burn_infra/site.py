@@ -62,10 +62,11 @@ class StaticSite(Construct):
     """A private S3 bucket behind a CloudFront distribution, filled from a built folder.
 
     name labels the distribution and its headers policy in the console. source_dir is the built
-    folder; it is uploaded only if it has an index.html.
+    folder; it is uploaded only if it has an index.html. None never uploads anything, and leaves the
+    files already uploaded.
     """
 
-    def __init__(self, scope: Construct, construct_id: str, *, name: str, source_dir: Path,
+    def __init__(self, scope: Construct, construct_id: str, *, name: str, source_dir: Path | None,
                  content_security_policy: str = SITE_CSP) -> None:
         super().__init__(scope, construct_id)
 
@@ -120,6 +121,8 @@ class StaticSite(Construct):
 
         self.url = f"https://{self.distribution.distribution_domain_name}"
 
+        if source_dir is None:
+            return
         if (source_dir / "index.html").is_file():
             self._upload(source_dir)
         else:
