@@ -130,11 +130,13 @@ def handler(event, context=None):
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     if http["method"] == "OPTIONS":
         return _preflight(headers)
-    if not auth.is_authorized(headers):
+    # Parsed once: auth decides on the same body the route then acts on.
+    request_body = _json_body(event)
+    if not auth.allows(http["method"], http["path"], headers, request_body):
         return _resp(401, {"error": "missing or invalid x-burn-demo-token"})
     try:
         status, body = route(http["method"], http["path"], event.get("queryStringParameters") or {},
-                             _json_body(event))
+                             request_body)
     except sessions.NotFound as exc:
         return _resp(404, {"error": f"not found: {exc}"})
     except errors.ApiError as exc:
