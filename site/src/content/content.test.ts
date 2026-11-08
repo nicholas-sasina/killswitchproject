@@ -15,14 +15,6 @@ import {
   pipelineStepAt,
   pipelineStepDone,
 } from "./pipeline";
-import {
-  CALL_PRESETS,
-  EXAMPLE_CALLS_PER_DAY,
-  callsToSlider,
-  formatUsd,
-  monthlyCost,
-  sliderToCalls,
-} from "./pricing";
 
 describe("heroStep", () => {
   it("has six steps on a 3.2 s beat", () => {
@@ -191,37 +183,5 @@ describe("pipelineState", () => {
       credential: true,
       done: true,
     });
-  });
-});
-
-describe("pricing", () => {
-  it("prices the worked example the page quotes", () => {
-    expect(monthlyCost(EXAMPLE_CALLS_PER_DAY)).toBe(63);
-    expect(formatUsd(monthlyCost(EXAMPLE_CALLS_PER_DAY))).toBe("$63");
-  });
-
-  it("formats whole dollars and cents", () => {
-    expect(formatUsd(monthlyCost(10_000))).toBe("$15");
-    expect(formatUsd(monthlyCost(250_000))).toBe("$375");
-    expect(formatUsd(monthlyCost(1_000))).toBe("$1.50");
-    expect(formatUsd(0.05)).toBe("$0.05");
-    expect(formatUsd(monthlyCost(1_000_000))).toBe("$1,500");
-  });
-
-  it("follows the price constant", () => {
-    expect(monthlyCost(42_000, 0.1)).toBe(126);
-  });
-
-  it("treats nonsense input as zero calls", () => {
-    expect(monthlyCost(-5)).toBe(0);
-    expect(monthlyCost(Number.NaN)).toBe(0);
-  });
-
-  it("round-trips the presets through the log slider", () => {
-    for (const calls of CALL_PRESETS) {
-      expect(sliderToCalls(callsToSlider(calls))).toBe(calls);
-    }
-    expect(sliderToCalls(0)).toBe(1_000);
-    expect(sliderToCalls(1000)).toBe(1_000_000);
   });
 });

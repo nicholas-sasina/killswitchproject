@@ -39,7 +39,6 @@ describe("App", () => {
       "Built for agents that come and go",
       "What Burn won’t catch",
       "What each AWS service does",
-      "Priced per tool call",
       "Burn one agent, not the whole swarm.",
     ]);
   });
@@ -73,13 +72,5 @@ describe("App", () => {
     act(() => fireEvent.click(step4));
     expect(screen.getByText("Step 4 of 6")).toBeTruthy();
     expect(screen.getByText("Burn contains that worker only.")).toBeTruthy();
-  });
-
-  it("prices calls with the calculator", () => {
-    render(<App />);
-    act(() =>
-      fireEvent.click(screen.getByRole("button", { name: "250,000 a day" })),
-    );
-    expect(screen.getByText("$375")).toBeTruthy();
   });
 });
