@@ -24,8 +24,16 @@ trips Burn's existing canary path: the provider records it and dispatches the
 incident. This script never calls Burn and takes no shortcut that would cause a
 burn - the burn, if any, is Burn reacting to the attacker on its own.
 
+It does not matter how the text reached the attacker. The same pipeline runs
+whether it arrived over HTTP (the listener) or the attacker already has it and
+pastes it in (stdin): extract key-shaped tokens, present each to the provider,
+report refused/accepted and a fingerprint.
+
     make attack            # listen on 127.0.0.1:8099
     make attack PORT=9000
+    pbpaste | make attack  # the attacker already has the text; try it
+    make attack FROM=-     # read the leaked text from stdin
+    make attack FROM=leak.txt
 """
 import argparse
 import hashlib
@@ -33,6 +41,7 @@ import os
 import re
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 HOST = "127.0.0.1"  # local stand-in only; never bind a routable interface
 DEFAULT_PORT = 8099
@@ -130,6 +139,14 @@ def make_server(port: int, provider_url: str, present=present_to_provider) -> HT
     return server
 
 
+def read_leaked(source: str) -> str:
+    """The leaked text, from '-' (stdin) or a file path. The attacker already has
+    it; we do not care how it got out."""
+    if source == "-":
+        return sys.stdin.read()
+    return Path(source).read_text(encoding="utf-8", errors="replace")
+
+
 def provider_url_from_env() -> str:
     """BURN_PROVIDER_URL, else the SSM parameter the minter stack published."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -142,8 +159,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--provider-url", default="", help="default: BURN_PROVIDER_URL or SSM /burn/provider/url")
+    parser.add_argument("--from", dest="source", default="",
+                        help="read the leaked text from a file, or '-' for stdin, instead of listening")
     args = parser.parse_args()
     provider_url = args.provider_url or provider_url_from_env()
+
+    # One-shot: the attacker already has the text (piped in or a file). Same pipeline.
+    source = args.source or ("-" if not sys.stdin.isatty() else "")
+    if source:
+        process_payload(read_leaked(source), provider_url)
+        return 0
+
     server = make_server(args.port, provider_url)
     print(f"attacker listener on http://{HOST}:{args.port}{AUDIT_PATH}")
     print(f"will present any key it receives to {provider_url}/v1/whoami as an outsider (no session proof)")

@@ -84,6 +84,25 @@ def test_present_uses_whoami_and_bearer_with_no_session_proof():
     assert not any(k.lower() == "x-burn-session-proof" for k in seen["headers"])
 
 
+def test_reads_leaked_text_from_stdin(monkeypatch):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"here is the backup\nPROVIDER_API_KEY={CANARY_SHAPED}\n"))
+    assert attack.read_leaked("-") == f"here is the backup\nPROVIDER_API_KEY={CANARY_SHAPED}\n"
+
+
+def test_stdin_pipeline_tries_the_key_and_prints_no_value(monkeypatch, capsys):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"leaked:\n{CANARY_SHAPED}\n"))
+    tried = []
+    results = attack.process_payload(attack.read_leaked("-"), "http://provider.example",
+                                     present=lambda u, t: tried.append(t) or "refused")
+    assert tried == [CANARY_SHAPED]
+    assert results == [("refused", attack.fingerprint(CANARY_SHAPED))]
+    out = capsys.readouterr().out
+    assert attack.fingerprint(CANARY_SHAPED) in out and "refused" in out
+    assert CANARY_SHAPED not in out  # same no-value guarantee as the listener
+
+
 def test_listener_binds_loopback_only():
     server = attack.make_server(0, "http://provider.example")  # port 0: an ephemeral port
     try:

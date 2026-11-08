@@ -101,8 +101,8 @@ proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 swarm: ## Start N deterministic workers under `burn run` in containers (ROLE=worker N=20; ITEMS=10 gives each a task; MOCK=1 for the mock servers)
 	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) --items $(ITEMS) $(if $(MOCK),--mock)
 
-attack: ## Run the attacker's local listener for the attack scenario (127.0.0.1:8099; PORT=... to change)
-	cd agents && uv run python scripts/attack.py --port $(PORT)
+attack: ## Receive the attack scenario's leak and try each key (listens on 127.0.0.1:8099; FROM=- reads stdin, e.g. pbpaste | make attack)
+	cd agents && uv run python scripts/attack.py --port $(PORT) $(if $(FROM),--from "$(FROM)")
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)
