@@ -37,3 +37,28 @@ it("renders an owner's dismissal of a flagged credential", () => {
   render(<EventFeed events={[event]} />);
   expect(screen.getByText("Flag dismissed by owner")).toBeTruthy();
 });
+
+it.each(["person@example.test", "instance:session_123", "system", null])(
+  "shows nullable actor %s in the existing event attribution",
+  (actor) => {
+    render(
+      <EventFeed
+        events={[
+          {
+            event_id: "evt_1",
+            ts: "2026-11-07T12:00:00Z",
+            agent_id: "agent-worker",
+            source: "burn",
+            action: "revoked",
+            actor,
+          },
+        ]}
+      />,
+    );
+    const feed = screen.getByRole("region", { name: "Live events" });
+    expect(feed.textContent).toContain("agent-worker");
+    expect(feed.textContent).toContain("burn");
+    if (actor) expect(feed.textContent).toContain(` · ${actor}`);
+    else expect(feed.textContent).not.toMatch(/null|undefined/);
+  },
+);

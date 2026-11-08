@@ -62,6 +62,7 @@ export interface LedgerEvent {
   // replaced: the session that replaced this burned one. resumed: the burned session this one replaced.
   replaced_by?: string | null;
   replaces?: string | null;
+  actor?: string | null;
 }
 
 export interface AgentState {
@@ -142,6 +143,7 @@ export interface EnrollToken {
   expires_at: string;
   status: "active" | "used_up" | "expired" | "revoked";
   created_at?: string;
+  created_by?: string | null;
 }
 
 export interface Instance {
@@ -164,6 +166,7 @@ export interface Instance {
   replacement?: Replacement | null;
   items_started?: number;
   items_done?: number;
+  created_by?: string | null;
 }
 
 export type ReplacementStatus = "pending" | "linked" | "needs_person";

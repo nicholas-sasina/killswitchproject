@@ -67,6 +67,7 @@ export function EventFeed({ events }: { events: LedgerEvent[] }) {
                   <span className="muted">
                     {" "}
                     · {event.source.replaceAll("_", " ")}
+                    {event.actor && ` · ${event.actor}`}
                   </span>
                 </p>
                 {event.secret_ref && <code>{event.secret_ref}</code>}
