@@ -14,7 +14,8 @@ export type EventAction =
   | "started"
   | "exited"
   | "unregistered"
-  | "canary_used";
+  | "canary_used"
+  | "dismissed";
 export type FlagLevel = "seen" | "attempted" | "reported";
 
 export interface LedgerEvent {
