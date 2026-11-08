@@ -27,10 +27,11 @@ export function Why() {
             tool call even before its keys are rotated.
           </p>
           <p className="fine">
-            In a 2025 SailPoint report, 82% of organizations already used AI
-            agents, 44% had policies to secure them, and 23% said an agent had
-            been tricked into revealing access credentials.{" "}
-            <a href={SURVEY_URL}>Read the report</a>
+            In a 2025 SailPoint survey of security and IT professionals and
+            executives, 82% of organizations already used AI agents, but only
+            44% reported having policies in place to secure them, and 23%
+            reported their AI agents had been tricked into revealing access
+            credentials. <a href={SURVEY_URL}>Read the report</a>
           </p>
         </div>
       </div>
