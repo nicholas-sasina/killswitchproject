@@ -12,6 +12,7 @@ import {
 } from "@testing-library/react";
 import { createPeopleAuth } from "../auth";
 import { App } from "../App";
+import { LocalSignIn } from "./SignIn";
 
 const config = {
   peopleDomain: "people.example.test",
@@ -277,5 +278,33 @@ describe("sign-in screen states", () => {
     expect(screen.getByRole("button", { name: "Try again" }).disabled).toBe(
       false,
     );
+  });
+
+  it("shows the local development screen once per tab", async () => {
+    const view = render(
+      <LocalSignIn>
+        <p>Dashboard</p>
+      </LocalSignIn>,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Local development" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Dashboard")).toBeNull();
+    act(() => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue as admin" }),
+      );
+    });
+    expect(screen.getByText("Dashboard")).toBeTruthy();
+    view.unmount();
+    render(
+      <LocalSignIn>
+        <p>Dashboard</p>
+      </LocalSignIn>,
+    );
+    expect(screen.getByText("Dashboard")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Continue as admin" }),
+    ).toBeNull();
   });
 });

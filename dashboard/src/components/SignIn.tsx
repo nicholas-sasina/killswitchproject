@@ -15,6 +15,9 @@ import "./signin.css";
 export const SITE_URL: string =
   import.meta.env.VITE_SITE_URL?.trim() || "http://localhost:5174/";
 
+/** Set for the tab once someone continues past the local development screen. */
+const LOCAL_CONTINUED_KEY = "burn.local.continued";
+
 const FLAME =
   "M10.2 1C11.3 4.6 16 6.9 16 12.6A7 7 0 0 1 2 12.9c0-3 1.6-5.1 3.4-6.5.1 2.3 1.1 3.8 2.7 4.4C7.4 7.2 8.4 3.8 10.2 1Z";
 
@@ -182,6 +185,51 @@ export function SignIn({
         You&rsquo;ll sign in on Amazon Cognito&rsquo;s secure page and come
         straight back.
       </p>
+    </Stage>
+  );
+}
+
+function hasContinued(): boolean {
+  try {
+    return sessionStorage.getItem(LOCAL_CONTINUED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Local development (VITE_BURN_LOCAL_DEV=1) has no people sign-in: requests
+ * carry the development token. This screen only marks the way in, once per
+ * tab, so local runs show the same hand-off as a real sign-in.
+ */
+export function LocalSignIn({ children }: { children: ReactNode }) {
+  const [continued, setContinued] = useState(hasContinued);
+  if (continued) return children;
+  return (
+    <Stage>
+      <h1 id="signin-title" className="signin-title">
+        Local development
+      </h1>
+      <p className="signin-lede">
+        Requests use the development token, which acts as admin. Nobody signs
+        in.
+      </p>
+      <button
+        className="signin-button"
+        type="button"
+        onClick={() =>
+          handOff(() => {
+            try {
+              sessionStorage.setItem(LOCAL_CONTINUED_KEY, "1");
+            } catch {
+              /* Without storage, the screen shows again on reload. */
+            }
+            setContinued(true);
+          })
+        }
+      >
+        Continue as admin
+      </button>
     </Stage>
   );
 }
