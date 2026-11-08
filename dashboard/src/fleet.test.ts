@@ -149,4 +149,26 @@ describe("containedFleet", () => {
     expect(bySession.sess_3.revokedAt).toBeUndefined();
     expect(bySession.sess_3.note).toBeUndefined();
   });
+
+  it("matches an event that names no session by agent id, only when that agent has one burned session", () => {
+    const one = mergeFleet(
+      [],
+      [instance({ session_id: "sess_1", status: "revoked" })],
+    );
+    const event = revoked(null, "2026-11-08T05:03:00.000Z", "evt_03");
+    expect(containedFleet(one, [event])[0].revokedAt).toBe(
+      "2026-11-08T05:03:00.000Z",
+    );
+    const two = mergeFleet(
+      [],
+      [
+        instance({ session_id: "sess_1", status: "revoked" }),
+        instance({ session_id: "sess_2", status: "revoked" }),
+      ],
+    );
+    expect(containedFleet(two, [event]).map((item) => item.revokedAt)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
 });
