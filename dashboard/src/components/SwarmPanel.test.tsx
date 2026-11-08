@@ -169,8 +169,17 @@ describe("agent enrollment", () => {
       within(dialog).getByRole("button", { name: "Close" }),
     );
     expect(within(dialog).getAllByRole("checkbox").length).toBe(
-      toolContract.tools.length + 2 + 4,
+      toolContract.tools.length + 2 + 4 + 2,
     );
+    expect(
+      (screen.getByLabelText("Plant a canary credential") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    const autoBurn = screen.getByLabelText(
+      "Burn automatically if the canary is used",
+    ) as HTMLInputElement;
+    expect(autoBurn.checked).toBe(true);
+    expect(autoBurn.disabled).toBe(false);
     change("Role name", "worker");
     fireEvent.click(screen.getByLabelText("read_ticket"));
     fireEvent.click(screen.getByLabelText("api_key"));
@@ -199,6 +208,8 @@ describe("agent enrollment", () => {
       may_spawn: ["planner"],
       egress: ["api.example.com", "*.example.org"],
       owner: "platform",
+      canaries: true,
+      auto_burn: true,
       managed_by: "ui",
     });
     expect(
@@ -272,6 +283,32 @@ describe("agent enrollment", () => {
     expect(fixture.calls("/roles", "POST")).toHaveLength(0);
   });
 
+  it.each([
+    { canaries: true, auto_burn: false },
+    { canaries: false, auto_burn: true },
+    { canaries: false, auto_burn: false },
+  ])(
+    "sends canaries=$canaries and auto_burn=$auto_burn when creating a role",
+    async (settings) => {
+      const fixture = setup();
+      await show(fixture);
+      await click("Add agent");
+      change("Role name", "worker");
+      const canary = screen.getByLabelText("Plant a canary credential");
+      const autoBurn = screen.getByLabelText(
+        "Burn automatically if the canary is used",
+      ) as HTMLInputElement;
+      if (!settings.auto_burn) fireEvent.click(autoBurn);
+      if (!settings.canaries) fireEvent.click(canary);
+      expect(autoBurn.disabled).toBe(!settings.canaries);
+      expect(autoBurn.checked).toBe(settings.auto_burn);
+      await click("Create role and token");
+      expect(
+        JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
+      ).toMatchObject(settings);
+    },
+  );
+
   it.each(["Bad Name", "-worker", "Upper", "a".repeat(33)])(
     "rejects invalid role name %s",
     async (name) => {
@@ -327,6 +364,35 @@ describe("agent enrollment", () => {
 });
 
 describe("role instances", () => {
+  it("labels only roles with report-only or no-canary settings", async () => {
+    const fixture = setup([
+      role("defaults"),
+      { name: "omitted", tools: [], managed_by: "code" },
+      { ...role("report", "code"), auto_burn: false },
+      { ...role("none"), canaries: false },
+      { ...role("both", "scenario"), canaries: false, auto_burn: false },
+    ]);
+    await show(fixture);
+    for (const name of ["defaults", "omitted"]) {
+      const group = within(
+        screen.getByRole("region", { name: `Role ${name}` }),
+      );
+      expect(group.queryByText("report-only")).toBeNull();
+      expect(group.queryByText("no canary")).toBeNull();
+    }
+    const report = within(screen.getByRole("region", { name: "Role report" }));
+    expect(report.getByText("report-only")).toBeTruthy();
+    expect(report.queryByText("no canary")).toBeNull();
+    const none = within(screen.getByRole("region", { name: "Role none" }));
+    expect(none.getByText("no canary")).toBeTruthy();
+    expect(none.queryByText("report-only")).toBeNull();
+    const both = within(screen.getByRole("region", { name: "Role both" }));
+    expect(both.getByText("report-only")).toBeTruthy();
+    expect(both.getByText("no canary")).toBeTruthy();
+    expect(screen.getAllByText("report-only")).toHaveLength(2);
+    expect(screen.getAllByText("no canary")).toHaveLength(2);
+  });
+
   it("groups instances with cross-role parent context, status, last seen and exposures", async () => {
     const parent = instance("parent", "planner");
     const child = instance("child", "worker", {
