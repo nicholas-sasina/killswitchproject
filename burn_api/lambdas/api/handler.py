@@ -132,11 +132,30 @@ def _preflight(headers: dict):
     return {"statusCode": 204, "headers": cors, "body": ""}
 
 
+def _qualifier(context) -> str | None:
+    """The alias or version this invocation named, from arn:aws:lambda:<region>:<acct>:function:<name>[:<q>]."""
+    parts = (getattr(context, "invoked_function_arn", None) or "").split(":")
+    return parts[7] if len(parts) == 8 else None
+
+
+def _is_canary_incident(event) -> bool:
+    # API Gateway events always carry requestContext; a canary incident never does.
+    return isinstance(event, dict) and "canary_incident" in event and "requestContext" not in event
+
+
 def handler(event, context=None):
-    if "canary_incident" in event and "requestContext" not in event:
-        # Direct async invoke from the mock provider (IAM-only; API Gateway events always
-        # carry requestContext). The payload is re-verified, never trusted: see canary.py.
-        return canary.handle_incident(event["canary_incident"])
+    # The mock provider is internet-facing and may invoke only the canary alias (IAM), which serves canary
+    # incidents and nothing else. The unqualified function, which API Gateway invokes, refuses them. So a
+    # forged HTTP-shaped event from the provider never reaches the routes or auth.
+    if _qualifier(context) == names.BURN_API_CANARY_ALIAS:
+        if _is_canary_incident(event):
+            # The payload is re-verified, never trusted: see canary.py.
+            return canary.handle_incident(event["canary_incident"])
+        print("refused: the canary alias serves canary incidents only")
+        return {"outcome": "refused", "reason": "the canary alias serves canary incidents only"}
+    if _is_canary_incident(event):
+        print("refused: a canary incident on the unqualified function")
+        return {"outcome": "refused", "reason": "canary incidents are accepted only on the canary alias"}
     http = event["requestContext"]["http"]
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     if http["method"] == "OPTIONS":

@@ -37,6 +37,15 @@ if "badges" not in sys.modules:  # the identity helper is bundled at deploy time
     sys.modules["badges"] = _stub
 
 import boto3  # noqa: E402
+from burn_contracts import names  # noqa: E402
+
+
+class _Context:
+    """The bit of a Lambda context the Burn API reads: which function (and qualifier) was invoked."""
+
+    def __init__(self, invoked_function_arn: str):
+        self.invoked_function_arn = invoked_function_arn
+
 
 AGENT_POLICY = {"Version": "2012-10-17", "Statement": [
     {"Effect": "Allow", "Action": "s3:ListAllMyBuckets", "Resource": "*"}]}
@@ -110,8 +119,10 @@ class Stack:
 
     def invoke(self, function_name, payload, wait):
         import handler, minter_app  # noqa: E401
-        if function_name == "burn-api":
-            self.incidents.append(handler.handler(payload))  # async in AWS; inline here
+        if function_name.split(":")[0] == "burn-api":
+            # The Lambda context says which qualifier was invoked, as it does in AWS.
+            context = _Context(f"arn:aws:lambda:us-east-1:000000000000:function:{function_name}")
+            self.incidents.append(handler.handler(payload, context))  # async in AWS; inline here
             return None
         if function_name == "burn-minter":
             return minter_app.handler(payload)
@@ -121,6 +132,8 @@ class Stack:
         import dispatch, minter_client  # noqa: E401
         setattr_(minter_client, "call", self.minter_call)
         setattr_(dispatch, "invoke", self.invoke)
+        # infra points the provider at the Burn API's canary alias, the only qualifier it may invoke
+        setattr_(dispatch, "burn_api_function", lambda: names.BURN_API_CANARY_TARGET)
 
     # ---- simulated steps ------------------------------------------------------------------
     def api(self, method, path, body=None):
