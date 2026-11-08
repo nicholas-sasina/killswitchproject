@@ -1,0 +1,288 @@
+/* ===========================================================================
+   Sign-in: the room between the website and the dashboard.
+   ---------------------------------------------------------------------------
+   The website's hero is a dark stage with a dot grid, and its Sign in fades
+   the page to that night colour before it leaves. This screen starts on the
+   same stage, so the two join without a flash: one white card in the middle.
+   The red comes from the dashboard's own ember token, so the sign-in screen
+   and the dashboard share one red. The stage takes the night theme's value
+   and the card the paper theme's, whatever the system theme is.
+   =========================================================================== */
+
+.signin {
+  --si-night: #18181b;
+  --si-dot: #3f3f46;
+  --si-ink: #18181b;
+  --si-ink-hover: #2e2e33;
+  --si-body: #5a5f66;
+  --si-muted: #71717a;
+  --si-hairline: #e4e4e7;
+  --si-ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 48px 16px;
+  overflow: hidden;
+  background: var(--si-night);
+  color: var(--si-ink);
+  font-family: var(--f-sans);
+}
+
+/* No paper past the stage when the page overscrolls. The dashboard
+   brings its own paper back. */
+:root:has(.signin) {
+  background: #18181b;
+}
+
+/* The website's dot grid: 18 px apart, fading out towards the edges. */
+.signin::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Ccircle cx='9' cy='9' r='1.25' fill='%233f3f46'/%3E%3C/svg%3E");
+  background-size: 18px 18px;
+  background-position: center;
+  mask-image: radial-gradient(
+    ellipse 62% 58% at 50% 50%,
+    #000 35%,
+    transparent 100%
+  );
+}
+
+.signin-card {
+  width: min(400px, 100%);
+  padding: 36px 32px 24px;
+  border-radius: 16px;
+  background: #ffffff;
+  color: var(--si-ink);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  view-transition-name: signin-card;
+}
+
+/* The website's mark: the flame and "BURN.". */
+.signin-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 32px;
+  color: var(--si-ink);
+}
+
+.signin-mark svg {
+  display: block;
+  width: 18px;
+  height: 22px;
+  color: var(--c-ember);
+}
+
+.signin-word {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.signin-dot {
+  color: var(--c-ember);
+}
+
+.signin-title {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--si-ink);
+}
+
+.signin-lede {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--si-body);
+  text-wrap: pretty;
+}
+
+.signin-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 46px;
+  margin-top: 24px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--si-ink);
+  color: #fafafa;
+  font: 600 15px/1 var(--f-sans);
+  transition: background-color 160ms ease;
+}
+
+.signin-button:hover:not(:disabled) {
+  background: var(--si-ink-hover);
+}
+
+/* Disabled only while sign-in opens, so it reads as working, not refused. */
+.signin-button:disabled {
+  opacity: 0.72;
+  cursor: progress;
+}
+
+.signin-note {
+  margin-top: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--si-muted);
+}
+
+.signin-card .error {
+  margin: 20px 0 0;
+}
+
+/* Returning from Cognito: a hairline that fills while the code is exchanged. */
+.signin-progress {
+  height: 2px;
+  margin-top: 24px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--si-hairline);
+}
+
+.signin-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--si-ink);
+  transform: scaleX(0.6);
+  transform-origin: left;
+}
+
+/* Configuration missing: the dashboard's own notice, set inside the card. */
+.signin-card .setup {
+  margin: 14px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.signin-card .setup h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--si-ink);
+}
+
+.signin-card .setup p {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--si-body);
+}
+
+.signin-back {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--si-hairline);
+  font-size: 14px;
+}
+
+.signin-back a {
+  color: var(--si-ink);
+  font-weight: 500;
+  text-underline-offset: 3px;
+}
+
+.signin-back a:hover {
+  color: var(--c-ember-text);
+}
+
+@media (max-width: 480px) {
+  .signin-card {
+    padding: 28px 24px 20px;
+  }
+  .signin-mark {
+    margin-bottom: 26px;
+  }
+  .signin-title {
+    font-size: 24px;
+  }
+}
+
+/* --- Motion -------------------------------------------------------------
+   The card arrives once. The hand-off to the dashboard is a view
+   transition: the card shrinks into the dashboard's brand and fades while
+   the dashboard fades in. handoff.ts skips it when the browser has no view
+   transitions or motion is reduced, and the swap is then instant.
+   ------------------------------------------------------------------------ */
+
+.signin-handoff .sidebar-brand {
+  view-transition-name: signin-card;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .signin-card {
+    animation: signin-arrive 420ms var(--si-ease) both;
+  }
+
+  .signin-progress > span {
+    animation: signin-progress 2400ms var(--si-ease) both;
+  }
+
+  ::view-transition-group(signin-card) {
+    animation-duration: 480ms;
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.1, 1);
+  }
+
+  ::view-transition-old(signin-card),
+  ::view-transition-new(signin-card) {
+    height: 100%;
+    object-fit: contain;
+  }
+
+  ::view-transition-old(signin-card) {
+    animation: signin-fade-out 240ms ease-in both;
+  }
+
+  ::view-transition-new(signin-card) {
+    animation: signin-fade-in 320ms 160ms ease-out both;
+  }
+
+  ::view-transition-old(root) {
+    animation: signin-fade-out 320ms ease-in both;
+  }
+
+  ::view-transition-new(root) {
+    animation: signin-fade-in 360ms 120ms ease-out both;
+  }
+}
+
+@keyframes signin-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes signin-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(0.85);
+  }
+}
+
+@keyframes signin-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes signin-fade-in {
+  from {
+    opacity: 0;
+  }
+}
