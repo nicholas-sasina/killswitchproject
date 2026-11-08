@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { BurnApi } from "../api";
 import type { Instance, Role, ScopedBurnResult } from "../contracts";
+import type { JoinUrls } from "../join";
 import { usePolling } from "../polling";
 import { plural } from "../plural";
 import { AddAgent } from "./AddAgent";
@@ -14,9 +15,12 @@ export function SwarmPanel({
   enabled,
   defaultStatus = "",
   sharedInstances,
+  joinUrls,
 }: {
   api: BurnApi;
   enabled: boolean;
+  /** Passed to the join commands: what burn run needs besides the token. */
+  joinUrls?: JoinUrls;
   /**
    * The instance list from a poll the page already runs. When given, the
    * panel does not poll /instances itself: each call scans the sessions and
@@ -271,6 +275,7 @@ export function SwarmPanel({
           roles={roles}
           instances={instances}
           role={adding.role}
+          joinUrls={joinUrls}
           onCreated={(role) => setCreated((current) => [...current, role])}
           onClose={() => setAdding(undefined)}
         />
