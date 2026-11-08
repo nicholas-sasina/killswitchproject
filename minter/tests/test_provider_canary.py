@@ -13,6 +13,7 @@ import minter_app
 import provider_app
 import session_proof
 from burn_contracts.names import instance_agent_id
+from conftest import fingerprint_rows
 
 AGENT, SESSION = instance_agent_id("worker", "3fa91c"), "sess_0123456789abcdef"
 
@@ -49,7 +50,7 @@ def test_canary_never_authenticates_and_looks_like_an_unknown_key(canary, dispat
 
 def test_canary_rejected_even_by_a_provider_that_ignores_the_canary_marker(canary, tables, dispatched):  # 4
     meta, value = canary
-    rows = [r for r in tables["fingerprints"].scan()["Items"] if r["secret_ref"] == meta["canary_ref"]]
+    rows = [r for r in fingerprint_rows(tables) if r["secret_ref"] == meta["canary_ref"]]
     for row in rows:  # an older provider build never looked at `canary`
         tables["fingerprints"].put_item(Item={k: v for k, v in row.items() if k != "canary"})
     assert whoami(value) == (401, {"error": "invalid key"})  # secret_type is not api_key
