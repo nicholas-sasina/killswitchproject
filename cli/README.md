@@ -104,7 +104,8 @@ writes a `.claude.json` that connects Burn's MCP server, skips onboarding and tr
 `.claude/settings.json` that allows the `mcp__burn` tools, which the role already limits. The server's entry says
 `${BURN_MCP_URL}` and `Bearer ${BURN_LOCAL_TOKEN}`, which Claude Code expands, so no token is written to a file.
 Your own `~/.claude` is never read or changed. Because the directory is trusted, a project's own `.claude`
-settings, hooks included, run without the trust prompt, so start it only in a directory you trust.
+settings, its hooks and permission rules included, apply without the trust prompt, so start it only in a directory
+you trust.
 
 Under another command, such as a wrapper script, no preset applies. Then put the server in a `.mcp.json` in the
 directory it runs in (Claude Code expands `${VAR}` in `url` and `headers`), and allow its tools with
@@ -127,7 +128,8 @@ that does:
 ```bash
 burn run --role coder -- sh -c 'exec codex -c mcp_servers.burn.url="$BURN_MCP_URL" -c mcp_servers.burn.bearer_token_env_var=BURN_LOCAL_TOKEN'
 ```
-This gives Codex Burn's tools but not a model: under `burn run` its sign-in and `OPENAI_API_KEY` do not reach it.
+This gives Codex Burn's tools but not a model: under `burn run` its sign-in does not reach it, and `OPENAI_API_KEY`
+reaches it only if you pass it with `--allow-env` (see [Models](#models)).
 
 **OpenAI Agents SDK** (`pip install "openai-agents[litellm]"`):
 ```python
@@ -200,9 +202,10 @@ commands, `burn run` strips the environment, so set non-secret settings inside t
 burn run --role coder -- env AWS_REGION_NAME=us-east-1 python agent.py   # LiteLLM, for the Agents SDK
 ```
 Other providers' keys, such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, are removed like any other secret.
-`--allow-env NAME` (repeatable) passes one through, and `burn run` warns about each one:
+`--allow-env NAME` (repeatable) passes one through, and `burn run` warns about each one. It goes before the command,
+since everything after the command is the command's own:
 ```bash
-burn run --role coder --allow-env OPENAI_API_KEY -- python agent.py
+burn run --allow-env OPENAI_API_KEY python agent.py
 # burn: OPENAI_API_KEY passes through to the agent; a burn cannot revoke it
 ```
 That is the trade-off: a burn revokes the instance's own keys, not yours, so an agent that copied your key keeps

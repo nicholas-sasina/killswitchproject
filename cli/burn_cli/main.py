@@ -24,11 +24,15 @@ containers, give a join token instead (--token, --token-stdin or BURN_JOIN_TOKEN
 
 burn run joins with the join token, fetches the instance's own credentials, and
 starts COMMAND with only those, and with only an allow-list of your environment (PATH, LANG, LC_*, TZ, TERM,
-the AWS region and CA-bundle variables): every other variable, credentials included, is removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
+the AWS region and CA-bundle variables): every other variable, credentials included, is removed unless you pass
+it with --allow-env NAME, before the command (a burn cannot revoke what you pass). The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
 (POST {role, command} to start a child instance), BURN_PROGRESS_URL (POST {item, state} to report task
 progress; a start is answered once Burn has recorded it), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE. BURN_TASK and BURN_RESUME
 are passed on from your environment only if they hold item ids; otherwise burn run refuses to start.
 It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
+
+For `claude`, burn run also sets up Claude Code in the instance's new HOME: Burn's tools, no first-run prompts,
+the current directory trusted, and Bedrock with the instance's own AWS key when the role has aws_key.
 
 HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved clients route through the
 egress proxy. They are not containment: a process can ignore them. Containment is the network rule in the
