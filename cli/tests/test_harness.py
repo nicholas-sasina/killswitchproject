@@ -87,6 +87,7 @@ def test_claude_gets_bedrock_with_the_instances_own_key(stack, fake_claude):
     for name in ("ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
         assert env[name] == MODEL, name
     assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+    assert env["ENABLE_TOOL_SEARCH"] == "false"  # Burn's tools are sent with every request, never deferred
     assert env["AWS_ACCESS_KEY_ID"].startswith("AKIA") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
     for name in ("AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_API_KEY"):
         assert name not in env, name

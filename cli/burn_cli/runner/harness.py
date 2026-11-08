@@ -54,6 +54,9 @@ CLAUDE = Preset(
         "ANTHROPIC_DEFAULT_OPUS_MODEL": BEDROCK_MODEL,
         # No auto-update into a HOME that is thrown away at exit, and no telemetry the egress proxy would refuse.
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        # Burn's few tools go straight into the request. Behind tool search, Haiku on Bedrock found them but
+        # could not call them.
+        "ENABLE_TOOL_SEARCH": "false",
     },
     files=_claude_files,
     needs_aws_key=True,
