@@ -55,6 +55,24 @@ def test_revoked_badge_is_refused_on_the_next_call(aws):
     assert event["tool"] == "list_tickets"
 
 
+def test_an_exited_sessions_badge_is_refused_like_a_revoked_one(aws):
+    """A restart ends the previous session as exited, not revoked; only an active session may call."""
+    session = put_session(aws)
+    body = tool_call("list_tickets", {})
+    aws.Table("burn-sessions").update_item(
+        Key={"session_id": session["session_id"]},
+        UpdateExpression="SET #s = :e", ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":e": "exited"},
+    )
+    out = interceptor.handler(request_event(body, session["client_id"]), None)
+
+    result = reply_body(out)["result"]
+    assert result["isError"] is True and result["content"][0]["text"].startswith("BURN: access refused")
+    assert "transformedGatewayRequest" not in out["mcp"]
+    [event] = events(aws)
+    assert event["action"] == "refused" and event["session_id"] == session["session_id"]
+
+
 def test_unknown_badge_is_refused_for_any_method(aws):
     out = interceptor.handler(request_event(rpc("tools/list"), "client-nobody-knows"), None)
 
