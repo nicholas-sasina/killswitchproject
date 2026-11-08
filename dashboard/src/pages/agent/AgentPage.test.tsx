@@ -320,6 +320,23 @@ describe("AgentPage", () => {
     expect(screen.getByRole("region", { name: "Finished" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Burn / })).toBeNull();
   });
+
+  it("says a scenario agent that never started a session has nothing to burn", () => {
+    show(
+      "agent-alpha",
+      makeConsole({
+        instances: [],
+        events: [],
+        agents: [{ agent_id: "agent-alpha", role: "alpha", status: "idle" }],
+      }),
+    );
+    expect(
+      screen.getByRole("region", { name: "Finished" }).textContent,
+    ).toContain(
+      "alpha-01 has not started a session, so there is nothing to burn.",
+    );
+    expect(screen.queryByRole("button", { name: /^Burn / })).toBeNull();
+  });
 });
 
 describe("AgentPage for a replacement", () => {

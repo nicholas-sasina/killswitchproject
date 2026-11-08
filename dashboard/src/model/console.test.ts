@@ -154,4 +154,40 @@ describe("the console model", () => {
       ["reader-01", "scenario"],
     ]);
   });
+
+  it("counts a scenario agent with no active session as finished, not running", () => {
+    const scenario = buildConsole({
+      fleet: mergeFleet(
+        [
+          // Never started a session.
+          { agent_id: "agent-alpha", role: "alpha", status: "idle" },
+          // Its latest session ended; the API reads that as idle too.
+          {
+            agent_id: "agent-beta",
+            role: "beta",
+            status: "idle",
+            session_id: "b1",
+          },
+          {
+            agent_id: "agent-gamma",
+            role: "gamma",
+            status: "active",
+            session_id: "g1",
+          },
+        ],
+        [],
+      ),
+      events: [],
+      now,
+    });
+    expect(scenario.agents.map((agent) => [agent.name, agent.state])).toEqual([
+      ["alpha-01", "finished"],
+      ["beta-01", "finished"],
+      ["gamma-01", "running"],
+    ]);
+    expect(scenario.counts.running).toBe(1);
+    expect(scenario.counts.finished).toBe(2);
+    expect(roleCounts(scenario, "alpha").running).toBe(0);
+    expect(scenario.roleByName.get("beta")?.finished).toHaveLength(1);
+  });
 });

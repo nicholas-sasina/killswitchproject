@@ -8,6 +8,7 @@
  * reasoning behind each kind of block and refusal). An action this build has
  * not heard of still reads as prose instead of breaking the feed.
  */
+import { carriesCredential, isUnknownCaller } from "../alerts";
 import type { LedgerEvent } from "../contracts";
 import { isCanaryRef, keyName } from "./keys";
 import { personLabel } from "./people";
@@ -33,13 +34,6 @@ export interface SentenceContext {
 function key(event: LedgerEvent): string {
   if (isCanaryRef(event.secret_ref)) return "its canary";
   return keyName(event.secret_ref) || "a key";
-}
-
-function carriesCredential(event: LedgerEvent): boolean {
-  return (
-    Boolean(event.secret_ref || event.fingerprint) ||
-    event.detail === "credential_detected"
-  );
 }
 
 /** The reason in a person's burn: "1 session(s) revoked (reason)". */
@@ -90,7 +84,7 @@ export function eventSentence(
           );
     case "refused": {
       const detail = event.detail ?? "";
-      if (detail.startsWith("unknown badge") || detail === "session_required")
+      if (isUnknownCaller(event))
         return {
           who: "An unknown caller",
           whoKind: "caller",

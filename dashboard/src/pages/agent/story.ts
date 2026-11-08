@@ -173,6 +173,26 @@ export function heroLede({
   return parts.join(" ");
 }
 
+/**
+ * Why a finished agent has nothing to burn. A role instance's own keys are
+ * deleted when it exits; a scenario agent keeps its keys for its next
+ * session. Until /roles answers, which one it is can be unknown, so the
+ * keys go unmentioned.
+ */
+export function finishedNote(
+  agent: ConsoleAgent,
+  managedBy?: Role["managed_by"],
+): string {
+  if (!agent.sessionId)
+    return `${agent.name} has not started a session, so there is nothing to burn.`;
+  const first = `${agent.name} finished on its own, so there is nothing to burn.`;
+  if (agent.from === "scenario" || managedBy === "scenario")
+    return `${first} Burn revoked its badge when it exited and keeps its keys for its next session.`;
+  if (managedBy)
+    return `${first} Burn revoked its badge and deleted its own keys when it exited.`;
+  return first;
+}
+
 // ---------- Timeline ----------
 
 export interface TimelineItem {

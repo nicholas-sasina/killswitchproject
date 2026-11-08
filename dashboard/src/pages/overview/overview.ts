@@ -7,6 +7,7 @@
  * events; nothing here is invented, and a figure the API cannot give is
  * left out rather than estimated.
  */
+import { isBlockedAtExit, isUnknownCaller } from "../../alerts";
 import type { Flag, FlagLevel, LedgerEvent, Role } from "../../contracts";
 import type { EventHistory } from "../../polling";
 import { agentHref, roleHref } from "../../router";
@@ -71,30 +72,6 @@ function sentence(text: string): string {
 }
 
 // ---------- Evidence in the stream ----------
-
-function carriesCredential(event: LedgerEvent): boolean {
-  return (
-    Boolean(event.secret_ref || event.fingerprint) ||
-    event.detail === "credential_detected"
-  );
-}
-
-/** A credential the egress proxy stopped on its way out (alerts.ts). */
-export function isBlockedAtExit(event: LedgerEvent): boolean {
-  return (
-    event.action === "blocked" &&
-    event.source === "egress" &&
-    carriesCredential(event)
-  );
-}
-
-/** A refused call from something Burn never enrolled. */
-export function isUnknownCaller(event: LedgerEvent): boolean {
-  if (event.action === "unregistered") return true;
-  if (event.action !== "refused") return false;
-  const detail = event.detail ?? "";
-  return detail.startsWith("unknown badge") || detail === "session_required";
-}
 
 export interface EvidenceCounts {
   /** Credentials agents saw: first sightings in tool output or a handoff. */

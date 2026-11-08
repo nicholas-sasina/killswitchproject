@@ -88,12 +88,17 @@ export interface ConsoleModel {
   counts: ConsoleCounts;
 }
 
+/**
+ * Only an active session is running. A scenario agent reads idle when it has
+ * no active session: it never started one, or its latest one ended (the API
+ * reports an exited session as idle), so it counts with the finished.
+ */
 export function stateOf(status: FleetAgent["status"]): AgentState {
   return status === "revoked"
     ? "burned"
-    : status === "exited"
-      ? "finished"
-      : "running";
+    : status === "active"
+      ? "running"
+      : "finished";
 }
 
 export function countAgents(agents: ConsoleAgent[]): Counts {
