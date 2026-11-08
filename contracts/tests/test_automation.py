@@ -1,4 +1,5 @@
 """The automation person's sign-in: mint, cache, refresh, the demo-token paths, and no token in any output."""
+import base64
 import json
 
 import pytest
@@ -133,14 +134,53 @@ def test_sign_in_on_without_an_automation_person_is_an_error_not_a_silent_fallba
         person(aws, env={"BURN_DEMO_TOKEN": "d"}).headers()
 
 
-def test_an_unreadable_switch_is_an_error():
+def test_an_unreadable_switch_counts_as_off_so_a_stack_that_is_off_needs_no_aws():
     class Denied(Exception):
         response = {"Error": {"Code": "AccessDeniedException"}}
 
     aws = Aws()
     aws.get_parameter = lambda Name: (_ for _ in ()).throw(Denied())
-    with pytest.raises(AutomationAuthError, match=r"requires sign-in \(AccessDeniedException\)"):
-        person(aws).headers()
+    assert person(aws, env={"BURN_DEMO_TOKEN": "d"}).headers() == {names.DEMO_TOKEN_HEADER: "d"}
+
+    def no_aws(service):  # an expired SSO session or AWS_PROFILE pointing nowhere fails at client creation
+        raise RuntimeError("The config profile (nowhere) could not be found")
+
+    assert AutomationPerson(client=no_aws, env={"BURN_DEMO_TOKEN": "d"}).headers() == {names.DEMO_TOKEN_HEADER: "d"}
+
+
+@pytest.mark.parametrize("switch", ["off", "on"])
+def test_the_switch_in_the_environment_wins_and_off_makes_no_aws_call(switch):
+    aws = Aws(enabled="off" if switch == "on" else "on")  # SSM says the opposite: it must not be asked
+    headers = person(aws, env={names.PEOPLE_ENABLED_ENV: switch, "BURN_DEMO_TOKEN": "d"}).headers()
+    assert ("param", names.PEOPLE_ENABLED_PARAM) not in aws.calls
+    if switch == "off":
+        assert headers == {names.DEMO_TOKEN_HEADER: "d"} and aws.calls == []
+    else:
+        assert headers == {"authorization": "Bearer id-token-1"}
+
+
+def test_settings_can_come_from_a_scripts_own_env_dict():
+    aws = Aws()
+    p = person(aws, env={names.PEOPLE_ENABLED_ENV: "on"})  # the process environment
+    dotenv = {names.PEOPLE_ENABLED_ENV: "off", "BURN_DEMO_TOKEN": "from-dotenv"}
+    assert p.headers(env=dotenv) == {names.DEMO_TOKEN_HEADER: "from-dotenv"} and aws.calls == []
+    assert p.requires_sign_in({names.PEOPLE_ENABLED_ENV: "on"}) is True and automation.people_sign_in_on is not None
+
+
+def test_the_cache_follows_the_id_tokens_own_exp_claim():
+    def jwt(claims):
+        part = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        return f"e30.{part}.sig"
+
+    aws, clock = Aws(lifetime=3600), Clock()
+    minted = []
+    aws.admin_initiate_auth = lambda **kw: minted.append(1) or {"AuthenticationResult": {
+        "IdToken": jwt({"exp": clock.t + 600}), "ExpiresIn": 3600}}  # ExpiresIn is the access token's
+    p = person(aws, clock=clock)
+    p.id_token()
+    clock.t += 600 - automation.REFRESH_MARGIN + 1
+    p.id_token()
+    assert len(minted) == 2
 
 
 def test_local_development_sends_the_demo_token_and_makes_no_aws_call():

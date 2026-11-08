@@ -6,9 +6,11 @@ credentials of whoever runs the script, then keeps the ID token in memory until 
 token is never printed, logged or written to disk.
 
 Local development (BURN_LOCAL_DEV=1, the mock servers) sends the demo token instead. So does a stack that has not
-switched people sign-in on (SSM /burn/people/enabled is not "on"): until then the API accepts only the demo token.
+switched people sign-in on: until then the API accepts only the demo token. Whether it has is BURN_PEOPLE_ENABLED
+("on"/"off", which `make env` writes to .env), else SSM /burn/people/enabled. When neither can be read the answer is
+"off", so a stack that is off needs no AWS access at all; on a stack that is on, the demo token is refused with a 401.
 
-boto3 is imported only when a token is minted, so this module stays importable without it.
+boto3 is imported only when it is needed, so this module stays importable without it.
 """
 import base64
 import hashlib
@@ -44,6 +46,15 @@ def secret_hash(username: str, client_id: str, client_secret: str) -> str:
     return base64.b64encode(digest).decode()
 
 
+def _expires_at(id_token: str, fallback: float) -> float:
+    """The ID token's own `exp` claim. ExpiresIn in the reply is the access token's lifetime, which may differ."""
+    try:
+        payload = id_token.split(".")[1]
+        return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
+    except (IndexError, ValueError, KeyError, TypeError):
+        return fallback
+
+
 class AutomationPerson:
     """Mints and caches the automation person's ID token. One per process is enough (see automation_headers)."""
 
@@ -51,7 +62,7 @@ class AutomationPerson:
                  env: dict | None = None):
         self._client, self._now, self._env = client, now, env
         self._clients: dict[str, object] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._token, self._expires_at = "", 0.0
         self._sign_in_on, self._switch_checked_until = False, 0.0
 
@@ -66,23 +77,25 @@ class AutomationPerson:
     def _environ(self) -> dict:
         return os.environ if self._env is None else self._env
 
-    def headers(self, demo_token: str | Callable[[], str] | None = None) -> dict:
+    def headers(self, demo_token: str | Callable[[], str] | None = None, env: dict | None = None) -> dict:
         """The header that authenticates a person-side call: the ID token, or the demo token (see the module doc).
 
         `demo_token` is the demo token or a function returning it. By default it is BURN_DEMO_TOKEN, else (outside
-        local development) the stack's demo-token secret.
+        local development) the stack's demo-token secret. `env` replaces os.environ for the settings, for a script
+        that reads .env into a dict of its own.
         """
-        if self._environ().get(names.LOCAL_DEV_ENV) == "1":
-            return {names.DEMO_TOKEN_HEADER: self._demo(demo_token, local=True)}
-        token = self.id_token()
+        environ = self._environ() if env is None else env
+        if environ.get(names.LOCAL_DEV_ENV) == "1":
+            return {names.DEMO_TOKEN_HEADER: self._demo(demo_token, environ, local=True)}
+        token = self.id_token(environ)
         if not token:  # this stack does not require sign-in yet
-            return {names.DEMO_TOKEN_HEADER: self._demo(demo_token, local=False)}
+            return {names.DEMO_TOKEN_HEADER: self._demo(demo_token, environ, local=False)}
         return {"authorization": f"Bearer {token}"}
 
-    def _demo(self, demo_token, *, local: bool) -> str:
+    def _demo(self, demo_token, environ, *, local: bool) -> str:
         if callable(demo_token):
             demo_token = demo_token()
-        value = demo_token or self._environ().get("BURN_DEMO_TOKEN", "")
+        value = demo_token or environ.get("BURN_DEMO_TOKEN", "")
         if not value and local:
             raise AutomationAuthError(f"{names.LOCAL_DEV_ENV}=1 needs BURN_DEMO_TOKEN (any value for the mock servers)")
         if not value:
@@ -92,32 +105,35 @@ class AutomationPerson:
                 raise AutomationAuthError(f"sign-in is off and there is no demo token ({_error_code(exc)})") from None
         return value
 
-    def id_token(self) -> str:
+    def id_token(self, env: dict | None = None) -> str:
         """The automation person's ID token, minted when there is none or it is about to expire.
 
         "" while the stack does not require sign-in: the API would not accept the token yet.
         """
         with self._lock:
-            now = self._now()
-            if not self._requires_sign_in(now):
+            if not self.requires_sign_in(env):
                 self._token = ""
                 return ""
+            now = self._now()
             if self._token and now < self._expires_at - REFRESH_MARGIN:
                 return self._token
             self._token, self._expires_at = self._mint(*self._login(), now)
             return self._token
 
-    def _requires_sign_in(self, now: float) -> bool:
-        if now < self._switch_checked_until:
+    def requires_sign_in(self, env: dict | None = None) -> bool:
+        """Whether the stack has switched people sign-in on: BURN_PEOPLE_ENABLED, else SSM, else "off"."""
+        value = ((self._environ() if env is None else env).get(names.PEOPLE_ENABLED_ENV) or "").strip()
+        if value:
+            return value == "on"
+        with self._lock:
+            now = self._now()
+            if now >= self._switch_checked_until:
+                try:
+                    value = self._aws("ssm").get_parameter(Name=names.PEOPLE_ENABLED_PARAM)["Parameter"]["Value"]
+                except Exception:  # noqa: BLE001 - not published, no AWS access, or no boto3: the API then needs the demo token
+                    value = "off"
+                self._sign_in_on, self._switch_checked_until = value == "on", now + SWITCH_RECHECK
             return self._sign_in_on
-        try:
-            value = self._aws("ssm").get_parameter(Name=names.PEOPLE_ENABLED_PARAM)["Parameter"]["Value"]
-        except Exception as exc:  # noqa: BLE001
-            if _error_code(exc) != "ParameterNotFound":  # not published: a stack from before sign-in
-                raise AutomationAuthError(f"cannot tell whether this stack requires sign-in ({_error_code(exc)})") from None
-            value = "off"
-        self._sign_in_on, self._switch_checked_until = value == "on", now + SWITCH_RECHECK
-        return self._sign_in_on
 
     def _login(self) -> tuple[str, str, str]:
         """(username, password, client secret or "") from the automation person's secret."""
@@ -151,12 +167,17 @@ class AutomationPerson:
         if not result.get("IdToken"):
             raise AutomationAuthError("the automation person could not sign in "
                                       f"(asked to answer {reply.get('ChallengeName') or 'a challenge'})")
-        return result["IdToken"], now + int(result.get("ExpiresIn", 3600))
+        return result["IdToken"], _expires_at(result["IdToken"], now + int(result.get("ExpiresIn", 3600)))
 
 
 _default = AutomationPerson()
 
 
-def automation_headers(demo_token: str | Callable[[], str] | None = None) -> dict:
+def automation_headers(demo_token: str | Callable[[], str] | None = None, env: dict | None = None) -> dict:
     """Headers for a person-side Burn API call made by a script. See AutomationPerson.headers."""
-    return _default.headers(demo_token)
+    return _default.headers(demo_token, env)
+
+
+def people_sign_in_on(env: dict | None = None) -> bool:
+    """Whether the stack requires a person's sign-in. See AutomationPerson.requires_sign_in."""
+    return _default.requires_sign_in(env)

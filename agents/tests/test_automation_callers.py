@@ -21,8 +21,11 @@ def test_burn_api_sends_the_helpers_header(monkeypatch):
 def test_burn_api_sends_the_stacks_demo_token_until_the_stack_requires_sign_in(monkeypatch):
     from burn_contracts import automation, names
     lookups = []
-    monkeypatch.setattr(automation, "_default", automation.AutomationPerson(env={}, client=lambda service: None))
-    monkeypatch.setattr(automation.AutomationPerson, "id_token", lambda self: "")  # the stack does not require sign-in yet
+    def no_aws(service):
+        raise AssertionError(f"made an AWS call ({service})")
+
+    off = {names.PEOPLE_ENABLED_ENV: "off"}  # the stack does not require sign-in yet
+    monkeypatch.setattr(automation, "_default", automation.AutomationPerson(env=off, client=no_aws))
     monkeypatch.setattr(common, "secret_value", lambda secret_id: lookups.append(secret_id) or "stack-demo")
     monkeypatch.setenv("BURN_API_URL", "https://api.example.invalid")
     sent = []
