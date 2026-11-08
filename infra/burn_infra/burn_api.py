@@ -62,10 +62,11 @@ class BurnApiStack(cdk.Stack):
             actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
             resources=[table_arn(names.ENROLL_TOKENS_TABLE)],
         ))
-        role.add_to_policy(iam.PolicyStatement(
-            actions=["dynamodb:PutItem", "dynamodb:Query"], resources=[table_arn(names.EVENTS_TABLE)]))
-        role.add_to_policy(iam.PolicyStatement(
-            actions=["dynamodb:Query"], resources=[table_arn(names.EXPOSURES_TABLE)]))
+        role.add_to_policy(iam.PolicyStatement(  # by_agent: a burn raises what the agent tried to send out
+            actions=["dynamodb:PutItem", "dynamodb:Query"],
+            resources=[table_arn(names.EVENTS_TABLE), f"{table_arn(names.EVENTS_TABLE)}/index/by_agent"]))
+        role.add_to_policy(iam.PolicyStatement(  # Scan: a canary incident checks no other agent holds it
+            actions=["dynamodb:Query", "dynamodb:Scan"], resources=[table_arn(names.EXPOSURES_TABLE)]))
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:{names.DEMO_TOKEN_SECRET}-*"],
@@ -96,7 +97,7 @@ class BurnApiStack(cdk.Stack):
         ))
 
         fn = lambda_.Function(
-            self, "Function", function_name="burn-api", runtime=lambda_.Runtime.PYTHON_3_12,
+            self, "Function", function_name=names.BURN_API_FUNCTION, runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.handler", code=lambda_.Code.from_asset(code_dir), role=role,
             timeout=cdk.Duration.seconds(29), memory_size=256,
         )
