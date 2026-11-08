@@ -3,8 +3,11 @@
 An instance reports item ids only, `{"item": <id>, "state": "started" | "done"}`. Burn stamps each event with its
 own receive time and keeps one entry per item, `{"started_at": <ts>, "done_at": <ts or null>}`. When the instance
 is burned, only items done before the clean cut-off are trusted; everything else it touched is quarantined.
-Timestamps are `events.utc_now_iso()` strings, which sort in time order as plain strings.
+Times are compared as instants, never as strings: the cut-off can come from evidence other components wrote, in
+another ISO 8601 spelling ("Z" or "+00:00", any number of fraction digits).
 """
+from datetime import datetime, timezone
+
 from .names import MAX_PROGRESS_EVENTS, MAX_PROGRESS_ITEMS, PROGRESS_STATES, is_item_id
 
 
@@ -47,6 +50,16 @@ def apply(progress: dict | None, events: list[tuple[str, str]], now: str) -> dic
     return result
 
 
+def parse_time(value) -> datetime:
+    """The UTC instant of an ISO 8601 timestamp with a time zone ("Z" or an offset), fractions optional."""
+    if not isinstance(value, str):
+        raise ValueError(f"not a timestamp: {value!r}")
+    moment = datetime.fromisoformat(value)  # raises ValueError for anything else
+    if moment.tzinfo is None:
+        raise ValueError(f"timestamp has no time zone: {value!r}")
+    return moment.astimezone(timezone.utc)
+
+
 def counts(progress: dict | None) -> dict:
     """What reads show instead of the map."""
     progress = progress or {}
@@ -60,7 +73,8 @@ def classify(progress: dict | None, cutoff: str) -> tuple[list[str], list[str]]:
     done: finished before the cut-off. quarantined: everything else it started, in flight at the cut-off or touched
     at or after it, because a possibly compromised agent worked on it. Items never started are in neither list.
     """
-    progress = progress or {}
-    done = sorted(item for item, times in progress.items() if times.get("done_at") and times["done_at"] < cutoff)
+    progress, limit = progress or {}, parse_time(cutoff)
+    done = sorted(item for item, times in progress.items()
+                  if times.get("done_at") and parse_time(times["done_at"]) < limit)  # equal is not before
     trusted = set(done)
     return done, sorted(item for item in progress if item not in trusted)

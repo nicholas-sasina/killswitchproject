@@ -649,3 +649,23 @@ def test_only_work_done_before_the_cutoff_is_trusted():
     assert done == ["done-before"]
     assert quarantined == sorted(set(state) - {"done-before"})
     assert progress.classify({}, cutoff) == ([], [])
+
+
+def test_the_cutoff_compares_times_not_strings():
+    from burn_contracts import progress
+    # Other components may write "Z" or "+00:00" and any number of fraction digits. As strings, "...:00Z" sorts
+    # after "...:00.500Z" ('Z' > '.'), which would trust an item done half a second after the breach.
+    cutoff = "2026-11-07T10:00:00Z"
+    state = {
+        "half-second-after": {"started_at": "2026-11-07T09:59:59.000Z", "done_at": "2026-11-07T10:00:00.500Z"},
+        "same-instant-other-format": {"started_at": "2026-11-07T09:59:00Z", "done_at": "2026-11-07T10:00:00.000+00:00"},
+        "just-before": {"started_at": "2026-11-07T09:59:00Z", "done_at": "2026-11-07T09:59:59.999999+00:00"},
+    }
+    assert progress.classify(state, cutoff) == (["just-before"], ["half-second-after", "same-instant-other-format"])
+    micro_cutoff = "2026-11-07T10:00:00.123456+00:00"
+    assert progress.classify({"x": {"started_at": cutoff, "done_at": "2026-11-07T10:00:00.123Z"}}, micro_cutoff) == (
+        ["x"], [])
+    assert progress.parse_time("2026-11-07T12:00:00+02:00") == progress.parse_time("2026-11-07T10:00:00Z")
+    for bad in ("2026-11-07T10:00:00", "yesterday", None, 5):  # no time zone, or not a timestamp at all
+        with pytest.raises(ValueError):
+            progress.parse_time(bad)
