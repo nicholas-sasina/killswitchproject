@@ -1,11 +1,10 @@
 /**
  * One fleet list, built from both places the API describes agents.
  *
- * `/events` returns only the scenario agents (three, in the support-desk
- * demo). `/instances` returns every instance that ever joined, including
- * swarm workers, livecheck probes and eval harness agents. Showing only the
- * first made the dashboard report three agents when a hundred and fifty had
- * run, and made a burned swarm worker invisible.
+ * `/events` describes only the scenario agents. `/instances` returns every
+ * instance that ever joined, swarm workers and eval harness agents included,
+ * so the fleet is built from both or a burned swarm worker would never
+ * appear.
  *
  * The unit here is the instance, not the agent name: one name can have many
  * sessions, so `agent-reader` legitimately appears eight times with eight
@@ -79,7 +78,7 @@ const STAGE: Record<FleetStatus, number> = {
  * and the latter takes seconds to answer for a large fleet. So the status is
  * whichever report is further along, and a burn shows as soon as the feed
  * has it. A scenario agent with no matching instance is still included, so
- * the demo works against an API that has no instance records.
+ * the fleet is complete against an API that has no instance records.
  */
 export function mergeFleet(
   agents: AgentState[],
