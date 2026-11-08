@@ -151,6 +151,7 @@ def run_main(monkeypatch, *args):
     captured = {}
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", *args])
     monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
+    monkeypatch.setattr(run_swarm, "fetch_proxy_ca", lambda docker_out, into: captured.setdefault("ca_into", into) and "/fetched/ca")
     monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(
         kw, api=api, instances=instances) or swarm_launch.Swarm(None, role, docker=None, **{
             k: kw[k] for k in ("api_url", "gateway_url", "mock", "interval", "certs_dir", "image")}))
@@ -245,3 +246,92 @@ def test_the_person_client_sends_only_the_headers_it_is_given(monkeypatch):
     assert reply == {"token": JOIN}
     (headers,) = sent
     assert headers["authorization"] == "Bearer automation-id" and "x-burn-demo-token" not in headers
+
+
+# --- the proxy's CA comes from the running proxy, not from the launching checkout ---------------
+
+class ProxyDocker:
+    """Answers the two docker calls fetch_proxy_ca makes: find the proxy, copy its CA certificate out."""
+
+    def __init__(self, proxies=("burn-demo-proxy-1",), cert="-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"):
+        self.proxies, self.cert, self.calls = list(proxies), cert, []
+
+    def __call__(self, argv):
+        self.calls.append(argv)
+        if argv[:2] == ["docker", "ps"]:
+            return "\n".join(self.proxies) + ("\n" if self.proxies else "")
+        if argv[:2] == ["docker", "cp"]:
+            if self.cert is not None:
+                Path(argv[3]).write_text(self.cert)
+            return ""
+        raise AssertionError(argv)
+
+
+def test_the_ca_is_copied_from_the_running_proxy_and_only_its_public_certificate(tmp_path):
+    from swarm_launch import NETWORK, fetch_proxy_ca
+    docker = ProxyDocker()
+    certs = fetch_proxy_ca(docker, str(tmp_path / "ca"))
+    assert (Path(certs) / "mitmproxy-ca-cert.pem").read_text().startswith("-----BEGIN CERTIFICATE-----")
+    ps, cp = docker.calls
+    assert f"network={NETWORK}" in ps and "label=com.docker.compose.service=proxy" in ps
+    assert cp[2] == "burn-demo-proxy-1:/certs/mitmproxy-ca-cert.pem"  # never mitmproxy-ca.pem, which holds the key
+    assert sorted(p.name for p in Path(certs).iterdir()) == ["mitmproxy-ca-cert.pem"]
+
+
+@pytest.mark.parametrize("proxies,message", [((), "no egress proxy"), (("a", "b"), "more than one")])
+def test_no_single_running_proxy_stops_with_a_clear_message(tmp_path, proxies, message):
+    from swarm_launch import ProxyCaError, fetch_proxy_ca
+    with pytest.raises(ProxyCaError, match=message):
+        fetch_proxy_ca(ProxyDocker(proxies=proxies), str(tmp_path / "ca"))
+
+
+@pytest.mark.parametrize("cert", [None, "", "not a certificate"])
+def test_a_proxy_without_a_ca_certificate_stops_with_a_clear_message(tmp_path, cert):
+    from swarm_launch import ProxyCaError, fetch_proxy_ca
+    with pytest.raises(ProxyCaError, match="CA certificate"):
+        fetch_proxy_ca(ProxyDocker(cert=cert), str(tmp_path / "ca"))
+
+
+def test_a_stale_certificate_from_an_earlier_run_is_replaced(tmp_path):
+    from swarm_launch import fetch_proxy_ca
+    old = tmp_path / "ca" / "mitmproxy-ca-cert.pem"
+    old.parent.mkdir()
+    old.write_text("-----BEGIN CERTIFICATE-----\nOLD\n-----END CERTIFICATE-----\n")
+    fetch_proxy_ca(ProxyDocker(), str(tmp_path / "ca"))
+    assert "OLD" not in old.read_text()
+
+
+def _real_env(monkeypatch):
+    monkeypatch.setattr(run_swarm, "load_dotenv", lambda: None)
+    monkeypatch.setenv("BURN_API_URL", "https://api.example.com")
+    monkeypatch.setenv("BURN_GATEWAY_URL", "https://gw.example.com/mcp")
+    monkeypatch.setattr(run_swarm, "automation_headers", lambda: {"authorization": "Bearer automation-id"})
+    monkeypatch.setattr(run_swarm.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0})())
+
+
+def test_a_real_swarm_mounts_the_ca_of_the_running_proxy_not_the_checkouts(monkeypatch):
+    _real_env(monkeypatch)
+    got = run_main(monkeypatch)
+    assert got["certs_dir"] == "/fetched/ca"
+    assert got["ca_into"].endswith("/.run/swarm-proxy-ca") and "proxy-certs" not in got["certs_dir"]
+
+
+def test_a_real_swarm_without_the_proxy_ca_stops_before_starting_anything(monkeypatch):
+    _real_env(monkeypatch)
+    started = []
+
+    def no_ca(docker_out, into):
+        raise swarm_launch.ProxyCaError("no egress proxy is running on burn-demo_agents_internal")
+
+    monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "1"])
+    monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
+    monkeypatch.setattr(run_swarm, "fetch_proxy_ca", no_ca)
+    monkeypatch.setattr(run_swarm, "start_workers", lambda *a, **k: started.append(1) or [])
+    with pytest.raises(SystemExit, match="no egress proxy is running"):
+        run_swarm.main()
+    assert started == []
+
+
+def test_a_mock_swarm_needs_no_proxy_ca(monkeypatch):
+    got = run_main(monkeypatch, "--mock")
+    assert "ca_into" not in got and got["certs_dir"] == ""

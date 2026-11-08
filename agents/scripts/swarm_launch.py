@@ -49,7 +49,8 @@ IMAGE_INPUTS = ("agents/Dockerfile.swarm", "agents/swarm-entrypoint.sh", "agents
 NOT_IN_IMAGE = {".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git", "tests", "node_modules"}
 NETWORK = "burn-demo_agents_internal"  # the demo stack's internal network: its one way out is the egress proxy
 PROXY = "http://proxy:8080"
-CERT = "/certs/mitmproxy-ca-cert.pem"
+CA_FILE = "mitmproxy-ca-cert.pem"  # the proxy CA's public certificate (mitmproxy-ca.pem would hold its key)
+CERT = f"/certs/{CA_FILE}"
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # must match burn_cli.runner.run.ADOPT_SECRETS
 WORKER = ["python", "-m", "burn_agents.swarm_worker"]
 JOIN_TTL = 3600
@@ -60,6 +61,34 @@ READS, READ_GAP = 3, 5.0  # a burned instance's replacement record can land a mo
 def task_ids(worker: int, items: int) -> list[str]:
     """Worker `worker`'s task (counting from 1): `items` item ids, empty for no task."""
     return [f"w{worker:02d}-item-{i:02d}" for i in range(1, items + 1)]
+
+
+class ProxyCaError(Exception):
+    """The running egress proxy's CA certificate could not be obtained."""
+
+
+def fetch_proxy_ca(docker_out: Callable[[list[str]], str], into: str) -> str:
+    """Copy the CA certificate of the egress proxy that is actually running into `into`; return that directory.
+
+    Workers trust only this CA (SSL_CERT_FILE), because the proxy re-signs every TLS connection. It is taken from
+    the running proxy, not from the launching checkout's .run/proxy-certs: the stack may have been started from
+    another checkout, and a missing or different CA fails every request through the proxy before it is sent.
+    docker_out runs a docker command and returns its stdout.
+    """
+    names = docker_out(["docker", "ps", "--filter", f"network={NETWORK}",
+                        "--filter", "label=com.docker.compose.service=proxy", "--format", "{{.Names}}"]).split()
+    if not names:
+        raise ProxyCaError(f"no egress proxy is running on {NETWORK}: start the stack first (make demo)")
+    if len(names) > 1:
+        raise ProxyCaError(f"more than one egress proxy is running on {NETWORK}: {', '.join(names)}")
+    target = Path(into)
+    target.mkdir(parents=True, exist_ok=True)
+    cert = target / CA_FILE
+    cert.unlink(missing_ok=True)  # never mount a certificate left by an earlier run
+    docker_out(["docker", "cp", f"{names[0]}:{CERT}", str(cert)])
+    if not cert.exists() or "BEGIN CERTIFICATE" not in cert.read_text(errors="replace"):
+        raise ProxyCaError(f"the egress proxy {names[0]} has no CA certificate at {CERT}")
+    return str(target)
 
 
 def to_container_url(url: str) -> str:
