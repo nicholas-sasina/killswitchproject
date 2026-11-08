@@ -206,14 +206,23 @@ def test_a_throttled_revoke_does_not_lose_agents(env, monkeypatch):
 
 
 def test_revokes_that_miss_the_deadline_are_reported(env, monkeypatch):
-    import time, burn_scopes, sessions
+    import threading, time, burn_scopes, sessions
     make_role(env, WORKER)
     for _ in range(2):
         join(env, "worker")
-    real = sessions.end_session
-    monkeypatch.setattr(sessions, "end_session", lambda *a, **k: (time.sleep(2), real(*a, **k))[1])
-    started = time.monotonic()
-    out = burn_scopes.burn_scope("role", "worker", budget=0.5)
-    assert time.monotonic() - started < 1.5
-    assert out["burned"] == [] and len(out["failed"]) == 2
-    assert all("revoke not confirmed" in f["error"] for f in out["failed"])
+    real, release = sessions.end_session, threading.Event()
+    monkeypatch.setattr(sessions, "end_session", lambda *a, **k: (release.wait(5), real(*a, **k))[1])
+    pools, real_pool = [], burn_scopes.ThreadPoolExecutor
+    monkeypatch.setattr(burn_scopes, "ThreadPoolExecutor", lambda **kw: pools.append(real_pool(**kw)) or pools[-1])
+    try:
+        started = time.monotonic()
+        out = burn_scopes.burn_scope("role", "worker", budget=0.5)
+        assert time.monotonic() - started < 1.5
+        assert out["burned"] == [] and len(out["failed"]) == 2
+        assert all("revoke not confirmed" in f["error"] for f in out["failed"])
+    finally:
+        # The revokes that missed the deadline are still running, and the burns behind them. They finish here,
+        # while moto stands in for AWS: once the test has ended they would call the real one.
+        release.set()
+        for pool in pools:
+            pool.shutdown(wait=True)
