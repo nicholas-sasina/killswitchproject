@@ -1,6 +1,6 @@
 # Burn eval results
 
-Generated 2026-11-08T00:21:36+00:00 at commit `f8ce9ad`. Every credential is freshly generated per run; no value appears here.
+Generated 2026-11-08T00:32:20+00:00 at commit `09d9668`. Every credential is freshly generated per run; no value appears here.
 
 Uncommitted source changes: False.
 
@@ -10,7 +10,7 @@ Exit-check results below measure the scanner offline, not the whole containment 
 
 ### References
 
-Scope: **local-emulator**. Source commit `f8ce9adf0a64e2270ad31bbe4ab6edb24f4efa88`, measured 2026-11-08T00:21:36.106+00:00.
+Scope: **local-emulator**. Source commit `09d966876d127123141ddf02dd932b331906171b`, measured 2026-11-08T00:32:18.238+00:00.
 
 Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures. Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called. Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior. Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution.
 
@@ -28,15 +28,15 @@ Additional observed checks:
 
 ### Canaries
 
-Scope: **local-emulator**. Source commit `c38eef33392a56fb8755464cb4963c4d9d9519ae`, measured 2026-11-08T00:20:53.653+00:00.
+Scope: **local-emulator**. Source commit `2c36726bbea37aa21786d6bf26f6b2ed858c13b7`, measured 2026-11-08T00:32:18.779+00:00.
 
-Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit. Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py. Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency. Optional negative_checks are fault-injection/replay observations, excluded from the ordinary-use detection-rate denominator; a revoked session with failed credential rotation is not complete containment.
+Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit. Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py. Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency. Optional negative_checks are fault-injection/replay observations, excluded from the ordinary-use detection-rate denominator; a revoked session with failed credential rotation is not complete containment. Optional policy_checks measure alert-only cases separately; session-origin headers and additional ledger holders are synthetic harness inputs, not a full proxy-to-provider network flow.
 
 Product checkout has uncommitted changes: False.
 
-Inspected product source SHA-256: `913e12ca37fb9ee0b1a3050d9f9f2715b8faa6bd0ffa57759a36f13ac818f3f0`.
+Inspected product source SHA-256: `3003cbdc690fa38ff620609bdaa4624de36eea61b18fec460e3ea8dda432dab3`.
 
-Uses detected: 5/5 (100.0%). Recorded revocations: 5/5. Time from use to revocation: p50 0.016994 s; p95 0.019999 s.
+Uses detected: 5/5 (100.0%). Recorded revocations: 5/5. Time from use to revocation: p50 0.015935 s; p95 0.019309 s.
 
 Additional observed checks:
 
@@ -48,7 +48,14 @@ Additional observed checks:
 Replay and injected-failure checks (excluded from the positive-use detection rate):
 
 - duplicate replay: presentations=2; provider rejections=2; new incidents=0; extra api rotations=0; extra canary events=0
-- rotation failure: incomplete containment flagged=True; old api key accepted=True; session revoked=True; provider rejected=True; outcome=contained_rotation_failed; rotated credentials=0
+- rotation failure: incomplete containment flagged=True; session revoked=True; provider rejected=True; old api key accepted=True; outcome=contained_rotation_failed; rotated credentials=0
+
+Origin and policy checks (excluded from the positive-use detection rate):
+
+- own session: session active=True; provider rejected=True; old api key accepted=True; canary events=1; api rotations=0; new incidents=0; outcome=not_dispatched
+- other session: session active=True; provider rejected=True; old api key accepted=True; canary events=1; api rotations=0; new incidents=0; outcome=not_dispatched
+- report only: session active=True; provider rejected=True; old api key accepted=True; canary events=1; api rotations=0; new incidents=1; outcome=report_only
+- ambiguous exposure: session active=True; provider rejected=True; old api key accepted=True; canary events=1; api rotations=0; new incidents=1; outcome=not_actionable
 
 
 ## Destinations
@@ -86,7 +93,7 @@ Post-cache read-unit measurements have not been supplied. This report does not c
 Frozen corpus SHA-256: `203bc1595d8faffd44f7479463794a867bab74b78f99da8772bf73cee66b7119`. Baseline detector: `d618897`.
 Forms were added before ws/eval policy changes; no detector decoders were changed. This developer-authored corpus is not an independent security audit.
 
-Named: 30.0%; blocked: 30.0%; 320 payload runs.
+Named: 30.6%; blocked: 30.6%; 320 payload runs.
 
 | Form | Named | Blocked |
 |---|---|---|
@@ -94,8 +101,8 @@ Named: 30.0%; blocked: 30.0%; 320 payload runs.
 | heldout_utf16_base64 | 0/40 | 0/40 |
 | heldout_zlib_base64 | 0/40 | 0/40 |
 | heldout_html_entities | 0/40 | 0/40 |
-| heldout_json_chars | 36/40 | 36/40 |
-| heldout_json_parts | 20/40 | 20/40 |
+| heldout_json_chars | 37/40 | 37/40 |
+| heldout_json_parts | 21/40 | 21/40 |
 | heldout_base64_lines | 0/40 | 0/40 |
 | heldout_percent_twice | 40/40 | 40/40 |
 
