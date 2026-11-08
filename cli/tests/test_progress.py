@@ -957,3 +957,26 @@ def test_a_start_that_begins_waiting_wakes_the_loop_to_use_the_short_gap():
     queue = ProgressQueue(on_change=lambda: woken.append(1))
     queue.add(ev("a"))
     assert queue.wait_recorded("a", 0.01) == ("timeout", "") and len(woken) == 2  # the add, then the wait
+
+
+def test_an_agent_that_hangs_up_before_its_reply_costs_no_traceback(capfd, caplog):
+    import logging
+    import socket
+    import struct
+    caplog.set_level(logging.DEBUG, logger="burn_cli.runner.spawn_endpoint")
+    queue = ProgressQueue()
+    server = SpawnEndpoint(lambda role, command: {}, "local-token", progress=queue, progress_wait=0.5).start()
+    try:
+        port = int(server.progress_url.split(":")[2].split("/")[0])
+        body = json.dumps(ev("item-01")).encode()
+        client = socket.create_connection(("127.0.0.1", port))
+        client.sendall(b"POST /progress HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer local-token\r\n"
+                       b"Content-Length: %d\r\n\r\n%s" % (len(body), body))
+        until(queue.waiting)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        client.close()  # a reset: the 503 that comes at the deadline has nowhere to go
+        until(lambda: any("hung up" in r.getMessage() for r in caplog.records))
+    finally:
+        server.stop()
+    err = capfd.readouterr().err
+    assert "Traceback" not in err and "Exception occurred" not in err

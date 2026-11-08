@@ -9,6 +9,7 @@
 """
 import hmac
 import json
+import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
@@ -17,6 +18,8 @@ from burn_contracts.progress import ProgressError
 
 from ..api import ApiError
 from .progress import ProgressQueue
+
+_log = logging.getLogger(__name__)
 
 
 class SpawnEndpoint:
@@ -91,11 +94,15 @@ class SpawnEndpoint:
 
             def _send(self, status: int, body: dict):
                 data = json.dumps(body).encode()
-                self.send_response(status)
-                self.send_header("content-type", "application/json")
-                self.send_header("content-length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.send_response(status)
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    # The agent gave up first, for example on a start that waited: nothing to tell, no traceback.
+                    _log.debug("the agent hung up before its %s reply to %s", status, self.path)
 
             def log_message(self, *args):
                 pass
