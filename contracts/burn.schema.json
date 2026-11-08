@@ -47,6 +47,16 @@
           "type": "array",
           "description": "Outbound hosts this role may reach through the proxy. Omit for the default allowlist.",
           "items": { "type": "string", "pattern": "^(\\*\\.)?[a-z0-9.-]{1,253}$" }
+        },
+        "canaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Give each instance its own canary (a decoy key that never authenticates)."
+        },
+        "auto_burn": {
+          "type": "boolean",
+          "default": true,
+          "description": "Burn an instance automatically when its canary is used from outside Burn. false = report-only: alert and flag, never burn."
         }
       }
     }

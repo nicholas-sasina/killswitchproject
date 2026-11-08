@@ -49,7 +49,16 @@ class RoleSpec(BaseModel):
     may_spawn: list[str] = []
     egress: list[str] | None = None
     owner: str | None = None
+    canaries: bool = True
+    auto_burn: bool = True
     managed_by: Literal["code", "ui"] = "ui"
+
+
+class FlagResolution(BaseModel):
+    secret_ref: str
+    action: Literal["rotate", "dismiss"]
+    reason: str = Field(min_length=3, max_length=300)
+    by: str | None = Field(default=None, pattern=r"^[A-Za-z0-9 ._@-]{1,64}$")
 
 
 class TokenRequest(BaseModel):
@@ -155,6 +164,17 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
     async def ledger(agent_id: str):
         require_agent(agent_id)
         return {"agent_id": agent_id, "entries": list(state.ledgers[agent_id].values())}
+
+    @app.get("/flags")
+    async def flags():
+        return {"flags": state.flag_list()}
+
+    @app.post("/flags/resolve")
+    async def resolve_flag(body: FlagResolution):
+        result = state.resolve_flag(body.secret_ref, body.action, body.reason, body.by)
+        if result is None:
+            raise HTTPException(404, "Not a flagged credential")
+        return result
 
     @app.get("/encodings")
     async def encodings():
