@@ -88,14 +88,18 @@ token, which must never be public.
   callback and sign-out URLs, and its origin to the API's CORS. BurnPeople and BurnApi read the address
   from SSM (`/burn/dashboard/url`) when they deploy, and depend on BurnDashboard. With the flag off,
   neither stack changes.
-- The CSP is the website's, plus the API and Cognito sign-in domains in `connect-src`.
+- The CSP is the website's, plus the Burn API and the people sign-in domain in `connect-src`. Before
+  hosting, those are wildcards for the region, so BurnDashboard depends on no other stack. With
+  `burn:dashboard_hosted=on`, they are the exact origins from SSM (`/burn/api/url`, `/burn/people/domain`),
+  read when BurnDashboard deploys.
 
 Deploy order:
 1. Switch people sign-in on: `make deploy-BurnApi PEOPLE_AUTH=on`, which deploys BurnPeople first.
 2. `make dashboard-deploy`: refuses unless sign-in is on. It builds and checks the dashboard, uploads it
    and prints its address.
-3. `make dashboard-hosted`: refuses unless the hosted dashboard serves a page. It deploys BurnPeople and
-   BurnApi with `-c burn:people_auth=on -c burn:dashboard_hosted=on`.
+3. `make dashboard-hosted`: refuses unless the hosted dashboard serves a page. It deploys BurnDashboard
+   (its CSP pinned; the uploaded files stay), BurnPeople and BurnApi with
+   `-c burn:people_auth=on -c burn:dashboard_hosted=on`.
 4. `make site-deploy`: the website's dashboard link now points at the hosted dashboard.
 
 ### Deploys follow the account

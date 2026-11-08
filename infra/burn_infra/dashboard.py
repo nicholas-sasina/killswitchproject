@@ -15,6 +15,12 @@ the files already uploaded as they are.
 BurnPeople adds its address to the sign-in callback and sign-out URLs, and BurnApi allows its origin
 in CORS. Both read the address from SSM when they deploy, so BurnDashboard must have been deployed
 first. With the flag off, neither stack changes at all.
+
+The same flag pins the dashboard's own CSP: connect-src then names exactly the Burn API's origin and
+the people sign-in domain, which BurnApi and BurnPeople publish to SSM. CloudFormation reads them when
+BurnDashboard deploys; the dashboard is hosted only after both stacks exist, so they are there. With
+the flag off, connect-src allows any API or sign-in domain in the region instead, so BurnDashboard
+depends on nothing and deploys first in a new account.
 """
 import sys
 
@@ -33,23 +39,40 @@ DASHBOARD_DIST = REPO / "dashboard" / "dist"
 DASHBOARD_HOSTED_CONTEXT = "burn:dashboard_hosted"  # "on": BurnPeople and BurnApi accept the hosted dashboard
 DASHBOARD_BUILD_CONTEXT = "burn:dashboard_build"    # "checked": set only by make dashboard-deploy
 
-# Like the website's CSP, plus the two origins the dashboard calls with fetch: the Burn API and the
-# people sign-in domain (for /oauth2/token). Wildcards keep this stack independent of BurnApi and
-# BurnPeople; both names exist only in this region. Signing in and out are top-level navigations to
-# the managed login pages, which a CSP does not restrict. The dashboard's forms submit through
-# JavaScript, so form-action stays 'self'.
-DASHBOARD_CSP = "; ".join([
-    "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self' data:",
-    f"connect-src 'self' https://*.execute-api.{names.REGION}.amazonaws.com"
-    f" https://*.auth.{names.REGION}.amazoncognito.com",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-])
+# Before the dashboard is hosted: any Burn API or people sign-in domain in this region.
+ANY_API_OR_SIGN_IN = [f"https://*.execute-api.{names.REGION}.amazonaws.com",
+                      f"https://*.auth.{names.REGION}.amazoncognito.com"]
+
+
+def dashboard_csp(connect: list[str]) -> str:
+    """Like the website's CSP, plus the origins the dashboard calls with fetch: the Burn API and the
+    people sign-in domain (for /oauth2/token).
+
+    Signing in and out are top-level navigations to the managed login pages, which a CSP does not
+    restrict. The dashboard's forms submit through JavaScript, so form-action stays 'self'.
+    """
+    return "; ".join([
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self' data:",
+        " ".join(["connect-src 'self'", *connect]),
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+    ])
+
+
+def connect_origins(scope: Construct) -> list[str]:
+    """Exactly the Burn API's origin and the people sign-in domain once the dashboard is hosted
+    (burn:dashboard_hosted=on), read from SSM when the stack deploys. Both are published as bare
+    origins (https://host, no path). Before that, ANY_API_OR_SIGN_IN.
+    """
+    if scope.node.try_get_context(DASHBOARD_HOSTED_CONTEXT) != "on":
+        return ANY_API_OR_SIGN_IN
+    return [ssm.StringParameter.value_for_string_parameter(scope, name)
+            for name in (names.API_URL_PARAM, names.PEOPLE_DOMAIN_PARAM)]
 
 
 def hosted_dashboard_url(scope: Construct) -> str | None:
@@ -69,7 +92,7 @@ class BurnDashboardStack(cdk.Stack):
 
         checked = self.node.try_get_context(DASHBOARD_BUILD_CONTEXT) == "checked"
         site = StaticSite(self, "Dashboard", name="Burn dashboard", source_dir=dashboard_dir if checked else None,
-                          content_security_policy=DASHBOARD_CSP)
+                          content_security_policy=dashboard_csp(connect_origins(self)))
         if not checked:
             cdk.Annotations.of(self).add_info(
                 "nothing is uploaded: only make dashboard-deploy uploads the dashboard, after checking the build")

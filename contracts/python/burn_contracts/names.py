@@ -37,6 +37,10 @@ DEMO_TOKEN_SECRET = "burn-system/demo-token"
 # Lambda function names.
 MINTER_FUNCTION = "burn-minter"
 
+# The BurnApi stack publishes the API's address here: https://<api id>.execute-api.<region>.amazonaws.com,
+# an origin with no path or trailing slash.
+API_URL_PARAM = "/burn/api/url"
+
 # Header the Burn API accepts as the admin credential. Until people sign-in is switched on for a
 # stack (PEOPLE_AUTH_ENV="1" on the API) it works as before. From then on it is local development
 # only: the API honors it only when LOCAL_DEV_ENV is also "1", which a deployment never sets.

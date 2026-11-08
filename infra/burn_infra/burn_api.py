@@ -155,7 +155,7 @@ class BurnApiStack(cdk.Stack):
             for path, method in [*INSTANCE_ROUTES, PREFLIGHT_ROUTE]:
                 api.add_routes(path=path, methods=[apigw.HttpMethod(method)], integration=integration,
                                authorizer=apigw.HttpNoneAuthorizer())
-        ssm.StringParameter(self, "UrlParam", parameter_name="/burn/api/url", string_value=api.api_endpoint)
+        ssm.StringParameter(self, "UrlParam", parameter_name=names.API_URL_PARAM, string_value=api.api_endpoint)
         # The internet-facing mock provider may invoke only this alias, which serves canary incidents and
         # nothing else (handler.py); API Gateway keeps invoking the unqualified function.
         lambda_.Alias(self, "CanaryAlias", alias_name=names.BURN_API_CANARY_ALIAS, version=fn.current_version)

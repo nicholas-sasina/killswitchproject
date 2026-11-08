@@ -158,22 +158,33 @@ def test_a_refused_check_deploys_nothing(hosting, target, check, stacks):
     assert not any(c["tool"] == "npx" for c in calls)
 
 
-def test_dashboard_deploy_uploads_only_the_checked_build(hosting):
-    result, calls = hosting("dashboard-deploy")
+def test_dashboard_deploy_uploads_only_the_checked_build_with_the_accounts_flags(hosting):
+    # The account's flags keep the CSP pinned once the dashboard is hosted.
+    result, calls = hosting("dashboard-deploy", FAKE_FLAGS="-c burn:people_auth=on -c burn:dashboard_hosted=on")
     assert result.returncode == 0, result.stderr
+    assert [c["args"][-1] for c in calls if c["tool"] == "uv" and c["cwd"] == "burn_api"] == [
+        "build", "scripts/deploy_flags.py"]  # checked first, flags after
     [deploy] = [c for c in calls if c["tool"] == "npx"]
     assert deploy["args"][deploy["args"].index("deploy") + 1] == "BurnDashboard"
-    assert deploy["args"][-2:] == ["-c", "burn:dashboard_build=checked"]
+    assert deploy["args"][-6:] == ["-c", "burn:dashboard_build=checked", "-c", "burn:people_auth=on",
+                                   "-c", "burn:dashboard_hosted=on"]
     assert "dashboard: https://dfake.cloudfront.net/" in result.stdout
 
 
-def test_dashboard_hosted_keeps_sign_in_on_and_deploys_only_people_and_api(hosting):
+def test_dashboard_deploy_that_cannot_read_the_account_does_not_deploy(hosting):
+    result, calls = hosting("dashboard-deploy", FAKE_FLAGS="", FAKE_FLAGS_EXIT="1")
+    assert result.returncode != 0
+    assert not any(c["tool"] == "npx" for c in calls)
+
+
+def test_dashboard_hosted_keeps_sign_in_on_and_pins_the_dashboard_csp(hosting):
     result, calls = hosting("dashboard-hosted")
     assert result.returncode == 0, result.stderr
     [deploy] = [c for c in calls if c["tool"] == "npx"]
     args = deploy["args"]
-    assert args[args.index("deploy") + 1:args.index("deploy") + 3] == ["BurnPeople", "BurnApi"]
-    assert "--exclusively" in args  # BurnDashboard is not redeployed without its build
+    # BurnDashboard too, for its pinned CSP; without dashboard_build=checked its files stay as uploaded.
+    assert args[args.index("deploy") + 1:args.index("deploy") + 4] == ["BurnDashboard", "BurnPeople", "BurnApi"]
+    assert "--exclusively" in args and "burn:dashboard_build=checked" not in args
     assert " ".join(args).endswith("-c burn:people_auth=on -c burn:dashboard_hosted=on")
 
 

@@ -67,10 +67,29 @@ def cors_origins(template: Template) -> list:
     return api["Properties"]["CorsConfiguration"]["AllowOrigins"]
 
 
-def csp_directives(template: Template) -> dict[str, list[str]]:
+def csp_text(template: Template) -> str:
+    """The dashboard's CSP. Each value CloudFormation reads from SSM at deploy shows as <parameter name>."""
     policy = next(iter(template.find_resources("AWS::CloudFront::ResponseHeadersPolicy").values()))
     csp = policy["Properties"]["ResponseHeadersPolicyConfig"]["SecurityHeadersConfig"]["ContentSecurityPolicy"]
-    directives = [d.split() for d in csp["ContentSecurityPolicy"].split(";")]
+    value = csp["ContentSecurityPolicy"]
+    if isinstance(value, str):
+        return value
+    separator, parts = value["Fn::Join"]
+    assert separator == ""
+    params = template.to_json()["Parameters"]
+    rendered = []
+    for part in parts:
+        if isinstance(part, str):
+            rendered.append(part)
+        else:
+            param = params[part["Ref"]]
+            assert param["Type"] == "AWS::SSM::Parameter::Value<String>"  # resolved at deploy, not at synth
+            rendered.append(f"<{param['Default']}>")
+    return "".join(rendered)
+
+
+def csp_directives(template: Template) -> dict[str, list[str]]:
+    directives = [d.split() for d in csp_text(template).split(";")]
     return {d[0]: d[1:] for d in directives if d}
 
 
@@ -99,6 +118,27 @@ def test_the_csp_lets_the_dashboard_call_the_api_and_the_sign_in_domain(dashboar
     assert csp["form-action"] == ["'self'"]  # the dashboard's forms submit through JavaScript
     # Sign-in and sign-out are top-level navigations to the managed login pages: nothing may restrict them.
     assert "navigate-to" not in csp
+
+
+FLAG_OFF_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "font-src 'self' data:; connect-src 'self' https://*.execute-api.us-east-1.amazonaws.com "
+                "https://*.auth.us-east-1.amazoncognito.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+
+
+def test_before_hosting_the_csp_is_exactly_as_it_was_and_reads_nothing(dashboard):
+    assert csp_text(dashboard) == FLAG_OFF_CSP
+    params = dashboard.to_json().get("Parameters", {}).values()
+    assert not [p for p in params if str(p.get("Default", "")).startswith("/burn/")]  # reads no other stack's values
+
+
+def test_once_hosted_connect_src_names_exactly_the_api_and_the_sign_in_domain(built_dist):
+    hosted = dashboard_template(built_dist, {"burn:dashboard_hosted": "on"})
+    csp = csp_directives(hosted)
+    assert csp["connect-src"] == ["'self'", f"<{names.API_URL_PARAM}>", f"<{names.PEOPLE_DOMAIN_PARAM}>"]
+    assert "*" not in csp_text(hosted)
+    before = csp_directives(dashboard_template(built_dist))
+    assert {k: v for k, v in csp.items() if k != "connect-src"} == {
+        k: v for k, v in before.items() if k != "connect-src"}  # every other directive unchanged
 
 
 def test_the_address_is_published_to_ssm_and_as_an_output(dashboard):
