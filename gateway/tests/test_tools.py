@@ -264,3 +264,12 @@ def test_a_bug_while_reading_a_secret_still_fails_the_call(planted):
     with pytest.raises(TypeError):
         read_as_session("read_config", path="config/app.env.bak")
 
+
+def test_a_hung_secrets_manager_read_gives_up_well_inside_the_lambda_timeout(aws):
+    """A read that hangs must fail in time to cost only its placeholder. The tools Lambda times out at 15 s
+    (infra/burn_infra/gateway.py), which would fail the whole call; botocore's defaults wait 60 s per attempt."""
+    config = placeholders._secrets().meta.config
+    attempts = config.retries["total_max_attempts"]
+    backoff = attempts - 1  # standard mode waits at most 1 s before the first retry
+    worst = attempts * (config.connect_timeout + config.read_timeout) + backoff
+    assert config.retries["mode"] == "standard" and worst <= 15 / 2
