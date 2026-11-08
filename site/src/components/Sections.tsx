@@ -77,11 +77,19 @@ const SERVICES: readonly [name: string, job: string][] = [
   ],
   [
     "AWS Lambda",
-    "Runs those checks on each request and response, and runs the Burn API.",
+    "Runs those checks on each request and response, the Burn API, and the minter that issues keys.",
+  ],
+  [
+    "Amazon API Gateway",
+    "Fronts the Burn API and the mock provider as HTTP APIs. With people sign-in on, a JWT authorizer checks each person’s token first.",
   ],
   [
     "Amazon Cognito",
     "Issues each agent instance its own identity, and signs people in.",
+  ],
+  [
+    "AWS IAM",
+    "Issues an instance’s own AWS keys, to a user inside a permissions boundary the minter can’t remove.",
   ],
   [
     "Amazon DynamoDB",
@@ -89,7 +97,7 @@ const SERVICES: readonly [name: string, job: string][] = [
   ],
   [
     "AWS Secrets Manager",
-    "Holds the keys agents own. A burn writes their replacements here.",
+    "Holds every key Burn mints, shared keys and decoys included. A burn writes the replacements here.",
   ],
   [
     "AWS CloudTrail",

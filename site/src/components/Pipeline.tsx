@@ -494,8 +494,8 @@ export function Pipeline({ ref }: { ref?: Ref<PipelineHandle> }) {
           <div>
             <dt>AWS stack</dt>
             <dd>
-              AgentCore Gateway, Lambda, Cognito, DynamoDB, Secrets Manager,
-              CloudTrail
+              AgentCore Gateway, Lambda, API Gateway, Cognito, IAM, DynamoDB,
+              Secrets Manager, CloudTrail
             </dd>
           </div>
         </dl>
