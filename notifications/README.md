@@ -244,7 +244,9 @@ In short:
 - Classifying containment failures depends on the Burn API's fixed detail prefixes. If they change,
   `tests/test_policy.py` and the fixtures must change too. A structured outcome field in the contract
   would remove this coupling.
-- The deployed stack has not run in AWS. It is checked by `cdk synth`, the template diff and
-  `tests/test_infra.py`.
+- The `BurnNotifications` stack is deployed in us-east-1. On 2026-11-08, real HIGH events
+  (`disclosure_blocked`, `canary_used`, `canary_contained`) were recorded as `delivered` in
+  `burn-notify-state` to Discord, Telegram, Slack and email (SES) test destinations, with provider
+  message ids for Discord, Telegram and SES (Slack's webhook returns none). Teams is not verified live.
 - Teams rendering of escaped text, and visible delivery on every platform, are confirmed only by a
   live test in a real channel (docs/LIVE_TESTING.md).
