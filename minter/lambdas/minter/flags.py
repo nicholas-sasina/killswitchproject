@@ -9,20 +9,29 @@ rotated by their human owner after review. State lives on the credential's
 burn-credentials row:
 
     status = "flagged"                       (unchanged meaning for older readers)
-    flag_level, flag_rank (1..3)             current level; the rank makes "only go up"
+    flag_level, flag_rank (1..3)             highest level reached; the rank makes "only go up"
                                              a single conditional update
     flag_evidence_<level>                    the FIRST evidence that reached each level
+    flag_instances                           distinct agent ids (= instances) behind the flag,
+                                             capped at MAX_INSTANCES ids
+    flag_state, flag_resolution              open / dismissed, and the owner's last decision
     flagged_at, flagged_by, flag_updated_at
 
-At most three evidence attributes per credential, so duplicate or repeated
-events never grow the row; re-sending the same event changes nothing.
+One flag per credential. At most three evidence attributes, so duplicate or
+repeated events never grow the row; re-sending the same event changes nothing.
+Owners resolve a flag with a reason (resolve()): rotate mints a new version and
+clears the flag, dismiss closes it. A dismissed flag reopens only when evidence
+arrives at a higher level than the level it was dismissed at.
 """
 import re
 
+from boto3.dynamodb.conditions import Attr
+from burn_contracts import fingerprint as fp
 from burn_contracts.events import FLAG_LEVELS, utc_now_iso
 from burn_contracts.names import CREDENTIALS_TABLE, SESSION_ID_RE, is_canary_ref
 
 import aws
+import fingerprints
 import registry
 
 RANK = {level: rank for rank, level in enumerate(FLAG_LEVELS, start=1)}
@@ -34,6 +43,17 @@ SOURCES_FOR = {
     "reported": {"provider"},
 }
 MAX_REFS_PER_CALL = 100
+MAX_INSTANCES = 500  # ids kept per flag; the count stops growing there
+REASON_LENGTH = (3, 300)
+BY_RE = re.compile(r"^[A-Za-z0-9 ._@-]{1,64}$")
+
+
+class NotFound(Exception):
+    pass
+
+
+class Conflict(Exception):
+    pass
 
 _EVIDENCE_FIELDS = {
     "source": re.compile(r"^[a-z_]{1,32}$"),
@@ -90,13 +110,13 @@ def _raise(secret_ref: str, level: str, evidence: dict) -> bool:
         aws.table(CREDENTIALS_TABLE).update_item(
             Key={"secret_ref": secret_ref},
             UpdateExpression=(
-                "SET #s = :flagged, flag_level = :level, flag_rank = :rank, flag_updated_at = :now, "
+                "SET #s = :flagged, flag_level = :level, flag_rank = :rank, flag_updated_at = :now, flag_state = :open, "
                 "flagged_at = if_not_exists(flagged_at, :now), flagged_by = if_not_exists(flagged_by, :by), "
                 "#ev = if_not_exists(#ev, :ev)"),
             ConditionExpression=condition,
             ExpressionAttributeNames={"#s": "status", "#ev": f"flag_evidence_{level}"},
             ExpressionAttributeValues={
-                ":flagged": "flagged", ":level": level, ":rank": RANK[level], ":now": now,
+                ":flagged": "flagged", ":level": level, ":rank": RANK[level], ":now": now, ":open": "open",
                 ":by": evidence.get("agent_id", "system"), ":ev": {**evidence, "recorded_at": now},
                 ":canary": "canary",
             },
@@ -122,10 +142,25 @@ def _fill_evidence(secret_ref: str, level: str, evidence: dict) -> None:
         pass  # first evidence already kept, or not flaggable
 
 
-def raise_level(secret_ref: str, level: str, evidence: dict) -> dict | None:
-    """Raise one credential to at least `level`.
+def _add_instance(secret_ref: str, agent_id: str | None) -> None:
+    """Count the instance behind this evidence (a string set dedupes; capped)."""
+    if not agent_id or agent_id == "system":
+        return
+    try:
+        aws.table(CREDENTIALS_TABLE).update_item(
+            Key={"secret_ref": secret_ref}, UpdateExpression="ADD flag_instances :a",
+            ConditionExpression="attribute_exists(flag_rank) AND (attribute_not_exists(flag_instances) "
+                                "OR size(flag_instances) < :max OR contains(flag_instances, :id))",
+            ExpressionAttributeValues={":a": {agent_id}, ":id": agent_id, ":max": MAX_INSTANCES},
+        )
+    except registry.conditional_failed():
+        pass  # not flagged, or the cap is reached
 
-    Returns {"secret_ref", "flag_level", "changed"} with the level after the call, or None
+
+def raise_level(secret_ref: str, level: str, evidence: dict) -> dict | None:
+    """Raise one credential to at least `level` and count the instance behind the evidence.
+
+    Returns {"secret_ref", "flag_level", "changed", "instance_count"} after the call, or None
     when there is nothing to flag (not registered, a canary, or `reported` for a
     credential nobody flagged).
     """
@@ -133,13 +168,98 @@ def raise_level(secret_ref: str, level: str, evidence: dict) -> dict | None:
     _check(level, evidence)
     if not isinstance(secret_ref, str) or is_canary_ref(secret_ref):
         return None
-    if _raise(secret_ref, level, evidence):
-        return {"secret_ref": secret_ref, "flag_level": level, "changed": True}
-    _fill_evidence(secret_ref, level, evidence)
+    changed = _raise(secret_ref, level, evidence)
+    if not changed:
+        _fill_evidence(secret_ref, level, evidence)
+    _add_instance(secret_ref, evidence.get("agent_id"))
     row = registry.get(secret_ref, consistent=True)
     if not row or row.get("secret_type") == "canary" or "flag_level" not in row:
         return None
-    return {"secret_ref": secret_ref, "flag_level": row["flag_level"], "changed": False}
+    return {"secret_ref": secret_ref, "flag_level": row["flag_level"], "changed": changed,
+            "instance_count": len(row.get("flag_instances") or ())}
+
+
+def view(row: dict, state: str | None = None) -> dict:
+    """The contract's Flag shape (contracts/minter.openapi.yaml). No values, ids only."""
+    return {
+        "secret_ref": row["secret_ref"], "secret_type": row.get("secret_type"),
+        "owner_agent_id": row.get("owner_agent_id"), "flag_level": row["flag_level"],
+        "instance_count": len(row.get("flag_instances") or ()), "state": state or row.get("flag_state", "open"),
+        "flagged_at": row.get("flagged_at"), "updated_at": row.get("flag_updated_at"),
+        "evidence": {lvl: row[f"flag_evidence_{lvl}"] for lvl in FLAG_LEVELS if f"flag_evidence_{lvl}" in row},
+        "resolution": row.get("flag_resolution"),
+    }
+
+
+def list_flags() -> list[dict]:
+    kwargs = {"FilterExpression": Attr("flag_rank").exists()}
+    rows = []
+    while True:
+        page = aws.table(CREDENTIALS_TABLE).scan(**kwargs)
+        rows += page["Items"]
+        if "LastEvaluatedKey" not in page:
+            break
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    flags = [view(r) for r in rows if r.get("secret_type") != "canary"]
+    flags.sort(key=lambda f: f["updated_at"] or "", reverse=True)
+    return sorted(flags, key=lambda f: (f["state"] != "open", -RANK[f["flag_level"]]))
+
+
+def _clean_reason(reason) -> str:
+    if not isinstance(reason, str):
+        raise ValueError("reason is required")
+    reason = " ".join(reason.split())
+    if not REASON_LENGTH[0] <= len(reason) <= REASON_LENGTH[1] or not reason.isprintable():
+        raise ValueError(f"reason must be {REASON_LENGTH[0]}-{REASON_LENGTH[1]} printable characters")
+    hmac_key = fingerprints.key()
+    for token in {reason, *re.split(r"[\s\"'`,;()<>]+", reason)}:
+        if len(token) >= 8 and fingerprints.get(fp.fingerprint(token, hmac_key)):
+            raise ValueError("reason contains a registered credential; describe it instead")
+    return reason
+
+
+def _flagged_row(secret_ref) -> dict:
+    row = registry.get(secret_ref, consistent=True) if isinstance(secret_ref, str) else None
+    if not row or row.get("secret_type") == "canary" or "flag_rank" not in row:
+        raise NotFound("not a flagged credential")
+    return row
+
+
+def resolve(secret_ref: str, action: str, reason: str, by: str | None, rotate_credential) -> dict:
+    """Owner decision. rotate_credential(row) -> new version, for action "rotate"."""
+    if action not in ("rotate", "dismiss"):
+        raise ValueError("action must be rotate or dismiss")
+    if by is not None and (not isinstance(by, str) or not BY_RE.match(by)):
+        raise ValueError("invalid by")
+    reason = _clean_reason(reason)
+    row = _flagged_row(secret_ref)
+    decision = {"action": action, "reason": reason, "by": by, "at": utc_now_iso(), "level": row["flag_level"]}
+    if action == "dismiss":
+        try:  # only the level the owner looked at: a raise in between needs a fresh review
+            new = aws.table(CREDENTIALS_TABLE).update_item(
+                Key={"secret_ref": secret_ref},
+                UpdateExpression="SET flag_state = :d, flag_resolution = :r, #s = :active, flag_updated_at = :t",
+                ConditionExpression="flag_rank = :rank",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":d": "dismissed", ":r": decision, ":active": "active",
+                                           ":t": decision["at"], ":rank": row["flag_rank"]},
+                ReturnValues="ALL_NEW")["Attributes"]
+        except registry.conditional_failed():
+            raise Conflict("the flag changed while it was being reviewed; review it again")
+        return {"flag": view(new), "rotated_to_version": None}
+    version = rotate_credential(row)
+    final = view({**row, "flag_resolution": decision}, state="rotated")
+    # The new version is a different secret: it starts unflagged. Keep a summary of the old flag.
+    aws.table(CREDENTIALS_TABLE).update_item(
+        Key={"secret_ref": secret_ref},
+        UpdateExpression="SET #s = :active, last_flag = :summary REMOVE flag_level, flag_rank, flag_state, "
+                         "flag_resolution, flag_instances, flagged_at, flagged_by, flag_updated_at, "
+                         "flag_evidence_seen, flag_evidence_attempted, flag_evidence_reported",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":active": "active", ":summary": {
+            "flag_level": final["flag_level"], "instance_count": final["instance_count"], "resolution": decision}},
+    )
+    return {"flag": final, "rotated_to_version": version}
 
 
 def raise_many(secret_refs, level: str, evidence: dict) -> list[dict]:

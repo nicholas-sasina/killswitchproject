@@ -54,6 +54,11 @@ def _route(method: str, path: str, body: dict, query: dict):
         return canaries.issue(body.get("agent_id", ""), match["session_id"])
     if match and method == "GET":
         return canaries.get(query.get("agent_id", ""), match["session_id"])
+    if path == "/flags" and method == "GET":
+        return {"flags": flags.list_flags()}
+    if path == "/flags/resolve" and method == "POST":
+        return flags.resolve(body.get("secret_ref"), body.get("action"), body.get("reason"), body.get("by"),
+                             credentials.rotate_flagged)
     if path == "/flags" and method == "POST":
         return {"flags": flags.raise_many(body.get("secret_refs"), body.get("level"), body.get("evidence"))}
     if path == "/shared/credentials" and method == "POST":
@@ -77,8 +82,10 @@ def handler(event, context=None):
         result = _route(event.get("method", ""), event.get("path", ""), body, event.get("query") or {})
     except ValueError as err:
         return {"statusCode": 400, "body": {"error": str(err)}}
-    except canaries.NotFound as err:
+    except (canaries.NotFound, flags.NotFound) as err:
         return {"statusCode": 404, "body": {"error": str(err)}}
+    except flags.Conflict as err:
+        return {"statusCode": 409, "body": {"error": str(err)}}
     except Exception:
         log.exception("minter request failed")  # the traceback holds no credential values
         return {"statusCode": 500, "body": {"error": "internal error"}}

@@ -4,8 +4,9 @@ import aws_key
 import fingerprints
 import flags
 import registry
+import shared
 import vault
-from burn_contracts.names import agent_secret_ref, owner_of
+from burn_contracts.names import SHARED_OWNER, agent_secret_ref, owner_of
 
 BY_TYPE = {"api_key": api_key, "aws_key": aws_key}
 
@@ -52,6 +53,16 @@ def rotate(agent_id: str, exposed_refs: list[str], evidence: dict | None = None)
             flagged.append(ref)
             levels[ref] = result["flag_level"]
     return {"rotated": rotated, "flagged": flagged, "flag_levels": levels}
+
+
+def rotate_flagged(row: dict) -> int:
+    """Rotate one flagged credential on its owner's decision. Returns the new version."""
+    if row["owner_agent_id"] == SHARED_OWNER:
+        return shared.rotate(row)
+    if row["secret_type"] not in BY_TYPE:
+        raise ValueError("this credential cannot be rotated")
+    BY_TYPE[row["secret_type"]].rotate(row)
+    return int(registry.get(row["secret_ref"], consistent=True)["version"])
 
 
 def delete(agent_id: str) -> list[str]:
