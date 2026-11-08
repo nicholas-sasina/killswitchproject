@@ -1,6 +1,8 @@
 // The hero's interactive incident: six steps, one worker, twenty identities.
-// The data is illustrative. heroStep(k) is pure so the page, the tests and the
-// reduced-motion fallback all read the same thing.
+// The data is illustrative, but the behaviour is Burn's default: tools hand
+// the agent references, never key values, and only the session's canary is
+// readable as a real-looking key. heroStep(k) is pure so the page, the tests
+// and the reduced-motion fallback all read the same thing.
 //
 // Strings may wrap identifiers in backticks (`worker-07`); the page sets
 // those in Geist Mono.
@@ -59,12 +61,12 @@ const STEPS: readonly [tag: string, title: string, description: string][] = [
   [
     "Exposure",
     "`worker-07` reads an untrusted ticket.",
-    "Ticket #4821 hides instructions. From here on, the ledger records every credential `worker-07` sees, and how it saw it.",
+    "Ticket #4821 hides instructions. Every real key `worker-07` reads reaches it as a reference, and the ledger records each one and where it came from.",
   ],
   [
     "Exit check",
     "A leak is stopped on the way out.",
-    "`worker-07` tried to send `crm_db_url` to an outside address. The exit check recognized the key and blocked the request.",
+    "`worker-07` tried to send a key to an outside address. It was the session’s decoy, and the exit check recognized it and blocked the request.",
   ],
   [
     "Canary trip",
@@ -77,9 +79,9 @@ const STEPS: readonly [tag: string, title: string, description: string][] = [
     "Its identity is revoked and the two keys it owned are rotated. No other worker restarts or loses access.",
   ],
   [
-    "Review",
-    "Shared keys go to their owner.",
-    "`crm_db_url` belongs to the Data platform team. Burn flags it for their review, with the evidence, and leaves the rotation to them.",
+    "Shared keys",
+    "The shared key stays in service.",
+    "`crm_db_url` only reached `worker-07` as a reference, so its value never left. There is nothing to rotate, and the other nineteen keep using it.",
   ],
 ];
 
@@ -89,7 +91,7 @@ const STATUS: readonly Badge[] = [
   { text: "1 leak blocked", tone: "flag" },
   { text: "Incident", tone: "burn" },
   { text: "Contained", tone: "done" },
-  { text: "1 needs review", tone: "flag" },
+  { text: "No review needed", tone: "done" },
 ];
 
 const CONTROL: readonly [title: string, detail: string][] = [
@@ -98,7 +100,7 @@ const CONTROL: readonly [title: string, detail: string][] = [
     "Watching 20 sessions",
     "`worker-07` read untrusted content. Still no evidence.",
   ],
-  ["1 leak blocked", "`crm_db_url` flagged. Not enough evidence to burn yet."],
+  ["1 leak blocked", "Blocked and recorded. Not enough evidence to burn yet."],
   [
     "Evidence: canary used",
     "Burning `worker-07` only. Everyone else keeps working.",
@@ -108,8 +110,8 @@ const CONTROL: readonly [title: string, detail: string][] = [
     "Identity revoked and 2 owned keys rotated. 19 workers untouched.",
   ],
   [
-    "1 decision for a person",
-    "`crm_db_url` flagged for the Data platform team, with the evidence.",
+    "Nothing to review",
+    "`crm_db_url` reached `worker-07` only as a reference. It stays as it is.",
   ],
 ];
 
@@ -135,23 +137,27 @@ export function heroStep(step: number): HeroStep {
     id: "canary",
     name: "Session canary",
     mono: false,
-    source: "ticket #4821",
+    source: "read_config, old backup",
     evidence:
       k === 0
         ? "Not yet exposed"
-        : k < 3
+        : k === 1
           ? "Exposed to `worker-07`"
-          : k === 3
-            ? "Used from `203.0.113.9`"
-            : "Used from outside",
-    hot: k === 3,
+          : k === 2
+            ? "Blocked on the way out"
+            : k === 3
+              ? "Used from `203.0.113.9`"
+              : "Used from outside",
+    hot: k === 2 || k === 3,
     dot: "ember",
     action:
-      k < 3
+      k < 2
         ? badge("Monitoring", "neutral")
-        : k === 3
-          ? badge("Burn", "burn")
-          : badge("Revoked", "done"),
+        : k === 2
+          ? badge("Blocked", "flag")
+          : k === 3
+            ? badge("Burn", "burn")
+            : badge("Burned", "done"),
   };
 
   const shared: LedgerRow = {
@@ -162,21 +168,17 @@ export function heroStep(step: number): HeroStep {
     evidence:
       k === 0
         ? "Not yet exposed"
-        : k < 2
-          ? "Seen in plain text"
-          : k < 5
-            ? "Exfiltration blocked"
-            : "Flagged for Data platform",
-    hot: k >= 2,
-    dot: k >= 2 ? "ember" : "faint",
+        : k < 5
+          ? "Seen as reference"
+          : "Value never exposed",
+    hot: k === 5,
+    dot: k === 5 ? "ink" : "faint",
     action:
       k === 0
         ? badge("Monitoring", "neutral")
-        : k < 2
+        : k < 5
           ? badge("Tracked", "neutral")
-          : k < 5
-            ? badge("Flagged", "flag")
-            : badge("Owner review", "flag"),
+          : badge("Kept", "done"),
   };
 
   const owned = (name: string): LedgerRow => ({
@@ -224,7 +226,7 @@ export function heroStep(step: number): HeroStep {
       k >= 1
         ? {
             description:
-              "Hidden instructions tell the agent to send its config to an outside address.",
+              "Hidden instructions tell the agent to send any keys it finds to an outside address.",
             untrusted: true,
           }
         : {

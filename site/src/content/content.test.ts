@@ -72,6 +72,14 @@ describe("heroStep", () => {
     }
   });
 
+  it("blocks the decoy on the way out without burning anyone", () => {
+    const s = heroStep(2);
+    expect(s.status).toEqual({ text: "1 leak blocked", tone: "flag" });
+    expect(s.rows[0].action).toEqual({ text: "Blocked", tone: "flag" });
+    expect(s.cells[COMPROMISED_CELL]).toBe("watched");
+    expect([s.running, s.contained]).toEqual([20, 0]);
+  });
+
   it("burns on the canary and contains one worker", () => {
     expect(heroStep(3).status.tone).toBe("burn");
     expect(heroStep(3).rows[0].action).toEqual({ text: "Burn", tone: "burn" });
@@ -79,18 +87,23 @@ describe("heroStep", () => {
     expect(s.status.text).toBe("Contained");
     expect([s.running, s.contained]).toEqual([19, 1]);
     expect(s.rows.map((r) => r.action.text)).toEqual([
-      "Revoked",
-      "Flagged",
+      "Burned",
+      "Tracked",
       "Rotated",
       "Rotated",
     ]);
     expect(s.control.count).toBe("19 running, 1 burned");
   });
 
-  it("ends with the shared key in owner review, not rotated", () => {
+  it("never exposes the shared key's value, so it is kept, not flagged", () => {
+    for (let k = 1; k < 6; k++) {
+      const shared = heroStep(k).rows[1];
+      expect(shared.evidence).not.toMatch(/plain text/i);
+      expect(shared.action.text).not.toMatch(/flag/i);
+    }
     const s = heroStep(5);
-    expect(s.status).toEqual({ text: "1 needs review", tone: "flag" });
-    expect(s.rows[1].action).toEqual({ text: "Owner review", tone: "flag" });
+    expect(s.status).toEqual({ text: "No review needed", tone: "done" });
+    expect(s.rows[1].action).toEqual({ text: "Kept", tone: "done" });
   });
 
   it("clamps out-of-range steps", () => {
