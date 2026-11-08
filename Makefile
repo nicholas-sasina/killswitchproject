@@ -11,10 +11,10 @@ export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
 
 # Folders with a Python test suite (each has its own uv project).
-PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli
+PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli infra
 
 .DEFAULT_GOAL := help
-.PHONY: burn help hooks deploy env test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm teardown
+.PHONY: burn help hooks deploy env person automation-person test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm teardown
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
