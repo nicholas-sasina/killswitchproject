@@ -5,6 +5,7 @@ the session row. A session row only exists once everything it needs exists.
 """
 import json
 import secrets
+import time
 
 import badges  # bundled from the identity code at deploy time
 import boto3
@@ -204,6 +205,9 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         canary.issue_for_session(agent_id, session_id, role_name)  # None when the role has canaries off
         badge = badges.create_badge(agent_id, session_id)
         badge_ref = _store_badge(agent_id, badge)
+        # Read inside the try: if the values cannot be read the instance has nothing to run with,
+        # so the join fails and is cleaned up like any other failed join.
+        own_secrets = _own_secrets(badge, credentials)
 
         now = _now()
         db.table(names.SESSIONS_TABLE).put_item(Item={
@@ -230,7 +234,41 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         "session_id": session_id, "agent_id": agent_id, "badge_ref": badge_ref, "credentials": credentials,
         "role": role_name, "parent_session": parent_session, "token_id": token_id,
         "tools": limits["tools"], "egress": limits["egress"],
+        "secrets": own_secrets,  # returned once; never logged, stored or sent again
     }
+
+
+SECRET_READ_ATTEMPTS = 4
+
+
+def _read_secret(client, ref: str) -> str:
+    """GetSecretValue with a short backoff: a secret the minter just wrote may not be readable yet."""
+    for attempt in range(SECRET_READ_ATTEMPTS):
+        try:
+            return client.get_secret_value(SecretId=ref)["SecretString"]
+        except ClientError as exc:
+            code = exc.response["Error"]["Code"]
+            retryable = code == "ResourceNotFoundException" or code in errors.THROTTLE_CODES
+            if not retryable or attempt == SECRET_READ_ATTEMPTS - 1:
+                raise
+            time.sleep(0.2 * 2 ** attempt)
+
+
+def _own_secrets(badge: dict, credentials: list[dict]) -> dict:
+    """The instance's own secret values for the join reply: badge plus the api_key / aws_key minted.
+
+    Only these two credential types are read, and only the grant on burn/agent-*/api_key and
+    aws_key allows it. The values are returned to the caller and not printed or stored here.
+    """
+    out = {"badge": {k: badge[k] for k in ("client_id", "client_secret", "token_url", "scope")}}
+    client = boto3.client("secretsmanager", region_name=names.REGION)
+    for cred in credentials:
+        if cred.get("type") == "api_key":
+            out["api_key"] = _read_secret(client, cred["secret_ref"])
+        elif cred.get("type") == "aws_key":
+            raw = json.loads(_read_secret(client, cred["secret_ref"]))
+            out["aws_key"] = {"access_key_id": raw["access_key_id"], "secret_access_key": raw["secret_access_key"]}
+    return out
 
 
 def _recheck_after_write(agent_id, session_id, badge, token_id, parent_session):
