@@ -485,3 +485,67 @@ export function tokenLine(row: TokenRow, role: string, now: Date): string {
     .map((part) => `${part}.`)
     .join(" ");
 }
+
+// ------------------------------------------------------------ the roles list
+
+export interface ListSquare {
+  key: string;
+  state: AgentState;
+  /** "worker-07, running" */
+  label: string;
+}
+
+export interface ListRow {
+  name: string;
+  /** "Support automation · managed in burn.yaml" */
+  line: string;
+  /** A square per agent running now and per agent burned today. */
+  squares: ListSquare[];
+  running: number;
+  /** "2 burned today", "3 finished", "No agents yet". */
+  note: string;
+  /** Whether the note is a burn today. */
+  hot: boolean;
+}
+
+/**
+ * One row per role in the model's order (most running, then most burned
+ * today, then name), roles with no agents included. The owner is the
+ * role's, or else the one its agents report.
+ */
+export function rolesList(model: ConsoleModel): ListRow[] {
+  return model.roles.map((group) => {
+    const owner =
+      group.role?.owner ??
+      group.agents.find((agent) => agent.owner)?.owner ??
+      "";
+    const where = managedIn(group.role);
+    const line = owner
+      ? [owner, where && `managed in ${where}`].filter(Boolean).join(" · ")
+      : where && `Managed in ${where}`;
+    const squares: ListSquare[] = group.agents
+      .filter((agent) => agent.state === "running" || agent.burnedToday)
+      .map((agent) => ({
+        key: agent.key,
+        state: agent.state,
+        label: `${agent.name}, ${agent.state === "running" ? "running" : "burned today"}`,
+      }));
+    const burnedToday = group.burnedToday.length;
+    const finished = group.finished.length;
+    const note = burnedToday
+      ? `${burnedToday} burned today`
+      : finished
+        ? `${finished} finished`
+        : group.agents.length
+          ? "Nothing burned today"
+          : "No agents yet";
+    return {
+      name: group.name,
+      line,
+      squares,
+      running: group.running.length,
+      note,
+      hot: burnedToday > 0,
+    };
+  });
+}

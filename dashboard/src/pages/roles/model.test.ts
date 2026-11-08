@@ -21,6 +21,7 @@ import {
   roleRows,
   rolePlural,
   roleTokens,
+  rolesList,
   sharedKeys,
   startedBy,
   tokenLine,
@@ -439,5 +440,73 @@ describe("join tokens", () => {
         now,
       ),
     ).toBe(false);
+  });
+});
+
+describe("rolesList", () => {
+  const roles: Role[] = [
+    {
+      name: "worker",
+      tools: [],
+      owner: "Support automation",
+      managed_by: "code",
+    },
+    { name: "triage", tools: [], managed_by: "ui" },
+    { name: "reader", tools: [], managed_by: "code" },
+  ];
+  // worker-02 was last seen, so burned, at 7:30 PM today.
+  const today = fleet.map((agent) =>
+    agent.session_id === "w2" ? { ...agent, last_seen: at(19, 30) } : agent,
+  );
+  const list = rolesList(
+    buildConsole({ fleet: mergeFleet([], today), events: [], roles, now }),
+  );
+
+  const row = (name: string) => list.find((found) => found.name === name)!;
+
+  it("lists every role, most running first, then most burned today", () => {
+    expect(list.map((found) => found.name)).toEqual([
+      "worker",
+      "reader",
+      "triage",
+    ]);
+  });
+
+  it("says who owns a role and where it is managed", () => {
+    expect(list.map((found) => found.line)).toEqual([
+      "Support automation · managed in burn.yaml",
+      "Managed in burn.yaml",
+      "Managed in this dashboard",
+    ]);
+  });
+
+  it("draws a square per running agent and per agent burned today", () => {
+    expect(row("worker").squares.map((square) => square.label)).toEqual([
+      "worker-02, burned today",
+      "worker-03, running",
+      "worker-04, running",
+    ]);
+    expect(row("worker")).toMatchObject({
+      running: 2,
+      note: "1 burned today",
+      hot: true,
+    });
+  });
+
+  it("notes what is left when nothing burned today", () => {
+    expect(row("reader")).toMatchObject({
+      running: 2,
+      note: "Nothing burned today",
+      hot: false,
+    });
+    expect(row("triage")).toMatchObject({
+      running: 0,
+      squares: [],
+      note: "No agents yet",
+    });
+    const finished = rolesList(
+      modelOf([instance("w1", "worker", "exited", at(19, 0))]),
+    );
+    expect(finished[0].note).toBe("1 finished");
   });
 });
