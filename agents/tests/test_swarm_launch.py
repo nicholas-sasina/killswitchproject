@@ -162,7 +162,7 @@ def test_mock_swarm_ignores_the_environment_and_never_uses_a_real_token(monkeypa
     monkeypatch.setenv("BURN_GATEWAY_URL", "https://gateway.example.com/mcp")
     got = run_main(monkeypatch, "--mock")
     assert got["api_url"] == "http://localhost:8700" and got["mock"] is True
-    assert "real-admin-token" not in repr(vars(got["api"])) and got["api"]._token == "mock"
+    assert got["api"].auth_headers() == {"x-burn-demo-token": "mock"}  # never the environment's token
     assert got["gateway_url"] == "http://localhost:8701/mcp"
 
 
@@ -178,8 +178,36 @@ def test_real_swarm_reads_the_environment_and_needs_the_stack(monkeypatch):
     with pytest.raises(SystemExit, match="make env"):
         run_main(monkeypatch)
     monkeypatch.setenv("BURN_API_URL", "https://api.example.com")
-    monkeypatch.setenv("BURN_DEMO_TOKEN", "t")
-    monkeypatch.setenv("BURN_GATEWAY_URL", "https://gw.example.com/mcp")
+    monkeypatch.setenv("BURN_GATEWAY_URL", "https://gw.example.com/mcp")  # no demo token needed
     monkeypatch.setattr(run_swarm.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 1})())
     with pytest.raises(SystemExit, match="start the stack first"):
         run_main(monkeypatch)
+
+
+def test_real_swarm_creates_the_join_token_as_the_automation_person(monkeypatch):
+    monkeypatch.setattr(run_swarm, "load_dotenv", lambda: None)
+    monkeypatch.setenv("BURN_API_URL", "https://api.example.com")
+    monkeypatch.setenv("BURN_GATEWAY_URL", "https://gw.example.com/mcp")
+    monkeypatch.setenv("BURN_DEMO_TOKEN", "real-admin-token")
+    monkeypatch.setattr(run_swarm, "automation_headers", lambda: {"authorization": "Bearer automation-id"})
+    monkeypatch.setattr(run_swarm.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0})())
+    got = run_main(monkeypatch)
+    assert got["api"].auth_headers() == {"authorization": "Bearer automation-id"}
+    assert got["api"].base_url == "https://api.example.com"
+
+
+def test_the_person_client_sends_only_the_headers_it_is_given(monkeypatch):
+    import io
+    import burn_cli.api
+    sent = []
+
+    def urlopen(req, timeout):
+        sent.append({k.lower(): v for k, v in req.header_items()})
+        return io.BytesIO(json.dumps({"token": JOIN}).encode())
+
+    monkeypatch.setattr(burn_cli.api.urllib.request, "urlopen", urlopen)
+    reply = swarm_launch.PersonApi("https://api.example.invalid", lambda: {"authorization": "Bearer automation-id"}).request(
+        "POST", "/roles/worker/tokens", {"uses": 1, "ttl": 60})
+    assert reply == {"token": JOIN}
+    (headers,) = sent
+    assert headers["authorization"] == "Bearer automation-id" and "x-burn-demo-token" not in headers

@@ -7,7 +7,7 @@ through `docker run -e NAME` (the values live in the launcher's environment, nev
 containers need no AWS access. Workers make no model calls, so a swarm costs nothing.
 
 Without --mock the workers run on the demo stack's internal network, whose one way out is the egress proxy
-(start the stack first); the Burn API, token and Gateway come from the environment or .env (`make env`).
+(start the stack first); the Burn API and Gateway come from the environment or .env (`make env`).
 With --mock they run against the mock servers on the host, which are the only servers it will talk to.
 """
 import argparse
@@ -18,7 +18,9 @@ import threading
 from urllib.parse import urlsplit
 
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
-from swarm_launch import IMAGE, NETWORK, Api, InstanceApi, start_workers
+from burn_contracts.automation import automation_headers
+from burn_contracts.names import DEMO_TOKEN_HEADER
+from swarm_launch import IMAGE, NETWORK, InstanceApi, PersonApi, start_workers
 
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
@@ -66,22 +68,24 @@ def main() -> int:
 
     if args.mock:
         # The environment and .env (which `make env` points at the real stack) are ignored, so a mock swarm can
-        # never use the real admin token or create real sessions.
-        api_url, gateway, token = args.api_url, args.gateway_url, "mock"
+        # never sign in to the real stack or create real sessions.
+        api_url, gateway = args.api_url, args.gateway_url
+        api = PersonApi(api_url, lambda: {DEMO_TOKEN_HEADER: "mock"})
         for url in (api_url, gateway):
             require_local(url)
     else:
         load_dotenv()
-        api_url, token, gateway = (os.environ.get(n, "") for n in ("BURN_API_URL", "BURN_DEMO_TOKEN", "BURN_GATEWAY_URL"))
-        if not (api_url and token and gateway):
-            sys.exit("BURN_API_URL, BURN_DEMO_TOKEN and BURN_GATEWAY_URL are required: run `make env` first")
+        api_url, gateway = (os.environ.get(n, "") for n in ("BURN_API_URL", "BURN_GATEWAY_URL"))
+        if not (api_url and gateway):
+            sys.exit("BURN_API_URL and BURN_GATEWAY_URL are required: run `make env` first")
+        api = PersonApi(api_url, automation_headers)  # the join-token call, as the automation person
         if subprocess.run(["docker", "network", "inspect", NETWORK], capture_output=True).returncode:
             sys.exit(f"the demo stack's network {NETWORK} does not exist: start the stack first (make demo)")
 
     docker(["docker", "build", "-q", "-f", str(AGENTS_DIR / "Dockerfile.swarm"), "-t", IMAGE, str(REPO_ROOT)])
     names: list[str] = []
     try:
-        names = start_workers(Api(api_url, token), InstanceApi(api_url), args.role, args.count, api_url=api_url,
+        names = start_workers(api, InstanceApi(api_url), args.role, args.count, api_url=api_url,
                               gateway_url=gateway, mock=args.mock, interval=args.interval,
                               certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker)
         print(f"started {len(names)} worker(s) of role {args.role}; Ctrl-C stops them")
