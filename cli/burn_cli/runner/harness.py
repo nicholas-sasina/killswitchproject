@@ -53,6 +53,11 @@ CLAUDE = Preset(
         # Burn's few tools go straight into the request. Behind tool search, Haiku on Bedrock found them but
         # could not call them.
         "ENABLE_TOOL_SEARCH": "false",
+        # `claude -p` connects MCP servers in the background and can send its first turn before Burn's tools are
+        # there. It waits for them instead, for at most 15 s, which covers a cold Gateway. An interactive session
+        # is not held up.
+        "MCP_CONNECTION_NONBLOCKING": "false",
+        "CLAUDE_CODE_MCP_STARTUP_WAIT_MS": "15000",
     },
     files=_claude_files,
     model=f"Bedrock, {BEDROCK_MODEL}",

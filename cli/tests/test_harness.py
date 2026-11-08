@@ -88,6 +88,8 @@ def test_claude_gets_bedrock_with_the_instances_own_key(stack, fake_claude):
         assert env[name] == MODEL, name
     assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
     assert env["ENABLE_TOOL_SEARCH"] == "false"  # Burn's tools are sent with every request, never deferred
+    # -p waits for Burn's MCP server before its first turn, for a bounded time
+    assert env["MCP_CONNECTION_NONBLOCKING"] == "false" and env["CLAUDE_CODE_MCP_STARTUP_WAIT_MS"] == "15000"
     assert env["AWS_ACCESS_KEY_ID"].startswith("AKIA") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
     for name in ("AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_API_KEY"):
         assert name not in env, name
