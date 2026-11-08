@@ -5,7 +5,16 @@ import urllib.request
 
 
 class ApiError(Exception):
-    pass
+    """An API call failed. `status` is the HTTP status, or None when the API was unreachable."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def retryable(self) -> bool:
+        """Rate limits, server errors and network failures can succeed on a later attempt."""
+        return self.status is None or self.status == 429 or self.status >= 500
 
 
 class Api:
@@ -25,6 +34,6 @@ class Api:
                 detail = json.loads(err.read()).get("error", "")
             except ValueError:
                 detail = ""
-            raise ApiError(f"{method} {path} failed with HTTP {err.code}" + (f": {detail}" if detail else "")) from None
+            raise ApiError(f"{method} {path} failed with HTTP {err.code}" + (f": {detail}" if detail else ""), err.code) from None
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
             raise ApiError(f"cannot reach the Burn API ({getattr(exc, 'reason', exc)})") from None

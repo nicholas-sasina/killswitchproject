@@ -1,13 +1,19 @@
-"""Command parsing and the six commands. Exit codes: 0 ok, 1 API/network error, 2 usage/config."""
+"""Command parsing and the commands. Exit codes: 0 ok, 1 API/network error, 2 usage/config."""
 import argparse
+import getpass
 import json
 import sys
 import time
+from pathlib import Path
 
-from . import config, render
+from . import config, render, spec
 from .api import Api, ApiError
 
 CLOUDTRAIL_NOTE = "CloudTrail event history can lag 5-15 minutes behind real activity."
+
+
+class UsageError(Exception):
+    pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,10 +21,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="print the raw API response")
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("agents", help="list agents and their status")
-    kill = sub.add_parser("kill", help="burn an agent: revoke its badge and rotate its credentials")
-    kill.add_argument("agent_id")
+    kill = sub.add_parser("kill", help="burn an instance, a role, a lineage or a join token's instances",
+                          description="Burn what you name: a SESSION (one instance), --role (every active instance), "
+                          "--lineage SESSION (an instance and its descendants) or --token TOKEN_ID (every instance "
+                          "that joined with it; the token is revoked too). An agent id (agent-...) burns that one agent.")
+    kill.add_argument("target", nargs="?", metavar="SESSION", help="a session id (sess_...) or an agent id (agent-...)")
+    scope = kill.add_mutually_exclusive_group()
+    scope.add_argument("--role", help="burn every active instance of this role")
+    scope.add_argument("--lineage", metavar="SESSION", help="burn this instance and all its descendants")
+    scope.add_argument("--token", metavar="TOKEN_ID", help="burn every instance that joined with this token")
     kill.add_argument("--reason", default="")
     kill.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    login = sub.add_parser("login", help="store the API URL and token")
+    login.add_argument("--url", help="Burn API URL (default: BURN_API_URL or a prompt)")
+    login.add_argument("--token-stdin", action="store_true", help="read the token from stdin instead of prompting")
+    login.add_argument("--no-verify", action="store_true", help="store without checking them against the API")
+    init = sub.add_parser("init", help="write a starter burn.yaml")
+    init.add_argument("-f", "--file", default=spec.DEFAULT_FILE)
+    init.add_argument("--force", action="store_true", help="overwrite an existing file")
+    apply = sub.add_parser("apply", help="create or update the roles in burn.yaml")
+    apply.add_argument("-f", "--file", default=spec.DEFAULT_FILE)
+    pull = sub.add_parser("pull", help="write roles made in the dashboard out to burn.yaml")
+    pull.add_argument("-f", "--file", default=spec.DEFAULT_FILE)
+    token = sub.add_parser("token", help="join tokens").add_subparsers(dest="token_command", required=True)
+    create = token.add_parser("create", help="create a join token for a role (shown once)")
+    create.add_argument("role")
+    create.add_argument("--uses", type=int, default=1, help="how many instances may join (default 1)")
+    create.add_argument("--ttl", type=int, default=3600, help="seconds until it expires (default 3600)")
+    ps = sub.add_parser("ps", help="list instances grouped by role, with lineage")
+    ps.add_argument("--role")
+    ps.add_argument("--status", choices=["active", "revoked", "exited"])
     sub.add_parser("ledger", help="credentials an agent has seen").add_argument("agent_id")
     sub.add_parser("blast-radius", help="CloudTrail activity of an agent's AWS keys").add_argument("agent_id")
     ev = sub.add_parser("events", help="show the event stream")
@@ -39,19 +71,45 @@ def cmd_agents(api, args):
           [[a["agent_id"], a.get("role"), a["status"], a.get("session_id"), a.get("exposures")] for a in agents]))
 
 
+def _burned_lines(r: dict) -> list[str]:
+    return [f"burned {r['agent_id']}: revoked={str(r['revoked']).lower()}",
+            f"sessions revoked: {', '.join(r['sessions_revoked']) or '-'}",
+            f"rotated: {', '.join(r['rotated']) or '-'}",
+            f"flagged: {', '.join(r['flagged']) or '-'}"]
+
+
+def _kill_target(args) -> tuple[str, str] | None:
+    """(scope, id) for the scoped burn the arguments name, or None for a plain agent id."""
+    if args.role:
+        return "role", args.role
+    if args.lineage:
+        return "lineage", args.lineage
+    if args.token:
+        return "token", args.token
+    if args.target and not args.target.startswith("agent-"):
+        return "instance", args.target
+    return None
+
+
 def cmd_kill(api, args):
+    scoped = _kill_target(args)
+    what = f"{scoped[0]} {scoped[1]}" if scoped else args.target
     if not args.yes:
-        answer = input(f"Burn {args.agent_id}? This revokes its badge and rotates its credentials. [y/N] ")
+        answer = input(f"Burn {what}? This revokes badges and rotates credentials. [y/N] ")
         if answer.strip().lower() != "y":
             print("aborted")
             return 1
-    body = {"agent_id": args.agent_id, **({"reason": args.reason} if args.reason else {})}
-    r = api.request("POST", "/burn", body)
-    lines = [f"burned {r['agent_id']}: revoked={str(r['revoked']).lower()}",
-             f"sessions revoked: {', '.join(r['sessions_revoked']) or '-'}",
-             f"rotated: {', '.join(r['rotated']) or '-'}",
-             f"flagged: {', '.join(r['flagged']) or '-'}"]
+    reason = {"reason": args.reason} if args.reason else {}
+    if scoped is None:
+        r = api.request("POST", "/burn", {"agent_id": args.target, **reason})
+        return _emit(args, r, "\n".join(_burned_lines(r)))
+    r = api.request("POST", "/burns", {"scope": scoped[0], "id": scoped[1], **reason})
+    lines = [f"burned {len(r['burned'])} instance(s) by {r['scope']} {r['id']}"]
+    for burned in r["burned"]:
+        lines += ["", *_burned_lines(burned)]
+    lines += [f"failed: {f.get('agent_id')}: {f.get('error')}" for f in r.get("failed", [])]
     _emit(args, r, "\n".join(lines))
+    return 1 if r.get("failed") else 0
 
 
 def cmd_ledger(api, args):
@@ -91,19 +149,93 @@ def cmd_events(api, args):
         time.sleep(1)
 
 
-COMMANDS = {"agents": cmd_agents, "kill": cmd_kill, "ledger": cmd_ledger,
+def cmd_login(args, dotenv):
+    url = (args.url or config.get("BURN_API_URL", dotenv) or input("Burn API URL: ")).strip().rstrip("/")
+    token = (sys.stdin.readline() if args.token_stdin else getpass.getpass("Demo token (hidden): ")).strip()
+    if not url or not token:
+        raise UsageError("both a URL and a token are required")
+    if not args.no_verify:
+        Api(url, token).request("GET", "/roles")  # a wrong URL or token stops here, before anything is stored
+    path = config.save(url, token, dotenv)
+    print(f"logged in to {url}; settings saved to {path}")
+
+
+def cmd_init(args):
+    path = Path(args.file)
+    if path.exists() and not args.force:
+        raise UsageError(f"{path} already exists (use --force to overwrite)")
+    path.write_text(spec.TEMPLATE)
+    print(f"wrote {path}. Edit it, then run `burn apply`.")
+
+
+def cmd_apply(api, args):
+    doc = spec.load(Path(args.file))  # validated before any call, so a typo changes nothing
+    saved = [api.request("PUT", f"/roles/{role['name']}", spec.role_body(role)) for role in doc["roles"]]
+    _emit(args, saved, "\n".join(f"applied role {r['name']} (managed by code)" for r in saved))
+
+
+def cmd_pull(api, args):
+    roles = [r for r in api.request("GET", "/roles")["roles"] if r["managed_by"] == "ui"]
+    if not roles:
+        print("no dashboard-made roles to pull")
+        return 0
+    path = Path(args.file)
+    path.write_text(spec.dump(spec.from_api(roles)))
+    print(f"wrote {len(roles)} role(s) to {path}: " + ", ".join(r["name"] for r in roles))
+    print("run `burn apply` to manage them from code; the dashboard then shows them read-only")
+
+
+def cmd_token_create(api, args):
+    r = api.request("POST", f"/roles/{args.role}/tokens", {"uses": args.uses, "ttl": args.ttl})
+    # The only place a join token is ever printed. The API will not show it again.
+    if args.json:
+        print(json.dumps(r, indent=2))
+        return
+    print(f"token {r['token_id']} for role {r['role']}: {r['uses']} use(s), expires {r['expires_at']}")
+    print("Shown once; it cannot be read again.\n")
+    print(r["token"])
+    print(f"\nJoin with:\n  BURN_JOIN_TOKEN={r['token']} burn run --role {r['role']} -- <command>")
+
+
+def cmd_ps(api, args):
+    query = "&".join(f"{k}={v}" for k, v in (("role", args.role), ("status", args.status)) if v)
+    instances = api.request("GET", "/instances" + (f"?{query}" if query else ""))["instances"]
+    if args.json:
+        return print(json.dumps(instances, indent=2))
+    if not instances:
+        return print("no instances")
+    by_id = {i["session_id"]: i for i in instances}
+
+    def depth(i):
+        return 0 if i.get("parent_session") not in by_id else 1 + depth(by_id[i["parent_session"]])
+
+    blocks = []
+    for role in sorted({i["role"] for i in instances}):
+        rows = [[("  " * depth(i)) + i["session_id"], i["agent_id"], i["status"], i.get("parent_session"),
+                 i.get("token_id"), i.get("last_seen")] for i in instances if i["role"] == role]
+        blocks.append(f"{role} ({len(rows)})\n" + render.table(
+            ["session", "agent", "status", "parent", "token", "last seen"], rows))
+    print("\n\n".join(blocks))
+
+
+COMMANDS = {"agents": cmd_agents, "apply": cmd_apply, "pull": cmd_pull, "ps": cmd_ps, "token": cmd_token_create, "kill": cmd_kill, "ledger": cmd_ledger,
             "blast-radius": cmd_blast_radius, "events": cmd_events}
 
 
 def run(argv: list[str] | None = None, dotenv=None) -> int:
-    args = build_parser().parse_args(argv)  # argparse exits 2 on bad usage
+    parser = build_parser()
+    args = parser.parse_args(argv)  # argparse exits 2 on bad usage
+    if args.command == "kill" and not (args.target or args.role or args.lineage or args.token):
+        parser.error("name what to burn: a SESSION, an agent id, --role, --lineage or --token")
     try:
+        if args.command in ("login", "init"):  # these run before any API config exists
+            cmd_login(args, dotenv) if args.command == "login" else cmd_init(args)
+            return 0
         url, token = config.load(dotenv)
-    except config.ConfigError as exc:
+        return COMMANDS[args.command](Api(url, token), args) or 0
+    except (config.ConfigError, UsageError, spec.SpecError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    try:
-        return COMMANDS[args.command](Api(url, token), args) or 0
     except ApiError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
