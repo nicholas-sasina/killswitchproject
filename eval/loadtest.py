@@ -36,6 +36,7 @@ class Run:
         self.revoked = set()
         self.revoked_badges = 0
         self.startup_errors = {}
+        self.throttle_types = {}
 
 
 async def one_agent(index, sem, http, url, token, calls, think, run):
@@ -50,6 +51,10 @@ async def one_agent(index, sem, http, url, token, calls, think, run):
                 try:
                     s, err, status = await mcp.call_tool("read_ticket", {"ticket_id": "none"})
                     refused = mcp.last_refused
+                    evidence = getattr(mcp, "last_throttle", None)
+                    if evidence:
+                        code = evidence["error_type"]
+                        run.throttle_types[code] = run.throttle_types.get(code, 0) + 1
                 except Exception as exc:
                     s, err, status, refused = time.perf_counter()-started, True, type(exc).__name__, False
                 run.lat.append(s)
@@ -146,6 +151,8 @@ async def run_load(agents: int, calls: int, concurrency: int, badge_count: int, 
         "tool_calls_recorded": len(state.calls_log), "outcomes": outcomes(state.calls_log),
         "throttling": {
             "service": "Amazon Bedrock AgentCore Gateway",
+            "response_error_types": state.throttle_types,
+            "originating_service": None,
             "http_429": sum(c[4] == 429 for c in state.calls_log),
             "limit_name": None, "limit_value": None,
             "note": "HTTP 429 observed at the Gateway endpoint. Exact quota is unverified; concurrency is not a quota measurement.",

@@ -125,7 +125,7 @@ def references(root, trials):
     return result
 
 
-def canaries(root, trials):
+def canaries(root, trials, *, negative_checks=False):
     source_paths(root)
     path = root/"burn_api/scripts/canary_harness.py"
     if not path.is_file():
@@ -136,28 +136,35 @@ def canaries(root, trials):
     from boto3.dynamodb.conditions import Key
     os.environ.update(harness.ENV)
     result = provenance(root, ("burn_api/lambdas", "burn_api/scripts", "minter/lambdas", "contracts/python"))
-    stack = harness.Stack(workers=trials+1)
+    stack = harness.Stack(workers=trials+1+int(negative_checks))
     stack.wire(setattr)
-    sessions = {agent: stack.start_session(agent, instance_id="inst-probe-"+secrets.token_hex(4))
-                for agent in stack.agents}
+    sessions = {agent: stack.start_session(agent) for agent in stack.agents}
     records = []
-    rejection_count = 0
-    for agent in sorted(sessions)[:trials]:
-        session = sessions[agent]
-        # Explicitly simulated neighbouring steps, implemented by the canary owner.
-        value = harness.attacker_decode(harness.leak_gzip_base64(stack.read_canary(session)))
-        used_at = now()
-        status, _ = stack.present(value)
-        rejection_count += status == 401
+    rejection_count = old_key_rejections = 0
+    first_stolen = None
+    def agent_events(agent):
         events, page = [], {}
         while True:
             response = stack.table("burn-events").query(IndexName="by_agent",
                 KeyConditionExpression=Key("agent_id").eq(agent), **page)
-            events.extend(e for e in response.get("Items", []) if e.get("action") == "canary_used"
-                          and e.get("secret_ref") == session["canary"]["canary_ref"])
+            events.extend(response.get("Items", []))
             if not response.get("LastEvaluatedKey"):
-                break
+                return events
             page = {"ExclusiveStartKey": response["LastEvaluatedKey"]}
+
+    for agent in sorted(sessions)[:trials]:
+        session = sessions[agent]
+        old_api_key = stack.secret(f"burn/{agent}/api_key")
+        # Explicitly simulated neighbouring steps, implemented by the canary owner.
+        value = harness.attacker_decode(harness.leak_gzip_base64(stack.read_canary(session)))
+        if first_stolen is None:
+            first_stolen = value
+        used_at = now()
+        status, _ = stack.present(value)
+        rejection_count += status == 401
+        old_key_rejections += stack.present(old_api_key)[0] == 401
+        events = [e for e in agent_events(agent) if e.get("action") == "canary_used"
+                  and e.get("secret_ref") == session["canary"]["canary_ref"]]
         row = stack.table("burn-sessions").get_item(Key={"session_id": session["session_id"]})["Item"]
         record = {"event_id": events[0]["event_id"] if events else "undetected-use-"+secrets.token_hex(8), "used_at": used_at}
         if events:
@@ -165,18 +172,59 @@ def canaries(root, trials):
         if row.get("status") == "revoked":
             record["burned_at"] = row["revoked_at"]
         records.append(record)
+    positive_incidents = list(stack.incidents)
+    negative = {}
+    if negative_checks:
+        first_agent = sorted(sessions)[0]
+        api_ref = f"burn/{first_agent}/api_key"
+        before_version = int(stack.credential(api_ref)["version"])
+        before_events = len([e for e in agent_events(first_agent) if e.get("action") == "canary_used"])
+        before_incidents = len(stack.incidents)
+        rejected = sum(stack.present(first_stolen)[0] == 401 for _ in range(2))
+        negative["duplicate_replay"] = {
+            "presentations": 2, "provider_rejections": rejected,
+            "new_incidents": len(stack.incidents)-before_incidents,
+            "extra_api_rotations": int(stack.credential(api_ref)["version"])-before_version,
+            "extra_canary_events": len([e for e in agent_events(first_agent) if e.get("action") == "canary_used"])-before_events,
+        }
+
+        import minter_client
+        failed_agent = sorted(sessions)[trials]
+        failed_session = sessions[failed_agent]
+        old_key = stack.secret(f"burn/{failed_agent}/api_key")
+        failed_value = stack.read_canary(failed_session)
+        original_call = stack.minter_call
+        def fail_rotation(method, path, body=None, query=None):
+            if path.endswith("/rotate"):
+                raise minter_client.MinterError("injected local rotation failure")
+            return original_call(method, path, body, query)
+        before_failure_incidents = len(stack.incidents)
+        with patch.object(minter_client, "call", fail_rotation):
+            provider_status, _ = stack.present(failed_value)
+        incident = stack.incidents[-1] if len(stack.incidents) > before_failure_incidents else {}
+        negative["rotation_failure"] = {
+            "provider_rejected": provider_status == 401,
+            "session_revoked": stack.session_status(failed_session["session_id"]) == "revoked",
+            "outcome": incident.get("outcome", "no_incident"),
+            "rotated_credentials": len(incident.get("rotated", [])),
+            "old_api_key_accepted": stack.present(old_key)[0] == 200,
+            "incomplete_containment_flagged": any(e.get("action") == "flagged" and "containment incomplete" in e.get("detail", "")
+                                                  for e in agent_events(failed_agent)),
+        }
     control = sessions[sorted(sessions)[-1]]
     outcomes = {}
-    for incident in stack.incidents:
+    for incident in positive_incidents:
         outcome = incident.get("outcome", "unknown")
         outcomes[outcome] = outcomes.get(outcome, 0)+1
-    result.update(records=records, checks={"provider_rejections": rejection_count,
+    result.update(records=records, negative_checks=negative, checks={"provider_rejections": rejection_count,
+                                          "rotated_old_api_key_rejections": old_key_rejections,
                                           "control_session_active": stack.session_status(control["session_id"]) == "active",
                                           "containment_outcomes": outcomes},
                   notes=" ".join([
         "Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit.",
         "Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py.",
         "Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency.",
+        "Optional negative_checks are fault-injection/replay observations, excluded from the ordinary-use detection-rate denominator; a revoked session with failed credential rotation is not complete containment.",
     ]))
     return result
 
@@ -186,6 +234,7 @@ def main():
     parser.add_argument("kind", choices=("references", "canaries"))
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--trials", type=int, required=True)
+    parser.add_argument("--negative-checks", action="store_true")
     args = parser.parse_args()
     root = args.source_root.resolve()
     if not 1 <= args.trials <= 100:
@@ -204,7 +253,9 @@ def main():
             stack.enter_context(patch.object(socket.socket, method, deny))
         stack.enter_context(mock_aws())
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            result = references(root, args.trials) if args.kind == "references" else canaries(root, args.trials)
+            if args.negative_checks and args.kind != "canaries":
+                raise ValueError("negative checks apply only to canaries")
+            result = references(root, args.trials) if args.kind == "references" else canaries(root, args.trials, negative_checks=args.negative_checks)
     print(json.dumps(result, allow_nan=False))
 
 

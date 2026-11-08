@@ -14,6 +14,7 @@ from pathlib import Path
 import boto3
 import httpx
 from botocore.exceptions import ClientError
+from throttling import response_evidence
 
 # The gateway folder owns badge creation; reuse it rather than duplicate Cognito calls.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gateway"))
@@ -104,6 +105,7 @@ class Mcp:
     def __init__(self, http: httpx.AsyncClient, url: str, token: str):
         self.http, self.url, self.token = http, url, token
         self.mcp_session, self.next_id, self.last_refused = None, 1, False
+        self.last_throttle = None
 
     async def rpc(self, method: str, params: dict | None = None, notify: bool = False):
         body = {"jsonrpc": "2.0", "method": method, "params": params or {}}
@@ -127,6 +129,7 @@ class Mcp:
 
     async def call_tool(self, name: str, arguments: dict) -> tuple[float, bool, int]:
         elapsed, r = await self.rpc("tools/call", {"name": name, "arguments": arguments})
+        self.last_throttle = response_evidence(r)
         try:
             messages = [r.json()]
         except ValueError:

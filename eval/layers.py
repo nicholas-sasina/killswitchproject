@@ -62,7 +62,7 @@ def measure(kind, evidence):
         if not isinstance(checks, dict):
             raise ValueError("checks must be aggregate observations")
         safe = {}
-        fields = ("responses", "withheld_responses", "tool_errors") if kind == "references" else ("provider_rejections",)
+        fields = ("responses", "withheld_responses", "tool_errors") if kind == "references" else ("provider_rejections", "rotated_old_api_key_rejections")
         for field in fields:
             if field in checks:
                 safe[field] = count(checks[field])
@@ -79,6 +79,27 @@ def measure(kind, evidence):
                     raise ValueError("unrecognized containment outcome")
                 safe["containment_outcomes"] = {k: count(v) for k, v in outcomes.items()}
         out["checks"] = safe
+    if kind == "canaries" and "negative_checks" in evidence:
+        cases = evidence["negative_checks"]
+        if not isinstance(cases, dict):
+            raise ValueError("negative checks must be aggregate observations")
+        safe_cases = {}
+        if "duplicate_replay" in cases:
+            case = cases["duplicate_replay"]
+            fields = {"presentations", "provider_rejections", "new_incidents", "extra_api_rotations", "extra_canary_events"}
+            if not isinstance(case, dict) or set(case) != fields:
+                raise ValueError("invalid duplicate replay observations")
+            safe_cases["duplicate_replay"] = {k: count(v) for k,v in case.items()}
+        if "rotation_failure" in cases:
+            case = cases["rotation_failure"]
+            boolean_fields = {"provider_rejected", "session_revoked", "old_api_key_accepted", "incomplete_containment_flagged"}
+            if (not isinstance(case, dict) or set(case) != boolean_fields | {"outcome", "rotated_credentials"}
+                or any(type(case[k]) is not bool for k in boolean_fields)
+                or case["outcome"] not in {"contained_rotation_failed", "contained_rotation_deferred", "contained"}):
+                raise ValueError("invalid rotation failure observations")
+            safe_cases["rotation_failure"] = {**{k:case[k] for k in boolean_fields},
+                "outcome": case["outcome"], "rotated_credentials": count(case["rotated_credentials"])}
+        out["negative_checks"] = safe_cases
     if kind == "references":
         recognized = exposed = 0
         for r in records:

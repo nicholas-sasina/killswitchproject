@@ -69,6 +69,20 @@ def test_canary_revocation_does_not_hide_failed_key_rotation():
     assert result["checks"]["containment_outcomes"] == {"contained_rotation_failed": 1}
 
 
+def test_replay_and_injected_failure_are_separate_from_positive_detection_rate():
+    data = evidence([{"event_id": "one", "used_at": "2026-11-07T23:00:00Z",
+                      "detected_at": "2026-11-07T23:00:01Z", "burned_at": "2026-11-07T23:00:02Z"}])
+    data["negative_checks"] = {
+        "duplicate_replay": dict(presentations=2, provider_rejections=2, new_incidents=0,
+                                 extra_api_rotations=0, extra_canary_events=0),
+        "rotation_failure": dict(provider_rejected=True, session_revoked=True, old_api_key_accepted=True,
+                                 incomplete_containment_flagged=True, outcome="contained_rotation_failed", rotated_credentials=0)}
+    result = layers.measure("canaries", data)
+    assert result["uses"] == result["detected"] == 1
+    assert result["negative_checks"]["rotation_failure"]["old_api_key_accepted"]
+    assert result["negative_checks"]["duplicate_replay"]["new_incidents"] == 0
+
+
 def test_canary_invalid_timestamps_are_rejected():
     with pytest.raises(ValueError, match="out of order"):
         layers.measure("canaries", evidence([{"event_id": "one", "used_at": "2026-11-07T23:00:02Z",

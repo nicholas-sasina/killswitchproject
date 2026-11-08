@@ -19,6 +19,7 @@ It measures `burn_detect` as it is; nothing here tunes a detector.
 - `run_offline.py`: runs the offline checks, merges any live output from `out/`, writes `results.json` and `RESULTS.md`.
 - `ddb_reads.py`: DynamoDB read/write units per call from CloudWatch over a load-test window, plus offline counts of fingerprints requested for larger outputs.
 - `capture_cache_cost.py`: validates a plan for three completed post-cache runs, reads CloudWatch capacity, and writes private measurement evidence.
+- `quota_capture.py`: reads applied Service Quotas and records candidate limits without attributing a throttled request to one of them.
 - `probes/`: runs actual Gateway response or canary handlers from an explicit source checkout against local AWS emulation.
 - `latency_gateway.py`, `latency_scan.py`, `loadtest.py`, `proxy_overhead.py`, `live/`: live and latency measurements.
 - `payloads/`: credential generators, smuggling forms, normal payloads.
@@ -107,6 +108,10 @@ Missing observations are **unmeasured**, never zero or a passing target. Use `--
 to select a private evidence directory (default `out/`). Keep inputs and draft reports there;
 never commit raw secrets or fabricate observations to complete a report.
 
+Use a fresh directory for each run or source snapshot. The local examples below use
+`out/local-01`; replace that name consistently on a later run. Keep the files from an earlier
+run intact instead of overwriting them or accidentally combining them with new observations.
+
 Each evidence file includes `source_commit` (a 7–40 character lowercase Git hash), a
 timezone-bearing `measured_at`, and the observations below. Reference/canary evidence also
 carries `scope`: `local-product-code`, `local-emulator`, or `deployed-aws`, with `notes` describing
@@ -130,7 +135,7 @@ observations are supplied evidence, not independently verified by the aggregator
 From `eval/`, measure the Gateway response interceptor in the current checkout:
 
 ```bash
-uv run --locked --python 3.12 --extra probes python -m probes references --source-root .. --trials 5 --output out/references.json
+uv run --locked --python 3.12 --extra probes python -m probes references --source-root .. --trials 5 --output out/local-01/references.json
 ```
 
 The probe generates private test credentials, supplies a synthetic tool response, and runs
@@ -148,11 +153,15 @@ git fetch origin ws/canaries
 git worktree add --detach .run/canary-source origin/ws/canaries
 ```
 
+Record the checkout's commit with `git -C .run/canary-source rev-parse HEAD`. Fetching a branch
+later does not update an existing detached checkout. Use another checkout path for a different
+reviewed source snapshot rather than assuming an old path contains the newest implementation.
+
 Then, from `eval/`:
 
 ```bash
-uv run --locked --python 3.12 --extra probes python -m probes canaries --source-root ../.run/canary-source --trials 5 --output out/canaries.json
-uv run --python 3.12 python run_offline.py --output-dir out/current
+uv run --locked --python 3.12 --extra probes python -m probes canaries --source-root ../.run/canary-source --trials 5 --negative-checks --output out/local-01/canaries.json
+uv run --python 3.12 python run_offline.py --evidence-dir out/local-01 --output-dir out/local-01/report
 ```
 
 This executes the selected source's provider, Burn API and minter handlers against moto.
@@ -161,13 +170,39 @@ the owner's harness. Incident dispatch is synchronous in process. The resulting 
 exclude real AWS networking and asynchronous Lambda dispatch, so they are local handler
 measurements, not deployed end-to-end latency.
 
+`--negative-checks` applies only to canaries. It adds duplicate replay and an injected rotation
+failure as separate observations; they are excluded from the ordinary-use detection-rate
+denominator. Revoking a session while its old credentials remain usable is incomplete
+containment, not a successful credential rotation.
+
 Both probes run in a subprocess with outbound socket connections denied. They write private
 observation files and print counts and provenance rather than credentials. Each artifact
 identifies its source commit and source hashes; inspect the dirty-source flag and the scope
 before publishing. The references and canary probes can measure different commits. Neither
 asserts that the selected source is merged or deployed.
 
-The destination audit uses this process's configured proxy endpoints. It does not load a
+To include the selected canary implementation in the probe test suite, run from `eval/`:
+
+```bash
+BURN_CANARY_PROBE_SOURCE=../.run/canary-source uv run --locked --python 3.12 --extra probes pytest -q tests/test_measurement_probes.py
+```
+
+Without the explicit source path, the optional canary-source tests skip. Unit-test success
+and measured handler behavior remain distinct from a deployed end-to-end check.
+
+The report defaults to this process's configured proxy endpoints. To audit an explicit
+configuration, create a private JSON file with exactly `gateway_url`, `provider_url`,
+`cognito_token_url`, and `sink_url` string fields. Empty strings disable optional endpoints.
+URLs must omit credentials, query strings, and fragments. An optional session file contains
+only `{"egress": null}` or `{"egress": ["exact.hostname"]}`, never a full session record.
+
+```bash
+uv run --python 3.12 python destinations.py --settings-json out/private-settings.json --session-json out/private-egress.json --output out/local-01/destinations.json
+uv run --python 3.12 python run_offline.py --evidence-dir out/local-01 --destination-evidence out/local-01/destinations.json --output-dir out/local-01/report
+```
+
+The audit makes no network requests and writes mode-600 output only inside ignored `eval/out`.
+Reports import validated hostnames, counts, and provenance hashes. Neither command loads a
 deployed proxy's environment automatically. The configured attacker sink counts as readable;
 AWS and application endpoints remain unverified until actual capability and access-control
 evidence establishes what an outsider could read. An authenticated hostname alone does not
@@ -186,6 +221,33 @@ the exact originating service quota remains unverified until service evidence id
 The configured concurrency is a load setting, not proof of an AWS quota. Historical reports
 retain their original grouping and are labelled legacy when rendered.
 
+## Investigate throttling on an authorized live run
+
+Load reports retain bounded, allowlisted AWS exception-type labels from HTTP 429 responses.
+They do not store response bodies or request ids. The endpoint where a 429 was observed and
+an exception label do not by themselves establish which underlying service limit was hit;
+`originating_service` remains unset until supporting evidence identifies it.
+
+An authorized operator can inspect applied quotas without starting a load test, deploying a
+stack or requesting a limit change. From `eval/`, list the service names and codes first:
+
+```bash
+uv run --python 3.12 python quota_capture.py --list-services
+```
+
+Set `SERVICE_CODE` to the exact code returned for the service being investigated; do not infer
+an AgentCore code from its display name. Then capture a private snapshot:
+
+```bash
+uv run --python 3.12 python quota_capture.py --service-code "$SERVICE_CODE" --output out/live-01/service-quotas.json
+```
+
+The snapshot records applied quota names, codes, values and units, with no account identifiers
+or resource ARNs. It remains `causal_attribution: unverified`: a configured quota is a candidate
+limit, not proof that it caused a particular response. Correlate the run window with the relevant
+service's metrics or other verified evidence before making that claim. The quota collector makes
+AWS read requests and is separate from the no-network local probes.
+
 Live measurements incur charges and change shared state. Coordinate them with Oliver and the
 integration owner. After the fingerprint-cache change is deployed, collect the three output
 sizes and full Gateway metrics together; do not reuse pre-cache inputs as post-cache results.
@@ -194,7 +256,8 @@ sizes and full Gateway metrics together; do not reuse pre-cache inputs as post-c
 
 The integration owner first verifies which cache-enabled source commit is deployed and runs
 the approved 36 B, 1 KiB and 16 KiB output measurements. Record the actual completed call count
-and CloudWatch window for each run in private `out/cache-windows.json`:
+and CloudWatch window for each run in a fresh private directory, for example
+`out/cache-01/windows.json`:
 
 - `source_commit`: the deployed Git hash, and `cache_enabled: true` confirmed by the owner.
 - `samples`: exactly three entries, with `output_bytes` equal to 36, 1024 and 16384.
@@ -206,8 +269,8 @@ and CloudWatch window for each run in private `out/cache-windows.json`:
 Then, from `eval/`:
 
 ```bash
-uv run --python 3.12 python capture_cache_cost.py --plan out/cache-windows.json
-uv run --python 3.12 python run_offline.py --output-dir out/current
+uv run --python 3.12 python capture_cache_cost.py --plan out/cache-01/windows.json --output out/cache-01/fingerprint_cache.json
+uv run --python 3.12 python run_offline.py --evidence-dir out/cache-01 --output-dir out/cache-01/report
 ```
 
 The collector writes `out/fingerprint_cache.json` by default; `--output` selects another path.

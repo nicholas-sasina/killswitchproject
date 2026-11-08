@@ -11,11 +11,15 @@ import subprocess
 import sys
 
 
-def run_probe(kind: str, source_root: Path, trials: int) -> dict:
+def run_probe(kind: str, source_root: Path, trials: int, *, negative_checks: bool = False) -> dict:
     if kind not in {"references", "canaries"} or trials < 1 or trials > 100:
         raise ValueError("Choose references or canaries and between 1 and 100 trials")
     command = [sys.executable, "-m", "probes.worker", kind, "--source-root", str(source_root.resolve()),
                "--trials", str(trials)]
+    if negative_checks:
+        if kind != "canaries":
+            raise ValueError("negative checks are available only for canaries")
+        command.append("--negative-checks")
     result = subprocess.run(command, cwd=Path(__file__).resolve().parents[1],
                             capture_output=True, text=True, timeout=300)
     if result.returncode:
@@ -42,11 +46,12 @@ def main():
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--trials", type=int, default=5)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--negative-checks", action="store_true", help="also observe duplicate replay and injected rotation failure (canaries only)")
     args = parser.parse_args()
     if not 1 <= args.trials <= 100:
         parser.error("trials must be between 1 and 100")
     try:
-        result = run_probe(args.kind, args.source_root, args.trials)
+        result = run_probe(args.kind, args.source_root, args.trials, negative_checks=args.negative_checks)
         write_private(args.output, result)
     except Exception as error:
         raise SystemExit(f"Offline probe did not complete ({type(error).__name__}); no successful measurement reported") from None

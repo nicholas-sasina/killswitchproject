@@ -44,10 +44,33 @@ def test_actual_canary_handlers_when_explicit_source_is_available():
     assert summary["uses"] == summary["detected"] == summary["burned"] == 2
     assert result["checks"]["control_session_active"]
     assert result["checks"]["provider_rejections"] == 2
+    assert result["checks"]["rotated_old_api_key_rejections"] == 2
     assert result["checks"]["containment_outcomes"] == {"contained": 2}
     assert result["scope"] == "local-emulator"
     assert "synchronous" in result["notes"]
     assert not re.search(r"mpk_live_[a-f0-9]{32}", json.dumps(result))
+
+
+def test_actual_canary_negative_checks_keep_replay_and_rotation_failure_visible():
+    source = os.getenv("BURN_CANARY_PROBE_SOURCE")
+    if not source:
+        pytest.skip("Set BURN_CANARY_PROBE_SOURCE to the canary owner's checkout")
+    result = run_probe("canaries", Path(source), 2, negative_checks=True)
+    summary = layers.measure("canaries", result)
+    assert summary["uses"] == 2 and result["checks"]["containment_outcomes"] == {"contained": 2}
+    replay = result["negative_checks"]["duplicate_replay"]
+    assert replay == dict(presentations=2, provider_rejections=2, new_incidents=0,
+                          extra_api_rotations=0, extra_canary_events=0)
+    failure = result["negative_checks"]["rotation_failure"]
+    assert failure == dict(provider_rejected=True, session_revoked=True, outcome="contained_rotation_failed",
+                           rotated_credentials=0, old_api_key_accepted=True, incomplete_containment_flagged=True)
+    assert result["checks"]["control_session_active"]
+    assert "excluded from the ordinary-use" in result["notes"]
+
+
+def test_reference_probe_rejects_canary_only_negative_mode():
+    with pytest.raises(ValueError, match="only for canaries"):
+        run_probe("references", ROOT, 1, negative_checks=True)
 
 
 @pytest.mark.parametrize("kind,trials", [("not-a-probe", 1), ("references", 0), ("canaries", 101)])

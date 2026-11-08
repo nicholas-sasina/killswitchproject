@@ -88,6 +88,13 @@ The original deployed measurements remain under `eval/reports/initial-deployed.*
 The Docker check proves behavior in isolated containers with emulated AWS services; it does
 not prove IAM permissions, async Lambda delivery or production latency in the shared stack.
 
+For a specific proxy configuration, use the private settings and session-projection workflow
+in [the evaluation guide](../eval/README.md). Its destination audit imports into a draft report
+with `--destination-evidence`; it does not contact the endpoints or certify remote permissions.
+The same guide describes local handler probes, including replay and failed-rotation checks,
+and read-only quota snapshots. Keep each run's evidence in its own ignored output directory.
+An applied quota snapshot does not identify the cause of a throttled request.
+
 ## What it costs
 
 Live runs consume Cognito tokens, Bedrock model calls, Gateway, Lambda, DynamoDB and other

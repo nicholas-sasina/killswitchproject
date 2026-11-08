@@ -123,6 +123,8 @@ Runtime credential files under `.run/` and local configuration stay private and 
 The API contract also defines roles, enrollment tokens, instances and scoped burns. Their
 mock implementation supports development independently of deployed handlers. A contract or
 mock route alone does not establish that the corresponding real API route is deployed.
+The [CLI and Python SDK](../cli/README.md) expose these workflows to operators and agent code;
+their availability also depends on the corresponding API implementation.
 Canaries and secret references belong to separate component implementations; evaluations
 must identify the source checkout and the actual path they exercised.
 

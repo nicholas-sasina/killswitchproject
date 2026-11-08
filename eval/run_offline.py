@@ -34,6 +34,7 @@ def load_live(directory=None) -> dict:
         "load_revocation": read("loadtest_40x5.json"),
         "load_1000": read("loadtest_1000x5.json"),
         "ddb_reads": read("ddb_reads.json"),
+        "quota_snapshot": read("service-quotas.json"),
     }.items() if v}
     return live
 
@@ -182,6 +183,11 @@ def markdown(r: dict) -> str:
                 out += ["Additional observed checks:", ""]
                 out += [f"- {key.replace('_', ' ')}: {value}" for key, value in layer["checks"].items()]
                 out += [""]
+            if layer.get("negative_checks"):
+                out += ["Replay and injected-failure checks (excluded from the positive-use detection rate):", ""]
+                for case, observations in layer["negative_checks"].items():
+                    out += [f"- {case.replace('_', ' ')}: " + "; ".join(f"{k.replace('_', ' ')}={v}" for k,v in observations.items())]
+                out += [""]
     audit = r.get("destinations")
     if audit:
         out += ["", "## Destinations", "", audit["scope"], "",
@@ -191,6 +197,10 @@ def markdown(r: dict) -> str:
         out += [f"| {x['host']} | {'unknown' if x['outsider_readable'] is None else 'yes' if x['outsider_readable'] else 'no'} | {x['basis']} |" for x in audit["destinations"]]
         if "mode" in audit:
             out += ["", f"Configuration mode: {audit['mode']}. A deny-all configuration is not a usable production configuration."]
+        if audit.get("provenance"):
+            p = audit["provenance"]
+            out += ["", f"Declared settings audit generated {p['generated_at']}; evaluator `{p['evaluator_commit']}`. "
+                    f"Network requests: {p['network_requests']}. Settings SHA-256: `{p['settings_sha256']}`."]
     cache = r.get("cache_costs")
     if cache:
         out += ["", "## Post-cache DynamoDB read cost", ""]
@@ -215,6 +225,15 @@ def markdown(r: dict) -> str:
         if measurement.get("throttling"):
             t = measurement["throttling"]
             out += ["", f"{name}: {t['http_429']} HTTP 429 responses at {t['service']}. {t['note']}"]
+            if t.get("response_error_types"):
+                out += ["Observed bounded error labels: " + ", ".join(f"{k} ({v})" for k,v in t["response_error_types"].items())]
+    quota = r.get("live", {}).get("quota_snapshot")
+    if quota:
+        out += ["", "## Applied quota snapshot", "",
+                "This snapshot lists candidate limits, not the verified cause of any 429. "
+                "Concurrency settings do not establish that a particular quota was hit.", "",
+                "| Applied quota | Value | Unit |", "|---|---|---|"]
+        out += [f"| {q['name']} | {q['value']} | {q['unit']} |" for q in quota["quotas"]]
     held = r.get("heldout")
     if held:
         out += ["", "## Exit check: held-out corpus", "",
@@ -250,10 +269,17 @@ def main():
     ap.add_argument("--trials", type=int, default=10)
     ap.add_argument("--evidence-dir", type=Path, default=HERE / "out")
     ap.add_argument("--output-dir", type=Path, default=HERE)
+    ap.add_argument("--destination-evidence", type=Path,
+                    help="Sanitized declared-configuration audit from destinations.py; no live capability certification.")
     args = ap.parse_args()
     if args.trials < 1:
         ap.error("trials must be positive")
     live = load_live(args.evidence_dir)
+    try:
+        destination_audit = (destinations.load_audit(args.destination_evidence)
+                             if args.destination_evidence else destinations.audit(Settings.from_env()))
+    except (OSError, ValueError, TypeError, KeyError):
+        ap.error("Invalid declared destination evidence; no input contents were emitted.")
     results = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_sha": git_sha(),
@@ -263,7 +289,7 @@ def main():
                     "corpus_sha256": hashlib.sha256(Path(heldout.__file__).read_bytes()).hexdigest()},
         "layers": layers.load(args.evidence_dir),
         "cache_costs": cache_costs.load(args.evidence_dir),
-        "destinations": destinations.audit(Settings.from_env()),
+        "destinations": destination_audit,
         "false_positives": false_positives.run(args.trials),
         "cost": with_sensitivity(cost.compute(measured=measured_usage(live)), live),
         "live": live,
