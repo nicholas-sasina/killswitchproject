@@ -82,7 +82,7 @@ describe("people sign-in screen", () => {
       screen.getByRole("button", { name: "Continue with email" }).disabled,
     ).toBe(false);
     expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.queryByText("Instances by role")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Console" })).toBeNull();
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -107,7 +107,9 @@ describe("people sign-in screen", () => {
           ? { roles: [] }
           : url.pathname === "/instances"
             ? { instances: [] }
-            : { events: [], agents: [] };
+            : url.pathname === "/flags"
+              ? { flags: [] }
+              : { events: [], agents: [] };
       return new Response(JSON.stringify(data));
     });
     vi.stubGlobal("fetch", fetcher);
@@ -123,11 +125,14 @@ describe("people sign-in screen", () => {
         String(url).endsWith("/oauth2/token"),
       ),
     ).toHaveLength(1);
-    expect(screen.getByText(/person@example.test/)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Signed in as person@example.test" }),
+    );
+    expect(screen.getByText("person@example.test")).toBeTruthy();
     expect(
       new URL(screen.getByRole("link", { name: "Sign out" }).href).pathname,
     ).toBe("/logout");
-    expect(screen.getByText("Instances by role")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Console" })).toBeTruthy();
     expect(window.location.search).toBe("");
   });
 
@@ -147,11 +152,11 @@ describe("people sign-in screen", () => {
     expect(
       screen.getByRole("button", { name: "Continue with email" }),
     ).toBeTruthy();
-    expect(screen.queryByText("Instances by role")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Console" })).toBeNull();
     expect(sessionStorage.getItem("burn.people.session")).toBeNull();
   });
 
-  it("keeps one shared instance poll after sign-in and pauses it on the Alerts hash route", async () => {
+  it("keeps one shared instance poll after sign-in, across pages and old links", async () => {
     const fixture = setup();
     await fixture.callback();
     vi.useFakeTimers();
@@ -163,7 +168,9 @@ describe("people sign-in screen", () => {
             ? { instances: [] }
             : path === "/roles"
               ? { roles: [] }
-              : { events: [], agents: [] },
+              : path === "/flags"
+                ? { flags: [] }
+                : { events: [], agents: [] },
         ),
       );
     });
@@ -175,16 +182,9 @@ describe("people sign-in screen", () => {
     await act(async () => {
       render(<App config={dashboardConfig} />);
     });
-    expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
-    });
-    expect(count()).toBe(5);
-    await act(async () => {
-      window.location.hash = "#/alerts";
-      window.dispatchEvent(new Event("hashchange"));
-    });
-    expect(screen.getByRole("heading", { name: "Alerts" })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Overview", current: "page" }),
+    ).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
     });
@@ -193,12 +193,15 @@ describe("people sign-in screen", () => {
       window.location.hash = "#/burned";
       window.dispatchEvent(new Event("hashchange"));
     });
-    expect(screen.getByRole("heading", { name: "Contained" })).toBeTruthy();
-    expect(count()).toBe(6);
+    expect(
+      screen.getByRole("link", { name: /^Incidents/, current: "page" }),
+    ).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
-    expect(count()).toBe(7);
+    // The same poll, not a second one for the new page.
+    expect(count()).toBe(6);
+    window.location.hash = "";
   });
 
   it("names the new public config variables without requesting a demo token in production", async () => {

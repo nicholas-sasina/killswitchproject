@@ -1,0 +1,6 @@
+/* The console's global styles, in cascade order. Shared components bring
+   their own stylesheets from src/ui/, and each page from its own folder. */
+@import "./fonts.css";
+@import "./tokens.css";
+@import "./base.css";
+@import "./motion.css";

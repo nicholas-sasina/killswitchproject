@@ -1,0 +1,337 @@
+/* The agent page. Tokens from styles/tokens.css only; shared pieces from
+   src/ui/. Quiet text on white is --muted-2; ember is evidence or a burn. */
+
+/* ---------- Hero: the burn button sits at the right ---------- */
+
+.agent-page .agent-hero .hero-main {
+  max-width: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 24px;
+  align-items: end;
+}
+
+.agent-page .agent-hero .hero-main > * {
+  grid-column: 1;
+}
+
+.agent-page .agent-hero .hero-lede {
+  max-width: 680px;
+  margin-top: 16px;
+}
+
+.agent-page .agent-hero .hero-actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: end;
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  .agent-page .agent-hero .hero-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-page .agent-hero .hero-actions {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: 24px;
+  }
+}
+
+/* ---------- Exposure ledger: the site's hero panel ---------- */
+
+.agent-ledger .ledger-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-right: 12px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  vertical-align: middle;
+}
+
+.agent-ledger .figures {
+  margin-top: 18px;
+}
+
+.agent-ledger .notice {
+  margin-top: 16px;
+}
+
+.ledger-rows {
+  margin-top: 18px;
+}
+
+.ledger-row {
+  display: grid;
+  grid-template-columns: 260px 220px minmax(0, 1fr);
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.ledger-row-head {
+  padding: 0 0 9px;
+  border-bottom-color: var(--hairline);
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.ledger-row-head span:first-child {
+  padding-left: 4px;
+}
+
+.ledger-cred {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 4px;
+}
+
+.ledger-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+}
+
+.ledger-dot.dot-ember {
+  background: var(--ember);
+}
+
+.ledger-dot.dot-ink {
+  background: var(--ink);
+}
+
+.ledger-dot.dot-faint {
+  background: var(--night-muted);
+}
+
+.ledger-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ledger-name.id {
+  font-size: 13px;
+}
+
+.ledger-cred > span:last-child {
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.ledger-src {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-2);
+  overflow-wrap: anywhere;
+}
+
+.ledger-ev {
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+.ledger-ev.is-hot {
+  color: var(--ink);
+}
+
+.ledger-ev .xf,
+.ledger-act .xf {
+  display: inline-grid;
+}
+
+@media (max-width: 640px) {
+  /* Three figures side by side need their labels above the numbers here. */
+  .agent-ledger .figures-row .figure {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    padding: 10px 12px;
+  }
+
+  .ledger-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
+    grid-template-areas:
+      "cred act"
+      "ev act";
+    row-gap: 2px;
+  }
+
+  .ledger-row-head {
+    grid-template-areas: "cred act";
+  }
+
+  .ledger-row-head span:nth-child(2) {
+    display: none;
+  }
+
+  .ledger-row-head span:nth-child(1),
+  .ledger-cred {
+    grid-area: cred;
+  }
+
+  .ledger-row-head span:nth-child(3),
+  .ledger-act {
+    grid-area: act;
+    justify-self: end;
+  }
+
+  .ledger-ev {
+    grid-area: ev;
+    padding-left: 20px;
+  }
+}
+
+/* ---------- Timeline ---------- */
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 96px 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.timeline-item time {
+  padding-top: 2px;
+  font-size: 12px;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
+
+.timeline-mark {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.timeline-text {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.tone-evidence .timeline-mark,
+.tone-burn .timeline-mark {
+  background: var(--ember);
+}
+
+.tone-after .timeline-mark {
+  background: var(--ink);
+}
+
+.tone-evidence .timeline-text,
+.tone-after .timeline-text {
+  color: var(--ink);
+}
+
+.tone-burn .timeline-text {
+  color: var(--ember-ink);
+}
+
+.timeline-more {
+  margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .timeline-item {
+    grid-template-columns: 8px minmax(0, 1fr);
+    grid-template-areas:
+      "mark time"
+      "mark text";
+    row-gap: 2px;
+  }
+
+  .timeline-item time {
+    grid-area: time;
+    padding-top: 0;
+  }
+
+  .timeline-mark {
+    grid-area: mark;
+  }
+
+  .timeline-text {
+    grid-area: text;
+  }
+}
+
+/* ---------- Right column ---------- */
+
+.agent-containment {
+  border-radius: var(--radius-console);
+}
+
+.agent-finished p {
+  padding-top: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.identity-agent {
+  font-family: var(--font-mono);
+}
+
+.identity-state {
+  color: var(--muted-2);
+  font-family: var(--font-sans);
+}
+
+.after-part {
+  padding-top: 14px;
+}
+
+.after-part + .after-part {
+  margin-top: 14px;
+  border-top: 1px solid var(--hairline-soft);
+}
+
+.after-headline {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.after-detail {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.after-label {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.after-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.agent-after .notice {
+  margin-top: 10px;
+}

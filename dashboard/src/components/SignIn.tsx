@@ -189,6 +189,19 @@ export function SignIn({
   );
 }
 
+/**
+ * Sign out of a local development run: forget that this tab continued past
+ * the local screen and show it again.
+ */
+export function signOutLocal(): void {
+  try {
+    sessionStorage.removeItem(LOCAL_CONTINUED_KEY);
+  } catch {
+    /* Without storage there is nothing to forget. */
+  }
+  window.location.reload();
+}
+
 function hasContinued(): boolean {
   try {
     return sessionStorage.getItem(LOCAL_CONTINUED_KEY) === "1";

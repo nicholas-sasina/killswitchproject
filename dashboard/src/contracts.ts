@@ -90,6 +90,10 @@ export interface LedgerEntry {
   first_seen: string;
   status: "active" | "rotated" | "flagged";
   flag_level?: FlagLevel | null;
+  /** seen: the plaintext reached the agent; referenced: it only ever got a reference. */
+  exposure?: "seen" | "referenced";
+  /** What the agent read it from: '<tool>:<resource>', '<tool>:sha256:<hex>', or the tool alone. */
+  source_ref?: string | null;
 }
 
 export interface LedgerResponse {
@@ -226,4 +230,72 @@ export interface BlastRadius {
   }[];
   events: BlastEvent[];
   note?: string;
+}
+
+export interface BurnBySourceRequest {
+  source_ref: string;
+  tool?: string;
+  since?: string;
+  reason?: string;
+}
+
+export interface BurnBySourceResult {
+  source_ref: string;
+  since?: string | null;
+  readers: {
+    agent_id?: string;
+    via?: "read" | "handoff";
+    first_seen?: string;
+  }[];
+  burned: BurnResult[];
+  failed?: { agent_id?: string; error?: string }[];
+}
+
+/** The first evidence that took a flag to a level. Safe ids only. */
+export interface FlagEvidence {
+  source?: string;
+  event_id?: string;
+  agent_id?: string;
+  session_id?: string | null;
+  tool?: string | null;
+  ts?: string;
+  recorded_at?: string;
+}
+
+/** One flag per credential. Never contains a credential value. */
+export interface Flag {
+  secret_ref: string;
+  secret_type?: SecretType;
+  /** "shared", or the agent that owns the credential. */
+  owner_agent_id?: string;
+  /** The highest level reached; never decreases. */
+  flag_level: FlagLevel;
+  /** Distinct agents whose evidence flagged it. */
+  instance_count: number;
+  /** rotated is only ever returned by /flags/resolve; GET /flags drops it. */
+  state: "open" | "dismissed" | "rotated";
+  flagged_at?: string;
+  updated_at?: string;
+  evidence?: Partial<Record<FlagLevel, FlagEvidence>>;
+  resolution?: {
+    action: "rotate" | "dismiss";
+    reason: string;
+    by?: string | null;
+    at: string;
+    level?: FlagLevel;
+  } | null;
+}
+
+export interface FlagResolution {
+  secret_ref: string;
+  action: "rotate" | "dismiss";
+  /** 3 to 300 characters, shown in the event feed. */
+  reason: string;
+  /** Who decided: ^[A-Za-z0-9 ._@-]{1,64}$ */
+  by?: string;
+}
+
+export interface FlagResolveResult {
+  flag?: Flag;
+  rotated_to_version?: number | null;
 }

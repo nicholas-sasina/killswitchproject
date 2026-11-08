@@ -41,8 +41,9 @@ node_modules/
 dashboard/dist/
 *.local
 
-# --- Site design reference (local only, never committed) -----------------
+# --- Design references (local only, never committed) ----------------------
 site/design-reference/
+dashboard/design-reference/
 
 # --- Eval raw output (may contain generated test credentials) --------------
 eval/out/

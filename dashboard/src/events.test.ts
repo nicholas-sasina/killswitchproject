@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { eventsReducer, initialEventsState, newestEvents } from "./events";
+import {
+  eventIdAt,
+  eventsReducer,
+  initialEventsState,
+  MAX_EVENTS,
+  mergeEvents,
+  newestEvents,
+} from "./events";
 import type { LedgerEvent } from "./contracts";
+import { HISTORY_MAX_PAGES, HISTORY_PAGE } from "./polling";
 
 function event(sequence: number): LedgerEvent {
   return {
@@ -68,5 +76,57 @@ describe("events reducer", () => {
     expect(next.agents).toEqual([{ agent_id, status: "revoked" }]);
     expect(next.cursor).toBe(state.cursor);
     expect(eventsReducer(next, { events: [], agents: [] }).agents).toEqual([]);
+  });
+});
+
+describe("event history", () => {
+  it("returns the same state for a poll that brings nothing new", () => {
+    const first = event(1);
+    const state = eventsReducer(initialEventsState, {
+      events: [first],
+      agents: [],
+      cursor: first.event_id,
+    });
+    expect(eventsReducer(state, { events: [], agents: [], cursor: null })).toBe(
+      state,
+    );
+    expect(eventsReducer(state, { events: [{ ...first }], agents: [] })).toBe(
+      state,
+    );
+    const moved = eventsReducer(state, {
+      events: [],
+      agents: [{ agent_id: "agent-reader", status: "active" }],
+    });
+    expect(moved).not.toBe(state);
+    expect(moved.byId).toBe(state.byId);
+  });
+
+  it("names the first possible event id at a moment, in ULID order", () => {
+    // The same ten characters contracts/python/burn_contracts/ids.py writes.
+    expect(eventIdAt(1469922850259)).toBe("evt_01ARZ3NDEK0000000000000000");
+    expect(eventIdAt(0)).toBe(`evt_${"0".repeat(26)}`);
+    expect(eventIdAt(1_000) < eventIdAt(1_001)).toBe(true);
+  });
+
+  it("keeps only the newest events once the list is full", () => {
+    const state = mergeEvents(
+      initialEventsState,
+      { events: [event(1), event(2), event(3)], agents: [] },
+      2,
+    );
+    const next = mergeEvents(
+      state,
+      { events: [event(5), event(4)], agents: [] },
+      2,
+    );
+    expect(newestEvents(state).map((item) => item.event_id)).toEqual([
+      event(3).event_id,
+      event(2).event_id,
+    ]);
+    expect(newestEvents(next).map((item) => item.event_id)).toEqual([
+      event(5).event_id,
+      event(4).event_id,
+    ]);
+    expect(MAX_EVENTS).toBeGreaterThan(HISTORY_PAGE * HISTORY_MAX_PAGES);
   });
 });

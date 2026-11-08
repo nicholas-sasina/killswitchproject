@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApi, readConfig } from "./api";
+import { ApiError, createApi, readConfig } from "./api";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -142,6 +142,48 @@ describe("API client", () => {
         "application/json",
       );
     }
+  });
+
+  it("routes flags, token revocation, one instance and burns by source", async () => {
+    const { api, fetcher } = setup();
+    await api.flags();
+    await api.resolveFlag({
+      secret_ref: "burn/shared/crm_db_url",
+      action: "dismiss",
+      reason: "Read-only replica",
+      by: "priya@example.test",
+    });
+    await api.revokeToken("tok/8f2a");
+    await api.instance("session_1/?");
+    await api.burnBySource({ source_ref: "read_ticket:T-1001" });
+    await api.events("evt_01", undefined, 500);
+    expect(
+      fetcher.mock.calls.map(([url, init]) => [
+        String(url),
+        init?.method ?? "GET",
+      ]),
+    ).toEqual([
+      ["https://burn.example.test/flags", "GET"],
+      ["https://burn.example.test/flags/resolve", "POST"],
+      ["https://burn.example.test/tokens/tok%2F8f2a", "DELETE"],
+      ["https://burn.example.test/instances/session_1%2F%3F", "GET"],
+      ["https://burn.example.test/burn/by-source", "POST"],
+      ["https://burn.example.test/events?since=evt_01&limit=500", "GET"],
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({
+      secret_ref: "burn/shared/crm_db_url",
+      action: "dismiss",
+      reason: "Read-only replica",
+      by: "priya@example.test",
+    });
+  });
+
+  it("carries the HTTP status on a failed request, with the same message", async () => {
+    const { api } = setup(() => new Response("nope", { status: 404 }));
+    const error = await api.flags().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(404);
+    expect((error as ApiError).message).toBe("API request failed (HTTP 404).");
   });
 
   it("reports network and invalid JSON failures without echoing server content", async () => {

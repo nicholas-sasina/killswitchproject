@@ -1,0 +1,182 @@
+/* The incidents page. Tokens from styles/tokens.css only; shared pieces from src/ui/. */
+
+/* ---------- Burned agents ---------- */
+
+.incidents-page .inc-list {
+  padding-bottom: 14px;
+}
+
+.incidents-page .inc-head,
+.incidents-page .inc-row {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.3fr) minmax(0, 1.6fr) minmax(0, 1.4fr)
+    130px;
+  gap: 16px;
+}
+
+.incidents-page .inc-head {
+  padding: 12px 0 9px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-row {
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.incidents-page .inc-row:focus-visible {
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.incidents-page .inc-agent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.incidents-page .inc-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.incidents-page .inc-row:hover .inc-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.incidents-page .inc-when {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-text {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* Column names for the stacked rows; the header row names them otherwise. */
+.incidents-page .inc-label {
+  display: none;
+}
+
+.incidents-page .inc-more {
+  padding-top: 14px;
+}
+
+/* ---------- Still open ---------- */
+
+.incidents-page .inc-open-list li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.incidents-page .inc-open-list li:last-child {
+  border-bottom: 0;
+  padding-bottom: 8px;
+}
+
+.incidents-page .inc-open-tag {
+  font-size: 10px;
+  color: var(--ember-ink);
+}
+
+.incidents-page .inc-open-key {
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.incidents-page .inc-open-body {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.incidents-page .inc-open .flag-actions {
+  margin-top: 12px;
+}
+
+.incidents-page .inc-open .notice {
+  margin-top: 14px;
+}
+
+/* ---------- How burns started ---------- */
+
+.incidents-page .inc-how .card-head-rule {
+  padding-bottom: 6px;
+}
+
+.incidents-page .inc-how-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.incidents-page .inc-how-list div:last-child {
+  border-bottom: 0;
+}
+
+.incidents-page .inc-how-list dt {
+  font-size: 13.5px;
+}
+
+.incidents-page .inc-how-list dd {
+  font-weight: 600;
+}
+
+/* ---------- Narrow: each row stacks ---------- */
+
+@media (max-width: 860px) {
+  .incidents-page .inc-head {
+    display: none;
+  }
+
+  .incidents-page .inc-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "agent status"
+      "why why"
+      "did did";
+    gap: 10px 16px;
+  }
+
+  .incidents-page .inc-agent {
+    grid-area: agent;
+  }
+
+  .incidents-page .inc-why {
+    grid-area: why;
+  }
+
+  .incidents-page .inc-did {
+    grid-area: did;
+  }
+
+  .incidents-page .inc-status {
+    grid-area: status;
+  }
+
+  .incidents-page .inc-label {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 10px;
+    color: var(--muted-2);
+  }
+}
