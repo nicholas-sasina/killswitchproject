@@ -45,7 +45,7 @@
         },
         "egress": {
           "type": "array",
-          "description": "Outbound hosts this role may reach through the proxy. Omit for the default allowlist.",
+          "description": "Outbound hosts this role may reach through the proxy. Omit for the default allowlist. Burn's own Gateway is never blocked by it, since the Gateway already checks tools per role; every other destination, model endpoints included, must be listed.",
           "items": { "type": "string", "pattern": "^(\\*\\.)?[a-z0-9.-]{1,253}$" }
         },
         "canaries": {
