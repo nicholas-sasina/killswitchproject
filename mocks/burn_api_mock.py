@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import base64
 import re
 import secrets
 from contextlib import asynccontextmanager, suppress
@@ -9,7 +10,7 @@ from typing import Literal
 
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import MOCK_HEADER, ROLE_NAME_RE, agent_secret_ref
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -142,6 +143,18 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
         state.emit(body.agent_id, "session", "issued", session_id=session_id, detail="Mock session issued.")
         return {"session_id": session_id, "agent_id": body.agent_id,
                 "badge_ref": agent_secret_ref(body.agent_id, "badge"), **result}
+
+    @app.post("/mock-token")
+    async def mock_token(authorization: str = Header("")):
+        """The badge issuer's OAuth client-credentials endpoint, as the mock MCP server expects its tokens."""
+        scheme, _, encoded = authorization.partition(" ")
+        try:
+            client_id = base64.b64decode(encoded).decode().partition(":")[0]
+        except ValueError:
+            client_id = ""
+        if scheme.lower() != "basic" or not client_id:
+            raise HTTPException(401, "Client credentials required")
+        return {"access_token": f"mock-{client_id}", "expires_in": 3600, "token_type": "Bearer"}
 
     @app.post("/burn")
     async def burn(body: BurnRequest):

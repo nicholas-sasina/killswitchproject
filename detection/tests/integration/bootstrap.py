@@ -32,6 +32,12 @@ def main():
     boto3.client("secretsmanager", region_name="us-east-1").create_secret(
         Name="burn-system/fingerprint-key", SecretString=key.hex())
     ddb.Table("burn-sessions").put_item(Item={"session_id": session, "agent_id": agent, "status": "active"})
+    scoped_sessions = {}
+    for label, hosts in (("sink_only", ["sink"]), ("no_sink", ["s3.amazonaws.com"]), ("deny_all", [])):
+        scoped = secrets.token_urlsafe(24)
+        ddb.Table("burn-sessions").put_item(Item={"session_id": scoped, "agent_id": agent,
+                                                "status": "active", "egress": hosts})
+        scoped_sessions[label] = scoped
     metadata = {"secret_ref": f"burn/{agent}/api_key", "secret_type": "api_key", "owner_agent_id": agent,
                 "part": "value", "version": 1, "status": "active"}
     table = ddb.Table("burn-fingerprints")
@@ -44,7 +50,7 @@ def main():
     path = Path("/test-data/runtime.json")
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w") as handle:
-        json.dump({"agent": agent, "session": session, "value": value}, handle)
+        json.dump({"agent": agent, "session": session, "value": value, "scoped_sessions": scoped_sessions}, handle)
     create_tls(path.parent)
     print("Created disposable proxy test data.")
 

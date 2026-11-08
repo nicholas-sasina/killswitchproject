@@ -80,3 +80,13 @@ def test_start_offset_is_deterministic_and_spread_within_one_interval():
     offsets = [start_offset(f"agent-worker-{i:06x}", 3.0) for i in range(50)]
     assert offsets == [start_offset(f"agent-worker-{i:06x}", 3.0) for i in range(50)]
     assert all(0 <= o <= 3.0 for o in offsets) and len(set(offsets)) > 40
+
+
+def test_root_cause_unwraps_an_exception_group_to_the_first_underlying_error():
+    from burn_agents.swarm_worker import root_cause
+    inner = ConnectionRefusedError("[Errno 111] Connect call failed ('172.17.0.1', 8701)")
+    group = ExceptionGroup("unhandled errors in a TaskGroup", [RuntimeError("client failed"), ValueError("later")])
+    group.exceptions[0].__cause__ = inner
+    assert root_cause(group) == "ConnectionRefusedError: [Errno 111] Connect call failed ('172.17.0.1', 8701)"
+    assert root_cause(KeyError("x")).startswith("KeyError")
+    assert len(root_cause(RuntimeError("x" * 1000))) < 250

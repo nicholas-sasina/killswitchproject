@@ -75,6 +75,24 @@ def main():
         else:
             raise SystemExit("Unapproved HTTPS destination was not refused")
         print("PASS: unapproved HTTPS destination refused before connecting.")
+    for label, session in data["scoped_sessions"].items():
+        scoped_proxy = f"http://{data['agent']}:{session}@proxy:8080"
+        with httpx.Client(proxy=scoped_proxy, trust_env=False, timeout=5,
+                          verify="/certs/mitmproxy-ca-cert.pem") as client:
+            if label == "sink_only":
+                check(client.get(sink + "/health").status_code == 200,
+                      "Role's explicitly permitted sink was refused")
+                response = client.post(sink + "/webhook", content=data["value"])
+                check(response.status_code == 403 and response.json()["reason"] == "credential_detected",
+                      "Role allowlist bypassed the credential check")
+            else:
+                try:
+                    client.get(sink + "/health")
+                except httpx.ProxyError:
+                    pass
+                else:
+                    raise SystemExit("Role-restricted CONNECT unexpectedly reached the sink")
+        print("PASS: session destination policy " + label + ".")
     print("PASS: proxy containment integration checks complete.")
 
 

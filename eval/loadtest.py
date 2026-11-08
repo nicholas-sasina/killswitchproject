@@ -29,12 +29,14 @@ class Run:
 
     def __init__(self):
         self.lat, self.errors = [], {}
-        self.calls_log = []          # (agent_index, started_at, refused, is_error)
+        self.calls_log = []          # (agent_index, started_at, refused, is_error, HTTP status)
         self.active = set()          # agents currently between their first and last call
         self.started = 0
         self.revoked_at = None
         self.revoked = set()
         self.revoked_badges = 0
+        self.startup_errors = {}
+        self.throttle_types = {}
 
 
 async def one_agent(index, sem, http, url, token, calls, think, run):
@@ -46,14 +48,23 @@ async def one_agent(index, sem, http, url, token, calls, think, run):
             await mcp.start()
             for _ in range(calls):
                 started = time.perf_counter()
-                s, err, status = await mcp.call_tool("read_ticket", {"ticket_id": "none"})
+                try:
+                    s, err, status = await mcp.call_tool("read_ticket", {"ticket_id": "none"})
+                    refused = mcp.last_refused
+                    evidence = getattr(mcp, "last_throttle", None)
+                    if evidence:
+                        code = evidence["error_type"]
+                        run.throttle_types[code] = run.throttle_types.get(code, 0) + 1
+                except Exception as exc:
+                    s, err, status, refused = time.perf_counter()-started, True, type(exc).__name__, False
                 run.lat.append(s)
-                run.calls_log.append((index, started, mcp.last_refused, err))
-                if err and not mcp.last_refused:
+                run.calls_log.append((index, started, refused, err, status))
+                if err and not refused:
                     run.errors[status] = run.errors.get(status, 0) + 1
                 await asyncio.sleep(think)   # an agent thinks between tool calls
         except Exception as exc:   # count, do not hide
-            run.errors[type(exc).__name__] = run.errors.get(type(exc).__name__, 0) + 1
+            key = type(exc).__name__
+            run.startup_errors[key] = run.startup_errors.get(key, 0) + 1
         finally:
             run.active.discard(index)
 
@@ -80,7 +91,7 @@ async def revoke_midway(run, throwaway, count, agents):
 
 def revocation_report(run) -> dict:
     """Calls that began after the revocation finished: revoked agents must all be refused."""
-    after = [c for c in run.calls_log if run.revoked_at and c[1] > run.revoked_at]
+    after = [c for c in run.calls_log if run.revoked_at is not None and c[1] > run.revoked_at]
     gone = [c for c in after if c[0] in run.revoked]
     kept = [c for c in after if c[0] not in run.revoked]
     return {
@@ -90,9 +101,22 @@ def revocation_report(run) -> dict:
         "refused_of_those": sum(c[2] for c in gone),
         "calls_after_revoke_from_others": len(kept),
         "succeeded_of_those": sum(not c[3] for c in kept),
+        "revoked_outcomes": outcomes(gone),
+        "other_outcomes": outcomes(kept),
         "revoked_calls_before_revoke_succeeded": sum(
             not c[3] for c in run.calls_log if c[0] in run.revoked and c[1] <= (run.revoked_at or 0)),
     }
+
+
+def outcomes(calls) -> dict:
+    """Refusal is distinct from throttling; neither counts as a success."""
+    counts = dict(refused=0, throttled=0, succeeded=0, other_errors=0)
+    for call in calls:
+        refused, error = call[2:4]
+        status = call[4] if len(call) > 4 else None
+        key = "throttled" if status == 429 else "refused" if refused else "other_errors" if error else "succeeded"
+        counts[key] += 1
+    return counts
 
 
 async def run_load(agents: int, calls: int, concurrency: int, badge_count: int, think: float, revoke: int) -> dict:
@@ -122,9 +146,19 @@ async def run_load(agents: int, calls: int, concurrency: int, badge_count: int, 
         "real_badges_and_sessions": badge_count, "token_fetch_seconds_total": round(token_seconds, 1),
         "tool_calls_ok": sum(not c[3] for c in state.calls_log),
         "tool_calls_refused": sum(c[2] for c in state.calls_log),
-        "tool_calls_attempted": agents * calls, "errors": {str(k): v for k, v in errors.items()},
+        "tool_calls_planned": agents * calls, "tool_calls_attempted": len(state.calls_log),
+        "errors": {str(k): v for k, v in errors.items()}, "startup_errors": state.startup_errors,
+        "tool_calls_recorded": len(state.calls_log), "outcomes": outcomes(state.calls_log),
+        "throttling": {
+            "service": "Amazon Bedrock AgentCore Gateway",
+            "response_error_types": state.throttle_types,
+            "originating_service": None,
+            "http_429": sum(c[4] == 429 for c in state.calls_log),
+            "limit_name": None, "limit_value": None,
+            "note": "HTTP 429 observed at the Gateway endpoint. Exact quota is unverified; concurrency is not a quota measurement.",
+        },
         "wall_seconds": round(wall, 1), "throughput_calls_per_s": round(len(lat) / wall, 1),
-        "latency": summarize_ms([s for s, c in zip(state.lat, state.calls_log) if not c[2]] or lat),
+        "latency": summarize_ms([s for s, c in zip(state.lat, state.calls_log) if not c[3]]),
         "revocation": revocation_report(state) if revoke else None,
     }
 
@@ -139,6 +173,8 @@ def main():
     ap.add_argument("--revoke", type=int, default=0, help="revoke this many badges (sessions) mid-load")
     ap.add_argument("--max-calls", type=int, default=MAX_CALLS_DEFAULT)
     args = ap.parse_args()
+    if min(args.agents, args.calls, args.concurrency) < 1 or args.badges < 0 or args.revoke < 0 or args.think < 0:
+        ap.error("agents, calls and concurrency must be positive; badges, revoke and think must be nonnegative")
     if args.agents * args.calls > args.max_calls:
         raise SystemExit(f"{args.agents * args.calls} calls exceeds --max-calls {args.max_calls}; raise it deliberately")
     result = asyncio.run(run_load(args.agents, args.calls, args.concurrency, args.badges or args.agents, args.think, args.revoke))

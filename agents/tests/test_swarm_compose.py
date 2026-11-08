@@ -39,7 +39,7 @@ def test_mock_env_points_containers_at_the_host():
     env = swarm_env(api_url="http://localhost:8700", token="t", join_token="j", gateway_url="http://127.0.0.1:8701/mcp", mock=True)
     assert env["BURN_API_URL"] == "http://host.docker.internal:8700"
     assert env["BURN_GATEWAY_URL"] == "http://host.docker.internal:8701/mcp"
-    assert env["BURN_MOCK_BADGE_URL"] == "http://host.docker.internal:8702"
+    assert env["BURN_MOCK_BADGE_URL"] == "http://host.docker.internal:8700/mock-token"  # served by the mock API itself
     assert swarm_env(api_url="https://x", token="t", join_token="j", gateway_url="https://g", mock=False)["BURN_API_URL"] == "https://x"
 
 
