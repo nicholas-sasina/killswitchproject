@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import (
-    agent_secret_ref, instance_agent_id, parse_join_token, scenario_role_name,
+    agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token, scenario_role_name,
 )
 
 ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn")
@@ -81,6 +81,8 @@ class Swarm:
 
     def save_role(self, spec: dict, *, create: bool):
         name = spec["name"]
+        if is_reserved_role_name(name):
+            raise SwarmError(400, "Role names 'eval' and 'eval-*' are reserved for the eval harness")
         if name in self._scenario_roles():
             raise SwarmError(409, "Scenario roles are managed by the scenario file")
         existing = self.roles.get(name)

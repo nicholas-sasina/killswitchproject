@@ -270,3 +270,11 @@ def test_dismissed_event_and_flag_routes():
         assert resolution["properties"]["action"]["enum"] == ["rotate", "dismiss"]
         assert "reason" in resolution["required"]
         assert "instance_count" in doc["components"]["schemas"]["Flag"]["required"]
+
+
+def test_eval_role_names_are_reserved_for_the_eval_harness():
+    from burn_contracts import names
+    for reserved in ("eval", "eval-7", "eval-"):
+        assert names.is_reserved_role_name(reserved)
+    for fine in ("evaluator", "my-eval", "worker", "eva"):
+        assert not names.is_reserved_role_name(fine)

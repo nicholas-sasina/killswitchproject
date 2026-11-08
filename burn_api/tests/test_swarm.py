@@ -856,3 +856,12 @@ def test_secret_values_never_reach_stdout_or_logs(env, monkeypatch, capsys, capl
     out = capsys.readouterr()
     for value in values:
         assert value not in out.out and value not in out.err and value not in caplog.text
+
+
+@pytest.mark.parametrize("reserved", ["eval", "eval-7", "eval-load-test"])
+def test_eval_role_names_are_reserved(env, reserved):
+    for method, path in (("POST", "/roles"), ("PUT", f"/roles/{reserved}")):
+        status, body = call(env, method, path, {"name": reserved, "tools": []})
+        assert status == 400 and "reserved" in body["error"]
+    assert env.ddb.Table("burn-roles").scan()["Items"] == []
+    assert call(env, "POST", "/roles", {"name": "evaluator", "tools": []})[0] == 201  # only eval and eval-*
