@@ -123,6 +123,7 @@ def test_a_burned_worker_with_a_pending_replacement_is_replaced_once_with_the_sa
     argv, env = docker.runs[-1]
     assert argv[argv.index("--name") + 1] == new and new != old and len(docker.runs) == 2
     assert argv[argv.index(IMAGE) + 1:argv.index(IMAGE) + 3] == ["burn", "run"]  # the image this launcher built
+    assert argv[argv.index("--pull") + 1] == "never"  # and only that: a missing image fails, it is never pulled
     assert json.loads(env["BURN_TASK"]) == OLD_TASK
     assert json.loads(env["BURN_RESUME"]) == {"done": ["w01-item-01", "w01-item-02"], "quarantined": ["w01-item-03"]}
     assert json.loads(env[ADOPT_SECRETS])["session_token"] == "bst_" + "2" * 43  # its own fresh credentials

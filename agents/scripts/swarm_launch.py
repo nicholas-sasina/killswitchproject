@@ -154,7 +154,8 @@ def image_tag(root: Path = REPO_ROOT) -> str:
 def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *, mock: bool, image: str,
                     certs_dir: str = "") -> list[str]:
     """`docker run` for one worker. Environment variables are passed by name; their values are not in this list."""
-    argv = ["docker", "run", "-d", "--name", name, "--label", "burn-swarm=1"]
+    # --pull never: run only the image this launcher built; if it is gone, fail rather than fetch one by that name
+    argv = ["docker", "run", "-d", "--pull", "never", "--name", name, "--label", "burn-swarm=1"]
     argv += ["--add-host", f"{HOST}:host-gateway"] if mock else ["--network", NETWORK, "-v", f"{certs_dir}:/certs:ro"]
     for env_name in env_names:
         argv += ["-e", env_name]
