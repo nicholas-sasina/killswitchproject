@@ -29,11 +29,10 @@ from botocore.exceptions import ClientError
 from burn_contracts import names
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-API_URL_PARAM = "/burn/api/url"  # published by BurnApi; make_env reads it by the same name
 
 # What the hosted build gets, in the process environment: values from SSM, then fixed ones.
 BUILD_PARAMS = {
-    "VITE_BURN_API_URL": API_URL_PARAM,
+    "VITE_BURN_API_URL": names.API_URL_PARAM,
     "VITE_BURN_PEOPLE_DOMAIN": names.PEOPLE_DOMAIN_PARAM,
     "VITE_BURN_PEOPLE_CLIENT_ID": names.PEOPLE_CLIENT_ID_PARAM,
 }

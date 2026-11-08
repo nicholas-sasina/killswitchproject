@@ -40,12 +40,13 @@ site-deploy: ## Build the website and deploy it to S3 and CloudFront (BurnSite)
 
 dashboard-deploy: ## Build the dashboard without the admin token, check it and host it (BurnDashboard); needs sign-in on
 	cd burn_api && uv run python scripts/hosted_dashboard.py build
-	cd infra && uv sync -q && $(CDK) deploy BurnDashboard --require-approval never -c burn:dashboard_build=checked
+	flags="$$($(DEPLOY_FLAGS))" && cd infra && uv sync -q && \
+	  $(CDK) deploy BurnDashboard --require-approval never -c burn:dashboard_build=checked $$flags
 	@echo "dashboard: $$(aws cloudformation describe-stacks --stack-name BurnDashboard --query "Stacks[0].Outputs[?OutputKey=='Url'].OutputValue" --output text)/"
 
-dashboard-hosted: ## Let sign-in and the API accept the hosted dashboard (BurnPeople, BurnApi); after dashboard-deploy
+dashboard-hosted: ## Let sign-in and the API accept the hosted dashboard, and pin its CSP; after dashboard-deploy
 	cd burn_api && uv run python scripts/hosted_dashboard.py check-hosted
-	cd infra && uv sync -q && $(CDK) deploy BurnPeople BurnApi --exclusively --require-approval never \
+	cd infra && uv sync -q && $(CDK) deploy BurnDashboard BurnPeople BurnApi --exclusively --require-approval never \
 	  -c burn:people_auth=on -c burn:dashboard_hosted=on
 
 env: ## Write .env and dashboard/.env.local from the deployed stacks
