@@ -10,6 +10,7 @@ import {
 import {
   PIPELINE_CYCLE_MS,
   PIPELINE_EVENTS,
+  PIPELINE_PACE,
   PIPELINE_STARTS,
   pipelineState,
   pipelineStepAt,
@@ -105,13 +106,16 @@ describe("heroStep", () => {
 });
 
 describe("pipelineState", () => {
-  it("runs six steps over 17 s", () => {
-    expect(PIPELINE_STARTS).toEqual([0, 3000, 5500, 8000, 10500, 13000]);
-    expect(PIPELINE_CYCLE_MS).toBe(17000);
-    expect(pipelineStepAt(2999)).toBe(0);
-    expect(pipelineStepAt(3000)).toBe(1);
-    expect(pipelineStepAt(16999)).toBe(5);
-    expect(pipelineStepAt(17000)).toBe(0);
+  // The script's times, written for a 17 s loop, at the pace the page plays them.
+  const at = (time: number) => time * PIPELINE_PACE;
+
+  it("runs six steps over 23.8 s", () => {
+    expect(PIPELINE_STARTS).toEqual([0, 4200, 7700, 11200, 14700, 18200]);
+    expect(PIPELINE_CYCLE_MS).toBe(23800);
+    expect(pipelineStepAt(at(3000) - 1)).toBe(0);
+    expect(pipelineStepAt(at(3000))).toBe(1);
+    expect(pipelineStepAt(at(17000) - 1)).toBe(5);
+    expect(pipelineStepAt(at(17000))).toBe(0);
   });
 
   it("lists every change as an event, sorted and unique", () => {
@@ -129,37 +133,42 @@ describe("pipelineState", () => {
   });
 
   it("records the ledger one mark at a time at baseline", () => {
-    expect(pipelineState(0).ledger.marks).toEqual([false, false, false, false]);
-    expect(pipelineState(1000).ledger.marks).toEqual([
+    expect(pipelineState(at(0)).ledger.marks).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(pipelineState(at(1000)).ledger.marks).toEqual([
       true,
       true,
       false,
       false,
     ]);
-    expect(pipelineState(2999).ledger).toEqual({
+    expect(pipelineState(at(3000) - 1).ledger).toEqual({
       marks: [true, true, true, true],
       done: true,
     });
-    expect(pipelineState(0).panels.ledger).toBe("active");
+    expect(pipelineState(at(0)).panels.ledger).toBe("active");
   });
 
   it("lights the exit chips in order", () => {
-    expect(pipelineState(3000).exit.chips).toEqual([false, false, false]);
-    expect(pipelineState(4000).exit.chips).toEqual([true, true, false]);
-    expect(pipelineState(5000).exit.done).toBe(true);
+    expect(pipelineState(at(3000)).exit.chips).toEqual([false, false, false]);
+    expect(pipelineState(at(4000)).exit.chips).toEqual([true, true, false]);
+    expect(pipelineState(at(5000)).exit.done).toBe(true);
   });
 
   it("trips the canary, then identifies worker-07", () => {
-    const tripped = pipelineState(5500);
+    const tripped = pipelineState(at(5500));
     expect(tripped.panels.canary).toBe("hot");
     expect(tripped.canary.identified).toBe(false);
     expect(tripped.support).toEqual({ hot: true, status: "identified" });
-    expect(pipelineState(6000).canary.identified).toBe(true);
-    expect(pipelineState(8000).support.status).toBe("burned");
+    expect(pipelineState(at(6000)).canary.identified).toBe(true);
+    expect(pipelineState(at(8000)).support.status).toBe("burned");
   });
 
   it("uses ember only for the canary-to-decision connector", () => {
-    const end = pipelineState(16999).lines;
+    const end = pipelineState(at(17000) - 1).lines;
     expect(end).toEqual({
       exit: "ink",
       canary: "ink",
@@ -167,17 +176,22 @@ describe("pipelineState", () => {
       human: "ink",
       result: "ink",
     });
-    expect(pipelineState(0).lines.exit).toBe("idle");
+    expect(pipelineState(at(0)).lines.exit).toBe("idle");
   });
 
   it("ticks the result rows off one by one", () => {
-    expect(pipelineState(13000).result).toEqual([true, false, false, false]);
-    expect(pipelineState(14500).result).toEqual([true, true, true, true]);
+    expect(pipelineState(at(13000)).result).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(pipelineState(at(14500)).result).toEqual([true, true, true, true]);
   });
 
   it("shows a step's finished state for the step buttons", () => {
-    expect(pipelineStepDone(0)).toBe(2999);
-    expect(pipelineStepDone(5)).toBe(16999);
+    expect(pipelineStepDone(0)).toBe(at(3000) - 1);
+    expect(pipelineStepDone(5)).toBe(at(17000) - 1);
     expect(pipelineState(pipelineStepDone(3)).decision).toEqual({
       burn: true,
       credential: true,
