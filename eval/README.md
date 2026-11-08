@@ -274,6 +274,36 @@ sizes and full Gateway metrics together; do not reuse pre-cache inputs as post-c
 
 ## Capture post-cache read costs
 
+Local operation counts for the combined cache and reference-replacement path are in
+[the local cache report](reports/local-cache.md). They do not replace AWS read-unit data.
+
+Before starting a live measurement, the integration owner verifies the deployment:
+
+1. Record the exact deployed source revision and Lambda package hashes. An open PR or
+   updated CloudFormation stack timestamp does not establish which code is running.
+   The interceptor package must include the intended `redact.py`, `resolve.py`,
+   `record.py` and fingerprint-cache implementation; the minter must bump the version
+   item on registration, rotation and deletion.
+2. Verify the interceptor can `GetItem` and `Scan` `burn-fingerprints`, in addition to
+   its fallback `BatchGetItem` permission. A functioning fallback can hide a missing
+   cache permission; successful calls alone do not establish that the cache is used.
+3. Wait for `burn-exposures`' `by_source` index to be `ACTIVE` and verify the Burn API
+   can query it before evaluating burn-by-source. This index is a separate prerequisite
+   for that feature, not proof that the cache is active.
+4. Run the approved end-to-end check on disposable evaluation agents. Verify revoked
+   credentials fail and an unrevoked control still works. Verify reference tokens and
+   ledger entries, not just absence of raw credentials, and exercise the intended
+   request-side reference resolution when a tool declares it.
+5. Audit the actual proxy settings and the evaluation role's egress. Test each allowed
+   destination's capabilities with the evaluation identity before declaring it
+   inaccessible to outsiders. A configured test sink counts as readable. Unknown
+   capabilities remain unknown; removing all useful destinations is not success.
+
+Do not run `make reset`, `make demo` or teardown to prepare a shared-account measurement:
+those commands can affect other agents. Use only run-owned evaluation resources and
+their cleanup. If deployment or permissions are missing, stop before collecting a
+post-cache result; preserve the existing report's unmeasured status.
+
 The integration owner first verifies which cache-enabled source commit is deployed and runs
 the approved 36 B, 1 KiB and 16 KiB output measurements. Record the actual completed call count
 and CloudWatch window for each run in a fresh private directory, for example
