@@ -113,7 +113,7 @@ A forwarded `tools/call` is edited in two ways:
  "owner": "agent", "owner_agent_id": "agent-alpha",
  "source": "tool_response", "via": "read_config", "source_ref": "read_config:config/app.env",
  "status": "referenced", "report": "would replace with a reference",
- "first_seen": "2026-11-07T20:50:33.201Z", "last_seen": "...", "seen_in": ["<trace id>#<rpc id>", "..."]}
+ "first_seen": "2026-11-07T20:50:33.201Z", "last_seen": "...", "last_call": "<trace id>#<rpc id>"}
 ```
 
 - `status`: `seen` once the plaintext reached the agent, for good; `referenced` while it only ever
@@ -125,7 +125,7 @@ A forwarded `tools/call` is edited in two ways:
 - `report`: only in `report` mode, what `replace` would have done on the latest call.
 
 Read rows: every `tools/call` that names a resource and is delivered also writes
-`{"agent_id", "secret_ref_or_fp": "read#<source_ref>", "source_ref", "source", "via", "first_seen", "last_seen", "seen_in"}`,
+`{"agent_id", "secret_ref_or_fp": "read#<source_ref>", "source_ref", "source", "via", "first_seen", "last_seen", "last_call"}`,
 credential or not, so `POST /burn/by-source` finds everyone who read a poisoned source. A
 `send_message` copies them to the receiver (source `handoff`) without an event. They have no
 `secret_ref`, `fingerprint` or `status`, so a burn never flags them and the API's ledger views and
@@ -134,10 +134,12 @@ exposure counts leave them out.
 - Credentials that match only a known format (not minted by Burn) have no `secret_ref`; their sort
   key is `fp#<fingerprint>` and `owner` is `unknown`.
 - `source`, `via` and `first_seen` keep the first sighting; later sightings only update `last_seen`
-  and `seen_in`, and write no event. The write is a single `UpdateItem` with `ReturnValues: ALL_OLD`:
+  and `last_call`, and write no event. The write is a single `UpdateItem` with `ReturnValues: ALL_OLD`:
   no old item means a new entry, and only then is `recorded` / `inherited` written.
 - The gateway may retry an interceptor call, so writes are keyed by the call
-  (`X-Amzn-Trace-Id` + JSON-RPC id): a write whose call is already in `seen_in` is skipped.
+  (`X-Amzn-Trace-Id` + JSON-RPC id): a write whose call is the row's `last_call` is skipped. Only
+  the latest call is kept, so a row stays the same size however often it is read. Rows written
+  before this kept every call in `seen_in`; the next write removes it.
 
 ## Session row (written by the Burn API at `POST /sessions`)
 

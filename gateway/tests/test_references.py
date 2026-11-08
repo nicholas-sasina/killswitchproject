@@ -273,9 +273,10 @@ def test_a_row_without_a_status_is_never_turned_into_referenced(aws):
     body = respond(session, f"KEY={value}")
     assert value not in delivered(body)  # the agent still only gets the reference
     row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
-    assert row["status"] == "seen" and "Root=1-a#1" in row["seen_in"]
+    # The old unbounded seen_in is dropped on the first write after the upgrade.
+    assert row["status"] == "seen" and row["last_call"] == "Root=1-a#1" and "seen_in" not in row
     respond(session, f"KEY={value}")  # a retry of the same call changes nothing
-    assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["seen_in"] == {"Root=1-old#1", "Root=1-a#1"}
+    assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"] == row
 
 
 # ---- source_ref and handoff ------------------------------------------------------------------
@@ -322,7 +323,7 @@ def test_reading_a_resource_without_credentials_is_still_recorded(aws):
     respond(session, "same ticket again", tool="read_ticket", arguments={"ticket_id": "T-1001"},
             trace="Root=1-b", rpc_id=2)
     again = read_rows(aws, "agent-alpha")["read_ticket:T-1001"]
-    assert again["first_seen"] == first and again["seen_in"] == {"Root=1-a#1", "Root=1-b#2"}
+    assert again["first_seen"] == first and again["last_call"] == "Root=1-b#2"
 
 
 def test_no_read_row_without_a_named_resource_or_when_withheld(aws):
