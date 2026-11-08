@@ -78,12 +78,13 @@ def view(session: dict, exposures: int | None = None) -> dict:
     }
 
 
-def get_session_or_none(session_id: str) -> dict | None:
-    return db.table(names.SESSIONS_TABLE).get_item(Key={"session_id": session_id}).get("Item")
+def get_session_or_none(session_id: str, consistent: bool = False) -> dict | None:
+    return db.table(names.SESSIONS_TABLE).get_item(
+        Key={"session_id": session_id}, ConsistentRead=consistent).get("Item")
 
 
-def get_session(session_id: str) -> dict:
-    row = get_session_or_none(session_id)
+def get_session(session_id: str, consistent: bool = False) -> dict:
+    row = get_session_or_none(session_id, consistent)
     if row is None:
         raise errors.ApiError(404, "Unknown session")
     return row

@@ -56,8 +56,9 @@ def create(role_name: str, body: dict) -> dict:
     return view(row) | {"token": f"{names.JOIN_TOKEN_PREFIX}{token_id}.{secret}"}
 
 
-def get(token_id: str) -> dict:
-    row = db.table(names.ENROLL_TOKENS_TABLE).get_item(Key={"token_id": token_id}).get("Item")
+def get(token_id: str, consistent: bool = False) -> dict:
+    row = db.table(names.ENROLL_TOKENS_TABLE).get_item(
+        Key={"token_id": token_id}, ConsistentRead=consistent).get("Item")
     if row is None:
         raise errors.ApiError(404, "Unknown token")
     return row

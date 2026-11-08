@@ -89,6 +89,9 @@ def get_agent(agent_id: str) -> dict | None:
 # swarm scale (hundreds of rows). A GSI per attribute (by_role, by_parent, by_token) is the next
 # step if the table grows; only these three functions would change.
 
+# The parent and token lookups are strongly consistent: a scoped burn must see a child row that a
+# concurrent spawn or join has just written.
+
 def sessions_for_role(role: str) -> list[dict]:
     return scan_all(table(names.SESSIONS_TABLE), FilterExpression=Attr("role").eq(role))
 
@@ -97,12 +100,14 @@ def sessions_for_parents(parent_sessions: list[str]) -> list[dict]:
     found = []
     for i in range(0, len(parent_sessions), 100):  # IN takes at most 100 values
         found += scan_all(table(names.SESSIONS_TABLE),
-                          FilterExpression=Attr("parent_session").is_in(parent_sessions[i:i + 100]))
+                          FilterExpression=Attr("parent_session").is_in(parent_sessions[i:i + 100]),
+                          ConsistentRead=True)
     return found
 
 
 def sessions_for_token(token_id: str) -> list[dict]:
-    return scan_all(table(names.SESSIONS_TABLE), FilterExpression=Attr("token_id").eq(token_id))
+    return scan_all(table(names.SESSIONS_TABLE), FilterExpression=Attr("token_id").eq(token_id),
+                    ConsistentRead=True)
 
 
 def write_event(**fields) -> dict:

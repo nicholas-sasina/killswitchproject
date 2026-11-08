@@ -572,3 +572,70 @@ def test_exposure_counts_run_concurrently(env, monkeypatch):
     started = time.monotonic()
     assert len(call(env, "GET", "/instances")[1]["instances"]) == 12
     assert time.monotonic() - started < 1.2  # sequential would be 2.4 s
+
+
+# --- a spawn or join must not escape a burn that is running ------------------------------------
+
+def test_child_is_refused_and_revoked_if_its_parent_is_burned_while_it_starts(env, monkeypatch):
+    import sessions
+    make_role(env, WORKER); make_role(env, HELPER)
+    parent = join(env, "worker")[1]
+    real_create_badge = sessions.badges.create_badge
+
+    def burn_parent_midway(agent_id, session_id):
+        # the parent is revoked after the spawn was allowed, before the child row is written
+        sessions.end_session(session_row(env, parent["session_id"]), "revoked")
+        return real_create_badge(agent_id, session_id)
+
+    monkeypatch.setattr(sessions.badges, "create_badge", burn_parent_midway)
+    status, body = spawn(env, parent["session_id"], "helper")
+    assert status == 403 and "not active" in body["error"]
+    children = [r for r in env.ddb.Table("burn-sessions").scan()["Items"] if r.get("parent_session")]
+    assert len(children) == 1 and children[0]["status"] == "revoked"
+    assert any(c[0] == "DELETE" and c[1] == f"/agents/{children[0]['agent_id']}/credentials"
+               for c in env.minter.calls)
+    assert children[0]["client_id"] in env.badges.deleted
+
+
+def test_join_is_refused_if_the_token_is_revoked_while_it_starts(env, monkeypatch):
+    import sessions
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 2})[1]
+    real_create_badge = sessions.badges.create_badge
+
+    def revoke_midway(agent_id, session_id):
+        call(env, "DELETE", f"/tokens/{token['token_id']}")
+        return real_create_badge(agent_id, session_id)
+
+    monkeypatch.setattr(sessions.badges, "create_badge", revoke_midway)
+    status, body = call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token["token"]})
+    assert status == 403 and "revoked" in body["error"]
+    rows = env.ddb.Table("burn-sessions").scan()["Items"]
+    assert len(rows) == 1 and rows[0]["status"] == "revoked"
+
+
+def test_failing_event_writes_do_not_undo_a_join_or_refund_its_use(env, monkeypatch):
+    import db
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 1})[1]
+    real = db.write_event
+
+    def flaky(**fields):
+        if fields["action"] == "started":
+            raise RuntimeError("events table throttled")
+        return real(**fields)
+
+    monkeypatch.setattr(db, "write_event", flaky)
+    status, body = call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token["token"]})
+    assert status == 201 and session_row(env, body["session_id"])["status"] == "active"
+    row = env.ddb.Table("burn-enroll-tokens").get_item(Key={"token_id": token["token_id"]})["Item"]
+    assert row["uses_left"] == 0
+    assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token["token"]})[0] == 403
+
+
+def test_new_instances_use_the_same_timestamp_format_as_heartbeat(env):
+    import re
+    make_role(env, WORKER)
+    row = session_row(env, join(env, "worker")[1]["session_id"])
+    pattern = r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$"
+    assert re.match(pattern, row["created_at"]) and re.match(pattern, row["last_seen"])

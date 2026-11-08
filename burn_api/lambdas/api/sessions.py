@@ -5,12 +5,12 @@ the session row. A session row only exists once everything it needs exists.
 """
 import json
 import secrets
-from datetime import datetime, timezone
 
 import badges  # bundled from the identity code at deploy time
 import boto3
 from botocore.exceptions import ClientError
 from burn_contracts import names
+from burn_contracts.events import utc_now_iso
 
 import db
 import errors
@@ -24,7 +24,8 @@ class NotFound(Exception):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    # Same format as heartbeat and the idle sweep (Z, milliseconds), so string comparisons hold.
+    return utc_now_iso()
 
 
 def end_session(session: dict, status: str = "revoked") -> bool:
@@ -205,16 +206,46 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
     except BaseException:
         _discard_partial_instance(agent_id, minted, badge)
         raise
+    _recheck_after_write(agent_id, session_id, badge, token_id, parent_session)
+    # The row exists and the token use is spent. A failed event write must not look like a failed
+    # join (the caller would refund the use), so events are best effort from here on.
     fields = {"session_id": session_id, "role": role_name, "parent_session": parent_session}
-    db.write_event(agent_id=agent_id, source="session", action="issued", **fields,
-                   detail=f"session started with {len(credentials)} credentials")
-    db.write_event(agent_id=agent_id, source="instance", action="started", **fields,
-                   detail="instance started")
+    for source, action, detail in (("session", "issued", f"session started with {len(credentials)} credentials"),
+                                   ("instance", "started", "instance started")):
+        try:
+            db.write_event(agent_id=agent_id, source=source, action=action, **fields, detail=detail)
+        except Exception as exc:
+            print(f"event {source}/{action} not written for {session_id}: {type(exc).__name__}")
     return {
         "session_id": session_id, "agent_id": agent_id, "badge_ref": badge_ref, "credentials": credentials,
         "role": role_name, "parent_session": parent_session, "token_id": token_id,
         "tools": limits["tools"], "egress": limits["egress"],
     }
+
+
+def _recheck_after_write(agent_id, session_id, badge, token_id, parent_session):
+    """Refuse a child whose parent was burned (or whose token was revoked) while it was starting.
+
+    A scoped burn scans for targets and then revokes them. A child written after that scan would
+    escape it, so the child looks again after its own row exists: either the burn's next scan
+    sees the row, or this check sees the revoked parent or token. Reads are strongly consistent.
+    """
+    import instances
+    import tokens
+
+    if parent_session is not None:
+        parent = instances.get_session_or_none(parent_session, consistent=True)
+        allowed = parent is not None and parent.get("status") == "active"
+    else:
+        allowed = not tokens.get(token_id, consistent=True)["revoked"]
+    if allowed:
+        return
+    end_session({"session_id": session_id, "client_id": badge["client_id"]}, "revoked")
+    try:
+        minter_client.call("DELETE", f"/agents/{agent_id}/credentials")
+    except Exception as exc:
+        print(f"cleanup: credential delete failed for {agent_id}: {type(exc).__name__}")
+    raise errors.ApiError(403, "Parent session is not active" if parent_session else "Join token revoked")
 
 
 def _discard_partial_instance(agent_id: str, minted: bool, badge: dict | None):
