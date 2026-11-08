@@ -187,7 +187,9 @@ def test_on_a_preflight_and_a_canary_incident_need_no_person(env, signin_on, mon
     assert preflight["statusCode"] == 204
     seen = []
     monkeypatch.setattr(canary, "handle_incident", lambda incident: seen.append(incident) or {"ok": True})
-    assert handler.handler({"canary_incident": {"secret_ref": "burn/agent-a/canary_x"}}) == {"ok": True}
+    alias = type("Context", (), {"invoked_function_arn":
+                                 "arn:aws:lambda:us-east-1:123456789012:function:burn-api:canary"})()
+    assert handler.handler({"canary_incident": {"secret_ref": "burn/agent-a/canary_x"}}, alias) == {"ok": True}
     assert seen == [{"secret_ref": "burn/agent-a/canary_x"}]
 
 
