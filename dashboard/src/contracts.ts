@@ -26,7 +26,9 @@ export type EventAction =
   | "exited"
   | "unregistered"
   | "canary_used"
-  | "dismissed";
+  | "dismissed"
+  | "replaced"
+  | "resumed";
 export type FlagLevel = "seen" | "attempted" | "reported";
 
 export interface LedgerEvent {
@@ -57,6 +59,9 @@ export interface LedgerEvent {
   role?: string | null;
   parent_session?: string | null;
   flag_level?: FlagLevel | null;
+  // replaced: the session that replaced this burned one. resumed: the burned session this one replaced.
+  replaced_by?: string | null;
+  replaces?: string | null;
 }
 
 export interface AgentState {
@@ -113,6 +118,7 @@ export interface RoleFields {
   owner?: string | null;
   canaries?: boolean;
   auto_burn?: boolean;
+  replace_on_burn?: boolean;
   /** What the gateway does with a credential in tool output; the API defaults it to replace. */
   references?: "replace" | "report" | "off";
 }
@@ -152,6 +158,37 @@ export interface Instance {
   last_seen?: string | null;
   exited_at?: string | null;
   exposures?: number;
+  generation?: number;
+  replaces?: string | null;
+  replaced_by?: string | null;
+  replacement?: Replacement | null;
+  items_started?: number;
+  items_done?: number;
+}
+
+export type ReplacementStatus = "pending" | "linked" | "needs_person";
+
+// Set on an instance Burn burned when its role has replace_on_burn (never for a role burn).
+export interface Replacement {
+  status: ReplacementStatus;
+  cutoff: string;
+  cutoff_source: "evidence" | "burn_time";
+  done: string[];
+  quarantined: string[];
+}
+
+export interface ReplaceRequest {
+  session_id: string;
+}
+
+export interface ReplaceResult {
+  replaces: string;
+  session_id: string;
+  generation: number;
+  cutoff: string;
+  cutoff_source: "evidence" | "burn_time";
+  done: string[];
+  quarantined: string[];
 }
 
 export interface ScopedBurnRequest {

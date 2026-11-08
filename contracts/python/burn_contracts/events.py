@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 
 from .ids import new_event_id
+from .names import SESSION_ID_RE
 
 SOURCES = {"tool_response", "egress", "handoff", "burn", "gateway", "session", "provider", "instance"}
 ACTIONS = {
@@ -20,6 +21,8 @@ ACTIONS = {
     # a session's canary was presented to the mock provider (source "provider"),
     # and an owner dismissed a flagged credential after review (source "burn")
     "canary_used", "dismissed",
+    # replace on burn (source "instance"): a burned instance was replaced, and its replacement resumed the task
+    "replaced", "resumed",
 }
 SECRET_TYPES = {"aws_key", "api_key", "other"}
 OWNERS = {"agent", "shared", "unknown"}
@@ -31,6 +34,7 @@ OPTIONAL_FIELDS = (
     "owner_agent_id", "target_agent_id", "destination", "encoding", "detail",
     "role", "parent_session",
     "flag_level", "actor",
+    "replaces", "replaced_by",
 )
 
 _SECRET_REF_RE = re.compile(r"^burn/(agent-[a-z0-9-]{1,40}|shared)/[a-z0-9_]{1,40}$")
@@ -71,6 +75,9 @@ def make_event(*, agent_id: str, source: str, action: str, **fields) -> dict:
         raise ValueError(f"invalid actor: {fields['actor']!r}")
     if fields.get("flag_level") is not None and fields["flag_level"] not in FLAG_LEVELS:
         raise ValueError(f"invalid flag_level: {fields['flag_level']!r}")
+    for link in ("replaces", "replaced_by"):
+        if fields.get(link) is not None and not SESSION_ID_RE.fullmatch(fields[link]):
+            raise ValueError(f"invalid {link}: {fields[link]!r}")
     if fields.get("detail") is not None and len(fields["detail"]) > 500:
         raise ValueError("detail longer than 500 chars")
 

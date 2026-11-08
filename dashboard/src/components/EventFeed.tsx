@@ -16,6 +16,8 @@ const actions: Record<EventAction, { text: string }> = {
   unregistered: { text: "Unregistered agent refused" },
   canary_used: { text: "Canary credential used" },
   dismissed: { text: "Flag dismissed by owner" },
+  replaced: { text: "Burned instance replaced" },
+  resumed: { text: "Replacement resumed the task" },
 };
 
 /**

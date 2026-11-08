@@ -480,3 +480,197 @@ def test_sign_in_names():
     assert names.AUTOMATION_CLIENT_NAME == "burn-automation"
     assert names.AUTOMATION_CLIENT_ID_PARAM == "/burn/people/automation-client-id"
     assert names.AUTOMATION_PERSON_SECRET == "burn-system/automation-person"
+
+
+# --- replace on burn ---------------------------------------------------------------------------
+
+def test_roles_can_ask_for_a_replacement_when_an_instance_is_burned():
+    schema = json.loads((ROOT / "burn.schema.json").read_text())
+    prop = schema["$defs"]["role"]["properties"]["replace_on_burn"]
+    assert prop["type"] == "boolean" and prop["default"] is False  # off unless a role asks for it
+    assert "not when the whole role is burned" in prop["description"]
+    role = {"name": "worker", "tools": ["read_inbox"], "replace_on_burn": True}
+    jsonschema.validate({"version": 1, "roles": [role]}, schema)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"version": 1, "roles": [role | {"replace_on_burn": "yes"}]}, schema)
+    fields = _api()["components"]["schemas"]["RoleFields"]["properties"]
+    assert fields["replace_on_burn"] == {key: prop[key] for key in ("type", "default", "description")}
+
+
+def test_progress_is_item_ids_only_with_fixed_limits():
+    assert names.ITEM_ID_RE.pattern == r"^[A-Za-z0-9_.:-]{1,64}$"
+    for good in ("w01-item-01", "T-1001", "a", "x" * 64, "ns:item_1.2"):
+        assert names.is_item_id(good)
+    for bad in (None, 7, "", "x" * 65, "has space", "a/b", "w01\n", "{{burn:ref:x}}", "é"):
+        assert not names.is_item_id(bad)
+    assert names.MAX_PROGRESS_ITEMS == 500 and names.MAX_PROGRESS_EVENTS == 50
+    assert names.PROGRESS_STATES == ("started", "done")
+    assert (names.PROGRESS_URL_ENV, names.TASK_ENV, names.RESUME_ENV) == (
+        "BURN_PROGRESS_URL", "BURN_TASK", "BURN_RESUME")
+
+
+def test_progress_rides_on_the_heartbeat_and_a_broken_rule_is_not_a_409():
+    api = _api()
+    schemas = api["components"]["schemas"]
+    assert schemas["ItemId"]["pattern"] == names.ITEM_ID_RE.pattern
+    op = api["paths"]["/instances/{session_id}/heartbeat"]["post"]
+    assert op["requestBody"]["required"] is False  # a bare heartbeat stays valid
+    body = op["requestBody"]["content"]["application/json"]["schema"]
+    assert body == {"$ref": "#/components/schemas/Heartbeat"}
+    progress = schemas["Heartbeat"]["properties"]["progress"]
+    assert progress["maxItems"] == names.MAX_PROGRESS_EVENTS
+    event = schemas["ProgressEvent"]
+    assert event["required"] == ["item", "state"] and event["additionalProperties"] is False
+    assert event["properties"]["item"] == {"$ref": "#/components/schemas/ItemId"}
+    assert tuple(event["properties"]["state"]["enum"]) == names.PROGRESS_STATES
+    assert "400" in op["responses"] and "409" in op["responses"]
+    assert str(names.MAX_PROGRESS_ITEMS) in op["responses"]["400"]["description"]
+    assert "Burn's clock" in op["description"]
+
+
+def test_replacement_names():
+    assert names.MAX_REPLACEMENT_GENERATION == 3  # at most 3 replacements per task, then a person decides
+    assert names.REPLACEMENT_STATUSES == ("pending", "linked", "needs_person")
+    assert names.CUTOFF_SOURCES == ("evidence", "burn_time")
+
+
+def _nullable_ref(prop, target):
+    return prop["allOf"] == [{"$ref": f"#/components/schemas/{target}"}] and prop["nullable"] is True
+
+
+def test_instances_show_their_replacement_links_and_progress_counts_only():
+    schemas = _api()["components"]["schemas"]
+    props = schemas["Instance"]["properties"]
+    assert props["generation"]["type"] == "integer" and props["generation"]["minimum"] == 0
+    for link in ("replaces", "replaced_by"):  # session ids, null when there is no link
+        assert props[link]["type"] == "string" and props[link]["nullable"] is True
+    assert _nullable_ref(props["replacement"], "Replacement")
+    assert props["items_done"]["type"] == props["items_started"]["type"] == "integer"
+    assert "progress" not in props  # list replies stay small: never the per-item map
+    replacement = schemas["Replacement"]
+    assert set(replacement["required"]) == {"status", "cutoff", "cutoff_source", "done", "quarantined"}
+    rprops = replacement["properties"]
+    assert tuple(rprops["status"]["enum"]) == names.REPLACEMENT_STATUSES
+    assert tuple(rprops["cutoff_source"]["enum"]) == names.CUTOFF_SOURCES
+    assert rprops["cutoff"]["format"] == "date-time"
+    for key in ("done", "quarantined"):
+        assert rprops[key]["items"] == {"$ref": "#/components/schemas/ItemId"}
+
+
+def test_the_replace_route_needs_a_person_and_documents_every_refusal():
+    api = _api()
+    assert api["paths"]["/instances/{session_id}"]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"] == {"$ref": "#/components/schemas/Instance"}
+    op = api["paths"]["/instances/{session_id}/replace"]["post"]
+    assert "security" not in op  # the global person (or, before sign-in, admin) requirement; never an instance
+    assert _schemes(api, op) == {"personBearer", "adminHeader"}
+    body = op["requestBody"]["content"]["application/json"]["schema"]
+    assert op["requestBody"]["required"] is True
+    assert body["required"] == ["session_id"] and body["additionalProperties"] is False
+    assert {"200", "400", "401", "404", "409"} <= set(op["responses"])
+    result = op["responses"]["200"]["content"]["application/json"]["schema"]
+    assert result == {"$ref": "#/components/schemas/ReplaceResult"}
+    required = set(api["components"]["schemas"]["ReplaceResult"]["required"])
+    assert {"replaces", "done", "quarantined", "cutoff"} <= required
+    assert "pending" in op["responses"]["409"]["description"]
+    for rule in ("same role", "active", "after", "already"):
+        assert rule in op["responses"]["400"]["description"], rule
+    assert "TransactWriteItems" in op["description"] or "exactly one" in op["description"]
+
+
+def test_replaced_and_resumed_events_link_the_two_instances():
+    old, new = "sess_burned0123", "sess_fresh4567"
+    replaced = events.make_event(
+        agent_id=WORKER, source="instance", action="replaced", session_id=old, role="worker",
+        replaced_by=new, actor="ada@example.com", detail="replaced by agent-worker-0b7c2e")
+    resumed = events.make_event(
+        agent_id="agent-worker-0b7c2e", source="instance", action="resumed", session_id=new, role="worker",
+        replaces=old, actor="admin", detail="4 done, 1 quarantined")
+    for event in (replaced, resumed):
+        jsonschema.validate(event, EVENT_SCHEMA)
+    assert {"replaced", "resumed"} <= events.ACTIONS
+    description = EVENT_SCHEMA["properties"]["action"]["description"]
+    assert "replaced =" in description and "resumed =" in description
+    assert events.make_event(agent_id="agent-a", source="burn", action="revoked")["replaces"] is None
+    with pytest.raises(ValueError):
+        events.make_event(agent_id=WORKER, source="instance", action="resumed", replaces="has space")
+
+
+def test_progress_events_are_checked_by_the_named_rule():
+    from burn_contracts import progress
+    assert progress.check_events([{"item": "w01-item-01", "state": "started"}]) == [("w01-item-01", "started")]
+    assert progress.check_events([]) == []
+    cases = [
+        ({"item": "w01"}, "item and state"), ({"item": "w01", "state": "done", "note": "x"}, "item and state"),
+        ({"item": "has space", "state": "done"}, "item id"), ({"item": "w01", "state": "finished"}, "state"),
+        ("w01", "item and state"),
+    ]
+    for event, rule in cases:
+        with pytest.raises(progress.ProgressError, match=rule):
+            progress.check_events([event])
+    with pytest.raises(progress.ProgressError, match="progress must be a list"):
+        progress.check_events({"item": "w01", "state": "done"})
+    with pytest.raises(progress.ProgressError, match=f"at most {names.MAX_PROGRESS_EVENTS} progress events"):
+        progress.check_events([{"item": f"i{n}", "state": "started"} for n in range(names.MAX_PROGRESS_EVENTS + 1)])
+    assert issubclass(progress.ProgressError, ValueError)
+
+
+def test_progress_is_stamped_by_the_caller_clock_and_never_moves():
+    from burn_contracts import progress
+    t1, t2, t3 = "2026-11-07T10:00:00.000Z", "2026-11-07T10:00:05.000Z", "2026-11-07T10:00:09.000Z"
+    state = progress.apply({}, [("a", "started"), ("b", "done")], t1)
+    assert state == {"a": {"started_at": t1, "done_at": None}, "b": {"started_at": t1, "done_at": t1}}
+    later = progress.apply(state, [("a", "started"), ("a", "done"), ("b", "done"), ("c", "started")], t2)
+    assert later["a"] == {"started_at": t1, "done_at": t2}  # a second started keeps the first time
+    assert later["b"] == {"started_at": t1, "done_at": t1}  # so does a second done
+    assert progress.apply(later, [("a", "started")], t3)["a"] == {"started_at": t1, "done_at": t2}
+    assert state["a"]["done_at"] is None  # the input is never changed
+    assert progress.counts(later) == {"items_started": 3, "items_done": 2}
+    assert progress.counts(None) == {"items_started": 0, "items_done": 0}
+    full = progress.apply({}, [(f"i{n}", "done") for n in range(names.MAX_PROGRESS_ITEMS)], t1)
+    assert progress.apply(full, [("i0", "done")], t2) == full  # known items never count again
+    with pytest.raises(progress.ProgressError, match=f"at most {names.MAX_PROGRESS_ITEMS} items"):
+        progress.apply(full, [("one-more", "started")], t2)
+
+
+def test_only_work_done_before_the_cutoff_is_trusted():
+    from burn_contracts import progress
+    cutoff = "2026-11-07T10:00:05.000Z"
+    before, at, after = "2026-11-07T10:00:01.000Z", cutoff, "2026-11-07T10:00:07.000Z"
+    state = {
+        "done-before": {"started_at": before, "done_at": before},
+        "done-at-cutoff": {"started_at": before, "done_at": at},       # not before it: not trusted
+        "in-flight": {"started_at": before, "done_at": None},          # working on it at the breach
+        "done-after": {"started_at": before, "done_at": after},
+        "started-after": {"started_at": after, "done_at": None},
+        "started-and-done-after": {"started_at": after, "done_at": after},
+    }
+    done, quarantined = progress.classify(state, cutoff)
+    assert done == ["done-before"]
+    assert quarantined == sorted(set(state) - {"done-before"})
+    assert progress.classify({}, cutoff) == ([], [])
+
+
+def test_the_cutoff_compares_times_not_strings():
+    from burn_contracts import progress
+    # Other components may write "Z" or "+00:00" and any number of fraction digits. As strings, "...:00Z" sorts
+    # after "...:00.500Z" ('Z' > '.'), which would trust an item done half a second after the breach.
+    cutoff = "2026-11-07T10:00:00Z"
+    state = {
+        "half-second-after": {"started_at": "2026-11-07T09:59:59.000Z", "done_at": "2026-11-07T10:00:00.500Z"},
+        "same-instant-other-format": {"started_at": "2026-11-07T09:59:00Z", "done_at": "2026-11-07T10:00:00.000+00:00"},
+        "just-before": {"started_at": "2026-11-07T09:59:00Z", "done_at": "2026-11-07T09:59:59.999999+00:00"},
+    }
+    assert progress.classify(state, cutoff) == (["just-before"], ["half-second-after", "same-instant-other-format"])
+    micro_cutoff = "2026-11-07T10:00:00.123456+00:00"
+    assert progress.classify({"x": {"started_at": cutoff, "done_at": "2026-11-07T10:00:00.123Z"}}, micro_cutoff) == (
+        ["x"], [])
+    assert progress.parse_time("2026-11-07T12:00:00+02:00") == progress.parse_time("2026-11-07T10:00:00Z")
+    for bad in ("2026-11-07T10:00:00", "yesterday", None, 5):  # no time zone, or not a timestamp at all
+        with pytest.raises(ValueError):
+            progress.parse_time(bad)
+
+
+def test_a_burned_instance_learns_it_before_its_body_is_checked():
+    description = _api()["paths"]["/instances/{session_id}/heartbeat"]["post"]["description"]
+    assert "404, then 409, then 400" in description

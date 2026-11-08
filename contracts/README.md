@@ -22,7 +22,7 @@ A contract change updates this folder and the mocks together.
 | `mcp-tools.json` | MCP tools behind the Gateway |
 | `scenario.schema.json` | `/agents/scenarios/*.yaml` format |
 | `burn.schema.json` | `burn.yaml` format (roles defined in code); example in `examples/burn.yaml` |
-| `python/burn_contracts/` | Shared helpers: `ids.py`, `events.py`, `fingerprint.py`, `names.py` |
+| `python/burn_contracts/` | Shared helpers: `ids.py`, `events.py`, `fingerprint.py`, `names.py`, `progress.py` (task progress rules) |
 
 ## How to test it
 ```bash
@@ -161,6 +161,8 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 team), `egress`, `credentials` (the narrowed credential types
 minted for the instance), `last_seen`, `exited_at`, `session_token_sha256` (the session token itself
 is returned once in the join reply and never stored; the supervisor never hands it to the agent).
+Replace on burn adds `progress` (one entry per task item, see below), `generation`, `replaces`,
+`replaced_by` and `replacement`.
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
 `burn-enroll-tokens` rows: `token_id`, `role`, `created_by` (the person who made the token, or null),
@@ -190,6 +192,8 @@ is returned once in the join reply and never stored; the supervisor never hands 
   other host, so a role that calls a model lists it.
 - Burn scopes (`POST /burns`): `instance`, `role`, `lineage` (an instance and every descendant),
   `token` (every instance that joined with it; the token is revoked too).
+- `replace_on_burn` (default false): when one of the role's instances is burned, Burn marks it for a clean
+  replacement (see "Replace on burn" below). Burning the whole role never replaces anything.
 
 ### Canaries and flag levels
 - **Canary incident**: the mock provider recognises a canary by its exact fingerprint, always answers 401
@@ -223,12 +227,40 @@ is returned once in the join reply and never stored; the supervisor never hands 
   and clears the flag; `dismiss` keeps the value and closes the flag. A dismissed flag reopens only on
   evidence at a higher level than the level it was dismissed at.
 
+### Replace on burn
+- **Progress** is item ids only (`names.ITEM_ID_RE`). The launcher hands an agent its task as `BURN_TASK` (a
+  JSON list of item ids); the agent tells its `burn run` supervisor `{"item": <id>, "state": "started" | "done"}`
+  at `BURN_PROGRESS_URL`, and the supervisor sends what it has queued in the body of its next heartbeat
+  (`{"progress": [...]}`, at most `names.MAX_PROGRESS_EVENTS` = 50 per heartbeat).
+- Burn stamps each event with its own receive time and keeps one entry per item on the session row,
+  `progress: {<item>: {"started_at", "done_at"}}`, at most `names.MAX_PROGRESS_ITEMS` = 500 items per
+  instance. `done` without `started` counts as both at once; a repeat never moves a time. A broken rule is a
+  400 naming it (never a 409, which means burned or exited). Reads show counts only. `burn_contracts.progress`
+  holds these rules and the done/quarantined split, so the API, the mock and `burn run` agree.
+- **At burn time** (one instance of a role with `replace_on_burn`: scope `instance`, which a burn by source and a
+  canary burn also use; never a role, lineage or token burn, which mean stop that whole group) Burn writes
+  `replacement` on the burned instance: `{status, cutoff, cutoff_source, done, quarantined}`. `cutoff` is the
+  earliest evidence of compromise on Burn's clock (`cutoff_source: evidence`: the blocked credential, canary use or refused call that
+  caused the burn, or for a burn by source this instance's first read of the source), else the burn time
+  (`cutoff_source: burn_time`). An item is `done` only if it was done before the cutoff; one in flight at the
+  cutoff or touched after it is `quarantined` for a person, never retried. `status` is `pending`, or
+  `needs_person` once the instance's `generation` reaches `names.MAX_REPLACEMENT_GENERATION` (3).
+- **The launcher** that started the instance (Burn never starts one, and never holds the task) joins a fresh
+  instance the normal way and calls `POST /instances/{old}/replace {"session_id": <new>}` with a person's token
+  (or the admin header before sign-in). One transaction links exactly one replacement: old `pending -> linked`
+  with `replaced_by`, new gets `replaces` and `generation` = old + 1. The reply's `done` and `quarantined` go
+  to the new agent as `BURN_RESUME`; it skips both and does the rest.
+
 ### Events
 - Build every event with `burn_contracts.events.make_event(...)`. It fills `event_id` and `ts`
   and rejects unknown enum values, so all writers stay schema-valid.
 - Instance lifecycle: source `instance`, actions `started` / `exited`, with `session_id`, `role`
   and `parent_session` set. A call carrying a badge Burn never issued is `agent_id: system`,
   source `gateway`, action `unregistered`.
+- Replace on burn: source `instance`, action `replaced` on the burned instance (`replaced_by` = the new session,
+  detail `replaced by <agent_id>`) and `resumed` on the replacement (`replaces` = the burned session, detail
+  `<n> done, <m> quarantined`). Both carry the caller as `actor`. A pending or needs_person replacement shows on
+  the instance, not as an event.
 - `actor` (optional) says who caused an event: the signed-in person's email, `instance:<session_id>`
   for an instance acting on its own session, `admin` for a caller with the admin header (before
   sign-in is switched on, or in local development), or `system` for Burn itself. Events written before

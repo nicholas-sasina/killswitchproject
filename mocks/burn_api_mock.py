@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import base64
+import json
 import re
 import secrets
 from contextlib import asynccontextmanager, suppress
@@ -14,7 +15,7 @@ from burn_contracts.names import DEMO_TOKEN_HEADER, MOCK_HEADER, ROLE_NAME_RE, a
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if __package__:
     from .burn_state import ENCODINGS, BurnState
@@ -54,6 +55,7 @@ class RoleSpec(BaseModel):
     canaries: bool = True
     auto_burn: bool = True
     references: Literal["replace", "report", "off"] = "replace"
+    replace_on_burn: bool = False
     managed_by: Literal["code", "ui"] = "ui"
 
 
@@ -80,6 +82,11 @@ class BurnsRequest(BaseModel):
     scope: Literal["instance", "role", "lineage", "token"]
     id: str
     reason: str | None = Field(default=None, max_length=200)
+
+
+class ReplaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
 
 
 class LeakRequest(AgentRequest):
@@ -305,10 +312,26 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
                         status: Literal["active", "revoked", "exited"] | None = None):
         return {"instances": swarm.list_instances(role, status)}
 
+    @app.get("/instances/{session_id}")
+    async def get_instance(session_id: str):
+        return swarm.get_instance(session_id)
+
     @app.post("/instances/{session_id}/heartbeat")
     async def heartbeat(session_id: str, request: Request):
         authorize_instance(request, session_id)
-        return swarm.heartbeat(session_id)
+        raw = await request.body()
+        try:
+            body = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            raise HTTPException(400, "The heartbeat body must be JSON") from None
+        if not isinstance(body, dict) or set(body) - {"progress"}:
+            raise HTTPException(400, "The heartbeat body has only progress")
+        return swarm.heartbeat(session_id, body.get("progress"))
+
+    @app.post("/instances/{session_id}/replace")
+    async def replace(session_id: str, body: ReplaceRequest):
+        """Admin (or, deployed, a person) only: the gate refuses an instance's own token on this path."""
+        return swarm.replace(session_id, body.session_id)
 
     @app.post("/instances/{session_id}/exit")
     async def exit_instance(session_id: str, request: Request):

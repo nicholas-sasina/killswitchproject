@@ -63,6 +63,11 @@
           "enum": ["replace", "report", "off"],
           "default": "replace",
           "description": "Credentials Burn recognizes in tool output: replace = the agent gets {{burn:ref:<secret_ref>}} instead of the value; report = record what would be replaced, change nothing; off = neither. Canaries are never replaced."
+        },
+        "replace_on_burn": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start a clean replacement when one of this role's instances is burned (not when the whole role is burned)."
         }
       }
     }
