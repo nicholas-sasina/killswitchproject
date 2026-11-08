@@ -14,7 +14,12 @@ dependencies = [
 
 [dependency-groups]
 # scripts/ (load, reset, run_demo) and the tests use these; the container image does not.
-dev = ["pytest>=8", "jsonschema>=4", "burn-contracts"]
+dev = [
+    "pytest>=8",
+    "jsonschema>=4",
+    "burn-contracts",
+    "moto[dynamodb,secretsmanager]>=5",
+]
 
 [tool.uv.sources]
 burn-contracts = { path = "../contracts", editable = true }

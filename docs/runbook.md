@@ -55,7 +55,7 @@ The step-by-step script for a four-minute demo is in [demo-script.md](demo-scrip
 ## Between runs
 
 ```bash
-make reset           # clears demo state and deletes the scenario's minted credentials
+make reset           # clears demo state; deletes the credentials and canaries of the scenario's agents and of every swarm instance, and their badge secrets (join tokens are cleared, roles kept)
 make demo
 ```
 
