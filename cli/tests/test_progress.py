@@ -176,7 +176,7 @@ class RecordingApi:
 
 def supervisor(api):
     inst = Instance(api, "worker", ["true"], gateway_url="http://gateway", host_env={},
-                    session={"session_id": "sess_1", "agent_id": "agent-1"})
+                    session={"session_id": "sess_1", "agent_id": "agent-1"}, sleep=lambda _: None)
     inst._token = "session-token-in-memory"
     return inst
 
@@ -201,7 +201,18 @@ def test_a_refused_batch_is_logged_and_dropped_and_is_not_a_burn(capsys):
     err = capsys.readouterr().err
     assert "refused 2 progress events" in err and "HTTP 400" in err
     inst._progress.add(ev("c"))
+    assert inst._beat() == 200 and api.bodies[-1] == []  # the API recorded nothing, liveness included: a bare beat
     assert inst._beat() == 200 and api.bodies[-1] == [ev("c")]
+
+
+def test_after_a_refused_batch_the_next_heartbeat_is_bare_even_with_more_queued():
+    api = RecordingApi(400)
+    inst = supervisor(api)
+    for i in range(60):
+        inst._progress.add(ev(f"item-{i:02d}"))
+    assert inst._beat() == 400 and inst._progress.pending() == 10  # the 50 sent are dropped
+    assert inst._beat() == 200 and inst._beat() == 200
+    assert api.bodies[1:] == [[], [ev(f"item-{i:02d}") for i in range(50, 60)]]
 
 
 @pytest.mark.parametrize("status", [0, 429, 503])
@@ -290,6 +301,29 @@ def test_a_refused_heartbeat_drops_its_progress_and_the_agent_keeps_running(stac
     assert [batch for _, batch in progress_beats(seen)] == [[ev("bad-item")], [ev("good-item")]]
     assert "refused 1 progress events" in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
+
+
+def test_a_refused_heartbeat_is_followed_promptly_by_a_bare_one_that_keeps_the_instance_alive(stack):
+    original = stack.handle
+
+    def refuse_progress(method, path, query, body):
+        if path.endswith("/heartbeat") and body.get("progress"):
+            return 400, {"error": "item id must match ^[A-Za-z0-9_.:-]{1,64}$"}
+        if path.endswith("/heartbeat"):
+            stack.instances[path.split("/")[2]]["last_seen"] = "alive"
+        return original(method, path, query, body)
+
+    stack.handle = refuse_progress
+    seen = timed(stack)
+    code = REPORT + """
+    report("item-01", "started")
+    time.sleep(1.5)"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.2).run() == 0
+    beats = [(t, body.get("progress")) for t, _, path, body in seen if path.endswith("/heartbeat")]
+    refused = next(i for i, (_, progress) in enumerate(beats) if progress)
+    then, bare = beats[refused][0], beats[refused + 1]
+    assert bare[1] is None and 0.15 <= bare[0] - then < 1.0  # after the minimum gap, not a minute later
+    assert next(iter(stack.instances.values()))["last_seen"] == "alive"
 
 
 def test_a_409_still_means_burned_when_progress_is_waiting(stack):
@@ -404,3 +438,4 @@ def test_the_help_lists_the_progress_endpoint_and_the_task_variables(capsys):
         cli(["run", "--help"])
     out = " ".join(capsys.readouterr().out.split())
     assert "BURN_PROGRESS_URL (POST {item, state}" in out and "BURN_TASK and BURN_RESUME" in out
+

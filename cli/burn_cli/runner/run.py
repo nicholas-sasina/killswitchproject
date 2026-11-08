@@ -57,6 +57,7 @@ class Instance:
         self._stopping, self._spawn_lock = threading.Event(), threading.Lock()
         self._progress = ProgressQueue(on_change=self._activity.set)  # new progress wakes the heartbeat
         self._beat_lock = threading.Lock()  # one heartbeat at a time, so a batch is never sent twice at once
+        self._bare_next = False  # after a refused batch: the API recorded nothing, not even that we are alive
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -191,7 +192,7 @@ class Instance:
                 self._activity.clear()
                 gap_left = self.min_gap - (time.monotonic() - last)
                 if gap_left > 0:
-                    if not self._progress.pending():
+                    if not (self._progress.pending() or self._bare_next):
                         continue  # MCP activity just after a beat: that beat already showed the instance alive
                     if self._done.wait(gap_left):  # progress goes out as soon as the minimum gap allows
                         return
@@ -201,24 +202,26 @@ class Instance:
                 self._stopped_by_api = True
                 self._stop_agent()
                 return
-            if status in (200, 400) and self._progress.pending():
-                self._activity.set()  # more than 50 were waiting: the rest go with the next beat
+            if status == 400 or (status == 200 and self._progress.pending()):
+                self._activity.set()  # the next beat goes after the minimum gap: a bare one, or the next 50
             # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
 
     def _beat(self) -> int:
-        """One heartbeat with the oldest queued progress, at most 50 events.
+        """One heartbeat with the oldest queued progress, at most 50 events, or none right after a refused batch.
 
         Returns 200, or the failed call's status (0 when the API was unreachable).
         """
         with self._beat_lock:
-            batch = self._progress.batch()
+            batch = [] if self._bare_next else self._progress.batch()
             try:
                 self.api.heartbeat(self.session["session_id"], self._token, batch)
             except ApiError as exc:
                 if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
                     self._progress.dropped(len(batch))
+                    self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
                     log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
                 return exc.status or 0
+            self._bare_next = False
             self._progress.sent(len(batch))
             return 200
 
