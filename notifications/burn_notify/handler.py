@@ -36,7 +36,9 @@ def processor() -> Processor:
         cfg = config_mod.load()
         store = DynamoStore(os.environ["BURN_NOTIFY_STATE_TABLE"],
                             lease_seconds=int(os.environ.get("BURN_NOTIFY_LEASE_SECONDS", "90")))
-        _processor = Processor(cfg, store, max_receives=int(os.environ.get("BURN_NOTIFY_MAX_RECEIVES", "5")))
+        # BURN_NOTIFY_NOTICE labels every message [TEST] (set while a deployment is being tested).
+        _processor = Processor(cfg, store, max_receives=int(os.environ.get("BURN_NOTIFY_MAX_RECEIVES", "5")),
+                               notice=os.environ.get("BURN_NOTIFY_NOTICE") or None)
     return _processor
 
 

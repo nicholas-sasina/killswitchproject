@@ -1,9 +1,14 @@
 # Deploying Burn notifications
 
-**Status: not deployed.** Deploying changes the shared AWS account, so it needs explicit approval from
-the workstream owner **and** the infrastructure owner. Nothing below has been run against AWS. It has
-been checked locally: `cdk synth` of both stacks, a template diff of the stream change, and the stack
-tests (`tests/test_infra.py`).
+**Status (2026-11-08): deployed to the team account, approved by the workstream owner and the infra
+owner.**
+- `BurnData` has the `burn-events` stream (PR #120).
+- `BurnNotifications` is created and running with the `[TEST]` label (`-c burn:notify_notice=...`).
+- Real ledger events were delivered end to end (stream → Pipe → SQS → Lambda) to Slack, Telegram and
+  Discord, and the flush Lambda's summaries arrived.
+- SES accepted the emails, but they were not observed in the Gmail inbox. A @gmail.com sender fails
+  Gmail's sender alignment, so use a verified domain sender instead.
+- To make alerts normal, redeploy without `burn:notify_notice`.
 
 ## What changes on existing resources
 Exactly one change, prepared on branch `ws/notifications-infra` (`infra/burn_infra/data.py`, +6/−2).
@@ -114,6 +119,8 @@ cd notifications
 CTX="-c burn:events_stream_arn=$STREAM_ARN -c burn:notify_config=$HOME/burn-notify-deployed.json \
      -c burn:notify_ses_identity=<identity> -c burn:dashboard_origin=https://<dashboard host> \
      -c burn:alarm_email=<on-call address>"
+# optional while testing: every message is labelled [TEST]
+#    -c burn:notify_notice="SYNTHETIC TEST - deployment test; not a real security event"
 uv run --group infra npx -y aws-cdk@2 diff   --app "python infra/app.py" BurnNotifications $CTX
 uv run --group infra npx -y aws-cdk@2 deploy --app "python infra/app.py" BurnNotifications $CTX
 ```

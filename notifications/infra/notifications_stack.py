@@ -12,6 +12,7 @@ Context values (all optional except the stream ARN):
     burn:notify_config        path to the notifications config JSON (secret_refs only, no secrets)
     burn:notify_ses_identity  verified SES identity name (domain or address) the Lambda may send from
     burn:dashboard_origin     https origin of the hosted dashboard (links go to <origin>/#/alerts)
+    burn:notify_notice        optional text that labels every message [TEST] (deployment testing)
     burn:alarm_email          optional address subscribed to the alarm topic (confirms by email)
     burn:ses_sandbox          "true" (default) also allows the configured recipient identities, as the
                               SES sandbox requires; "false" once the account has production access
@@ -59,7 +60,7 @@ LEASE_SECONDS = LAMBDA_TIMEOUT + 30  # a claim outlives the worker that holds it
 ENV_LIMIT = 3500             # Lambda allows 4 KB of environment in total
 STATE_TABLE = "burn-notify-state"
 SECRET_PREFIX = "burn-notify/"
-CODE_EXCLUDE = ["tests", "infra", "docs", "demo", ".venv", ".pytest_cache", "**/__pycache__", "*.md", "uv.lock",
+CODE_EXCLUDE = ["cdk.out", "tests", "infra", "docs", "demo", ".venv", ".pytest_cache", "**/__pycache__", "*.md", "uv.lock",
                 "pyproject.toml", "*.json"]
 
 
@@ -121,6 +122,8 @@ class BurnNotificationsStack(cdk.Stack):
                "BURN_NOTIFY_METRICS": "1", "BURN_NOTIFY_LEASE_SECONDS": str(LEASE_SECONDS)}
         if ctx("burn:dashboard_origin"):
             env["BURN_DASHBOARD_ORIGIN"] = ctx("burn:dashboard_origin")
+        if ctx("burn:notify_notice"):  # e.g. while testing a deployment: every message is labelled [TEST]
+            env["BURN_NOTIFY_NOTICE"] = str(ctx("burn:notify_notice"))[:200]
         code = lambda_.Code.from_asset(str(NOTIFICATIONS), exclude=CODE_EXCLUDE)
 
         # SES: send only from the configured sender(s) of the verified identity. In the SES sandbox, SES also
