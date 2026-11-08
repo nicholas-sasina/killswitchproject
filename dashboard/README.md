@@ -48,6 +48,18 @@ discarded when continuing or closing. The waiting view changes to connected when
 Existing dashboard-managed roles have a **New token** action. Both **Burn instance** and
 **Burn role** require confirmation; burning a role revokes all its active instances.
 
+## Sign-in
+
+Sign in through Cognito managed login using authorization code + PKCE S256 (`openid email profile`).
+Set `VITE_BURN_PEOPLE_DOMAIN` and `VITE_BURN_PEOPLE_CLIENT_ID` alongside the API URL; register
+`http://localhost:5173/` as the callback and sign-out URI. The callback checks state and strips the query.
+Verifier/state and ID/access/refresh tokens stay in this tab's sessionStorage. The sidebar shows the
+signed-in email and Sign out. API calls use the ID bearer; a 401 refreshes and retries once, then
+returns to Sign in on failure. Sign out clears Burn's sign-in state and uses managed logout.
+
+For local mocks only, set `VITE_BURN_LOCAL_DEV=1` and `VITE_BURN_DEMO_TOKEN`. This bypasses
+people sign-in and uses the demo header; otherwise that header is never sent.
+
 ## How it works
 
 - Polls the Burn API every second with an incremental cursor; a reducer deduplicates events by `event_id`.
@@ -88,7 +100,7 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
 | File                             | Purpose                                                               |
 | -------------------------------- | --------------------------------------------------------------------- |
 | `src/contracts.ts`               | TypeScript shapes matching the API and event contracts                |
-| `src/api.ts`                     | Requests, demo-token header, timeouts and response-header observation |
+| `src/api.ts`                     | Requests, bearer auth with refresh, timeouts and response observation |
 | `src/events.ts`                  | Deduplication, cursor handling and newest-first ordering              |
 | `src/polling.ts`                 | Polling with cancellation and no overlapping requests                 |
 | `src/App.tsx`                    | View switching, agent selection and containment state                 |
@@ -113,13 +125,16 @@ cp .env.example .env.local
 
 Set these local fields, then run `npm run dev` and open http://localhost:5173 (the only origin the Burn API accepts; the dev server listens on localhost only and will not move to another port):
 
-| Variable               | Meaning                                     |
-| ---------------------- | ------------------------------------------- |
-| `VITE_BURN_API_URL`    | Burn API base URL, without an endpoint path |
-| `VITE_BURN_DEMO_TOKEN` | Token sent as `x-burn-demo-token`           |
+| Variable                     | Meaning                                         |
+| ---------------------------- | ----------------------------------------------- |
+| `VITE_BURN_API_URL`          | Burn API base URL, without an endpoint path     |
+| `VITE_BURN_PEOPLE_DOMAIN`    | Cognito managed-login hostname or HTTPS origin  |
+| `VITE_BURN_PEOPLE_CLIENT_ID` | Public people app client ID                     |
+| `VITE_BURN_LOCAL_DEV`        | `1` for local mocks only; defaults to `0`       |
+| `VITE_BURN_DEMO_TOKEN`       | Local mock token, used only with local-dev mode |
 
 For local development, start `mocks/burn_api_mock.py` from the repository root according to its README.
-Use its local URL (port 8700) for the Burn API URL. Generate a local test token if needed; the mock accepts any token.
+Use its local URL (port 8700) for the Burn API URL and set `VITE_BURN_LOCAL_DEV=1`. Generate a local test token if needed; the mock accepts any token.
 Local configuration stays in the gitignored `.env.local`. Restart Vite after changing it.
 
 ```sh
@@ -135,7 +150,7 @@ and the shared polling limits. Fleet and alert tests cover merging the two sourc
 before the next instance poll, per-session burn times, alert wording for each kind of block and
 refusal, the alerts row cap, which rebuild actions each role gets, and one instance poll per page.
 `npm run preview` serves the production build. The Burn API must allow the dashboard's origin,
-successful unauthenticated OPTIONS preflights, `x-burn-demo-token` and `Content-Type`.
+successful unauthenticated OPTIONS preflights, `Authorization` and `Content-Type` (also `x-burn-demo-token` for local mocks).
 Development services expose `x-burn-mock` in `Access-Control-Expose-Headers` so the browser can detect mock data.
 
 ## FAQ
@@ -161,5 +176,7 @@ projector. Both themes are audited to WCAG AA for text and 3:1 for control bound
 is the degraded one.
 
 **What does MOCK DATA mean, and where does the token live?** At least one API response declared itself a development mock.
-Switch URLs and reload to start a new connection. Vite embeds `VITE_` values in the browser bundle, including the demo token;
-this is a demo access control, so serve the dashboard only to the intended audience and keep builds containing it out of git.
+Switch URLs and reload to start a new connection. People tokens stay in this tab's sessionStorage and
+are cleared by Sign out; they never go in localStorage, API URLs or console logs. The people domain
+and client ID are public configuration. In local-dev mode Vite embeds the demo token in the bundle,
+so keep local configuration and builds containing it out of git.
