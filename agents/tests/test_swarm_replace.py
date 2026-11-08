@@ -12,6 +12,7 @@ from burn_cli.api import ApiError  # noqa: E402
 from swarm_launch import ADOPT_SECRETS, start_workers  # noqa: E402
 
 OLD_TASK = ["w01-item-01", "w01-item-02", "w01-item-03", "w01-item-04"]
+IMAGE = "burn-swarm-worker:0123456789ab"
 
 
 class FakeBurn:
@@ -74,7 +75,7 @@ def swarm_of(count=1, items=4, burn=None, docker=None):
     burn, docker, logged, slept = burn or FakeBurn(), docker or Docker(), [], []
     swarm = start_workers(burn, burn, "worker", count, api_url="http://localhost:8700",
                           gateway_url="http://localhost:8701/mcp", mock=True, interval=3.0, certs_dir="/c",
-                          docker=docker, items=items, sleep=slept.append, log=logged.append)
+                          docker=docker, items=items, sleep=slept.append, log=logged.append, image=IMAGE)
     return swarm, burn, docker, logged, slept
 
 
@@ -121,6 +122,7 @@ def test_a_burned_worker_with_a_pending_replacement_is_replaced_once_with_the_sa
     ]
     argv, env = docker.runs[-1]
     assert argv[argv.index("--name") + 1] == new and new != old and len(docker.runs) == 2
+    assert argv[argv.index(IMAGE) + 1:argv.index(IMAGE) + 3] == ["burn", "run"]  # the image this launcher built
     assert json.loads(env["BURN_TASK"]) == OLD_TASK
     assert json.loads(env["BURN_RESUME"]) == {"done": ["w01-item-01", "w01-item-02"], "quarantined": ["w01-item-03"]}
     assert json.loads(env[ADOPT_SECRETS])["session_token"] == "bst_" + "2" * 43  # its own fresh credentials
@@ -225,7 +227,8 @@ def run_main(monkeypatch, *args):
             return None
 
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", "--mock", *args])
-    monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
+    monkeypatch.setattr(run_swarm, "docker", lambda argv, env=None: captured.setdefault("built", argv))
+    monkeypatch.setattr(run_swarm, "image_tag", lambda: IMAGE)
     monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(kw) or Started())
     run_swarm.main()
     return captured
@@ -240,3 +243,37 @@ def test_items_are_passed_to_the_launcher_and_default_to_none(monkeypatch):
 def test_a_task_size_burn_could_not_track_is_refused(monkeypatch, items):
     with pytest.raises(SystemExit, match="--items"):
         run_main(monkeypatch, "--items", items)
+
+
+def test_the_containers_run_the_exact_image_this_launcher_built(monkeypatch):
+    got = run_main(monkeypatch)
+    built = got["built"]
+    assert built[:2] == ["docker", "build"] and built[built.index("-t") + 1] == IMAGE and got["image"] == IMAGE
+
+
+# --- the image tag ------------------------------------------------------------------------------------------------
+
+def make_tree(root):
+    for rel, text in {"agents/Dockerfile.swarm": "FROM python", "agents/swarm-entrypoint.sh": "exec", "cli/a.py": "a",
+                      "contracts/b.py": "b", "agents/burn_agents/swarm_worker.py": "w"}.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    return root
+
+
+def test_the_image_tag_is_a_hash_of_what_the_image_is_built_from(tmp_path):
+    from swarm_launch import image_tag
+    one, two = make_tree(tmp_path / "one"), make_tree(tmp_path / "two")
+    tag = image_tag(one)
+    assert tag == image_tag(two)  # two checkouts of the same code share the image
+    assert tag.startswith("burn-swarm-worker:") and len(tag.split(":")[1]) == 12
+    for noise in (".venv/lib/x.py", "cli/__pycache__/a.cpython-312.pyc", "agents/tests/test_x.py", "dashboard/x.ts",
+                  "contracts/.pytest_cache/v"):
+        (two / noise).parent.mkdir(parents=True, exist_ok=True)
+        (two / noise).write_text("noise")
+    assert image_tag(two) == tag  # nothing the image does not contain changes it
+    (two / "agents/burn_agents/swarm_worker.py").write_text("w2")
+    assert image_tag(two) != tag  # a change to the worker is a new image, so another tree's swarm keeps its own
+    (two / "agents/burn_agents/swarm_worker.py").write_text("w")
+    (two / "cli/a.py").rename(two / "cli/c.py")
+    assert image_tag(two) != tag  # a rename too

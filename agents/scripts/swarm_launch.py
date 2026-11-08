@@ -13,6 +13,7 @@ the launcher starts the replacement: one fresh join, POST /instances/{old}/repla
 task and BURN_RESUME (what the burned instance finished, and what it touched after the breach). The task stays here:
 Burn never holds it, so a compromised agent cannot change it.
 """
+import hashlib
 import json
 import sys
 import threading
@@ -42,7 +43,10 @@ class PersonApi(Api):
 
 
 HOST = "host.docker.internal"
-IMAGE = "burn-swarm-worker"
+IMAGE_NAME = "burn-swarm-worker"
+# What Dockerfile.swarm copies into the image, relative to its build context (the repository root).
+IMAGE_INPUTS = ("agents/Dockerfile.swarm", "agents/swarm-entrypoint.sh", "agents/burn_agents", "contracts", "cli")
+NOT_IN_IMAGE = {".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git", "tests", "node_modules"}
 NETWORK = "burn-demo_agents_internal"  # the demo stack's internal network: its one way out is the egress proxy
 PROXY = "http://proxy:8080"
 CERT = "/certs/mitmproxy-ca-cert.pem"
@@ -100,7 +104,25 @@ def container_env(*, public: dict, secrets: dict, api_url: str, gateway_url: str
     return env
 
 
-def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *, mock: bool,
+def image_tag(root: Path = REPO_ROOT) -> str:
+    """`burn-swarm-worker:<hash>` of what the worker image is built from.
+
+    Each build gets the tag of its own content, and its containers run that exact tag, so swarms started at the same
+    time from different checkouts never run each other's image. The same code always gives the same tag.
+    """
+    digest = hashlib.sha256()
+    for rel in IMAGE_INPUTS:
+        base = root / rel
+        files = [base] if base.is_file() else sorted(
+            f for f in base.rglob("*")
+            if f.is_file() and not NOT_IN_IMAGE & set(f.relative_to(base).parts) and f.suffix != ".pyc")
+        for f in files:
+            for part in (f.relative_to(root).as_posix().encode(), f.read_bytes()):
+                digest.update(len(part).to_bytes(8, "big") + part)
+    return f"{IMAGE_NAME}:{digest.hexdigest()[:12]}"
+
+
+def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *, mock: bool, image: str,
                     certs_dir: str = "") -> list[str]:
     """`docker run` for one worker. Environment variables are passed by name; their values are not in this list."""
     argv = ["docker", "run", "-d", "--name", name, "--label", "burn-swarm=1"]
@@ -108,7 +130,7 @@ def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *,
     for env_name in env_names:
         argv += ["-e", env_name]
     # `public` is the session without its secrets: ids, role, tools. Safe to show in `ps`.
-    return argv + [IMAGE, "burn", "run", "--role", role, "--adopt", json.dumps(public), "--", *WORKER]
+    return argv + [image, "burn", "run", "--role", role, "--adopt", json.dumps(public), "--", *WORKER]
 
 
 class BurnCalls:
@@ -150,10 +172,10 @@ class Swarm:
     """The launcher's workers: the map of container to task, and what to do when a container exits."""
 
     def __init__(self, calls: BurnCalls, role: str, *, api_url: str, gateway_url: str, mock: bool, interval: float,
-                 certs_dir: str, docker: Callable[[list[str], dict], object], sleep=None, log=None):
+                 certs_dir: str, docker: Callable[[list[str], dict], object], image: str, sleep=None, log=None):
         self.calls, self.role, self.docker = calls, role, docker
         self._container = {"api_url": api_url, "gateway_url": gateway_url, "mock": mock, "interval": interval}
-        self.mock, self.certs_dir = mock, certs_dir
+        self.mock, self.certs_dir, self.image = mock, certs_dir, image
         self.sleep, self.log = sleep or time.sleep, log or (lambda line: print(line, flush=True))
         self.workers: dict[str, Worker] = {}
         self._lock = threading.Lock()  # follow() handles each worker's exit on its own thread
@@ -186,7 +208,7 @@ class Swarm:
             public, secrets = split_reply(reply)
             env = container_env(public=public, secrets=secrets, task=task, resume=resume, **self._container)
             name = f"burn-swarm-{self.role}-{public['agent_id'].rsplit('-', 1)[-1]}"
-            self.docker(docker_run_argv(name, self.role, public, sorted(env), mock=self.mock,
+            self.docker(docker_run_argv(name, self.role, public, sorted(env), mock=self.mock, image=self.image,
                                         certs_dir=self.certs_dir), env)
         except BaseException:
             try:
@@ -271,12 +293,12 @@ def _why_not(instance: dict) -> str:
 
 def start_workers(api: Api, instances: InstanceApi, role: str, count: int, *, api_url: str, gateway_url: str,
                   mock: bool, interval: float, certs_dir: str, docker: Callable[[list[str], dict], object],
-                  items: int = 0, sleep=None, log=None) -> Swarm:
+                  image: str, items: int = 0, sleep=None, log=None) -> Swarm:
     """Join `count` times with one join token and start one container per instance, each with a task of `items` items.
 
     A session whose container could not be started is ended, so a failure does not leave instances dangling.
     """
     swarm = Swarm(BurnCalls(api, instances, sleep=sleep), role, api_url=api_url, gateway_url=gateway_url, mock=mock,
-                  interval=interval, certs_dir=certs_dir, docker=docker, sleep=sleep, log=log)
+                  interval=interval, certs_dir=certs_dir, docker=docker, image=image, sleep=sleep, log=log)
     swarm.start(count, items)
     return swarm

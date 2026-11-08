@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
 from burn_contracts.automation import AutomationAuthError, automation_headers
 from burn_contracts.names import DEMO_TOKEN_HEADER, MAX_PROGRESS_ITEMS
-from swarm_launch import IMAGE, NETWORK, InstanceApi, PersonApi, start_workers
+from swarm_launch import NETWORK, InstanceApi, PersonApi, image_tag, start_workers
 
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
@@ -107,12 +107,14 @@ def main() -> int:
         if subprocess.run(["docker", "network", "inspect", NETWORK], capture_output=True).returncode:
             sys.exit(f"the demo stack's network {NETWORK} does not exist: start the stack first (make demo)")
 
-    docker(["docker", "build", "-q", "-f", str(AGENTS_DIR / "Dockerfile.swarm"), "-t", IMAGE, str(REPO_ROOT)])
+    image = image_tag()  # this checkout's own image: another checkout's swarm cannot replace it under us
+    docker(["docker", "build", "-q", "-f", str(AGENTS_DIR / "Dockerfile.swarm"), "-t", image, str(REPO_ROOT)])
     swarm = None
     try:
         swarm = start_workers(api, InstanceApi(api_url), args.role, args.count, api_url=api_url,
                               gateway_url=gateway, mock=args.mock, interval=args.interval,
-                              certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker, items=args.items)
+                              certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker, image=image,
+                              items=args.items)
         task = f", {args.items} item(s) each" if args.items else ""
         print(f"started {len(swarm.names)} worker(s) of role {args.role}{task}; Ctrl-C stops them")
         follow(swarm.names, swarm.on_exit)
