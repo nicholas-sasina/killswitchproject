@@ -6,7 +6,9 @@ info:
     Public API used by the dashboard, the scenario runner and the eval harness.
     Real implementation: API Gateway HTTP API + Lambda (/burn_api). Mock: /mocks/burn_api_mock.py.
 
-    Who may call what:
+    Who may call what, once people sign-in is switched on for a stack (`BURN_PEOPLE_AUTH=1` on the API).
+    Until then the admin header (`x-burn-demo-token`) works as before on every route, alongside the
+    instance credentials below.
     - People sign in to the people user pool (invite-only) and send their ID token as
       `Authorization: Bearer <jwt>` (`personBearer`). It is required on every route except the exempt
       ones below; a missing or invalid token is a 401.
@@ -16,8 +18,8 @@ info:
       `Authorization: Bearer bst_...` (`instanceBearer`), for its heartbeat, exit and spawning a child.
     - Every form of `POST /sessions` now needs a person. Instance clients (joining and spawning) use
       `POST /instances`.
-    - `x-burn-demo-token` (`adminHeader`) is for local development only: the deployed API ignores it unless
-      it runs with `BURN_LOCAL_DEV=1`, which a deployment never sets.
+    - `x-burn-demo-token` (`adminHeader`) is then for local development only: the API ignores it unless it
+      also runs with `BURN_LOCAL_DEV=1`, which a deployment never sets.
     The mock server accepts any token and adds the response header `x-burn-mock: true`
     so the dashboard can show a MOCK banner.
 
@@ -557,7 +559,7 @@ components:
       type: apiKey
       in: header
       name: x-burn-demo-token
-      description: Local development only (BURN_LOCAL_DEV=1). The deployed API ignores this header.
+      description: Local development only (BURN_LOCAL_DEV=1) once people sign-in is switched on for a stack (BURN_PEOPLE_AUTH=1); a deployed API then ignores this header. Until then it works as before.
   schemas:
     CreatedBy:
       type: string

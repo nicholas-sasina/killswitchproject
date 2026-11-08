@@ -37,8 +37,9 @@ DEMO_TOKEN_SECRET = "burn-system/demo-token"
 # Lambda function names.
 MINTER_FUNCTION = "burn-minter"
 
-# Header the Burn API accepts as the admin credential. Local development only: the deployed API
-# honors it only when its environment sets LOCAL_DEV_ENV to "1", which a deployment never does.
+# Header the Burn API accepts as the admin credential. Until people sign-in is switched on for a
+# stack (PEOPLE_AUTH_ENV="1" on the API) it works as before. From then on it is local development
+# only: the API honors it only when LOCAL_DEV_ENV is also "1", which a deployment never sets.
 DEMO_TOKEN_HEADER = "x-burn-demo-token"
 LOCAL_DEV_ENV = "BURN_LOCAL_DEV"
 # Set to "1" on the deployed API once people sign-in is switched on for the stack: from then on
@@ -60,7 +61,8 @@ PEOPLE_ENABLED_PARAM = f"{PEOPLE_SSM_PREFIX}/enabled"
 # Scripts and tests that run without a person (e2e, smoke, load) sign in as an "automation" person
 # through a second, confidential app client that alone accepts the admin password flow. Its client
 # id is published next to the others. The person's credentials live in Secrets Manager as the JSON
-# {"username": "<email>", "password": "<password>"}, for AdminInitiateAuth (ADMIN_USER_PASSWORD_AUTH).
+# {"username": "<email>", "password": "<password>", "client_secret": "<the automation client's secret>"},
+# everything AdminInitiateAuth (ADMIN_USER_PASSWORD_AUTH, with SECRET_HASH) needs in one read.
 AUTOMATION_CLIENT_NAME = "burn-automation"
 AUTOMATION_CLIENT_ID_PARAM = f"{PEOPLE_SSM_PREFIX}/automation-client-id"
 AUTOMATION_PERSON_SECRET = "burn-system/automation-person"

@@ -34,7 +34,9 @@ cd contracts && uv run --with pytest --with jsonschema --with pyyaml pytest -q
   every API, not against each other, so pieces can be developed and replaced independently.
 - **Do you store credentials in the ledger?** No. The ledger stores an HMAC-SHA256 fingerprint keyed
   with a server-side secret, so the ledger itself is useless to an attacker.
-- **How do people sign in, and what stops a worker from calling the API as an admin?** People sign in
+- **How do people sign in, and what stops a worker from calling the API as an admin?** This describes a
+  stack with people sign-in switched on (`BURN_PEOPLE_AUTH=1` on the API); until then the admin header
+  works as before. People sign in
   to an invite-only user pool and send their ID token as `Authorization: Bearer <jwt>`; the API
   gateway checks it before the API runs, and the signed-in email is recorded as `created_by` on what
   they create and as `actor` on the ledger events they cause. A worker never holds a person's token.
@@ -42,8 +44,8 @@ cd contracts && uv run --with pytest --with jsonschema --with pyyaml pytest -q
   parent's session token), and an instance's own heartbeat and exit (its session token, `bst_...`);
   the CORS preflight is exempt too. They carry their own credential and the API checks it itself.
   Every form of `POST /sessions` needs a person, so instance clients use `/instances`. The old shared
-  `x-burn-demo-token` header works only in local development (`BURN_LOCAL_DEV=1`); a deployment never
-  sets it, so the header cannot open any route there. Scripts that run without a person sign in as an
+  `x-burn-demo-token` header then works only in local development (`BURN_LOCAL_DEV=1`); a deployment
+  never sets it, so the header cannot open any route there. Scripts that run without a person sign in as an
   automation person through a separate app client (see `names.AUTOMATION_*`).
 
 ---

@@ -422,6 +422,7 @@ def test_the_exempt_routes_are_exactly_the_three_instance_routes():
                       ("/instances/{session_id}/exit", "post")}
     description = api["info"]["description"]
     assert "Every form of `POST /sessions` now needs a person" in description
+    assert "BURN_PEOPLE_AUTH=1" in description and "works as before" in description  # not true until switched on
     assert "OPTIONS" in description
     assert "personBearer" not in api["paths"]["/instances"]["post"]["security"][0]
 
