@@ -22,6 +22,7 @@ import {
   type FleetAgent,
 } from "../fleet";
 import type { LedgerEvent, Role } from "../contracts";
+import type { JoinUrls } from "../join";
 import { usePolling } from "../polling";
 import { AddAgent } from "./AddAgent";
 import { BlastTimeline } from "./BlastTimeline";
@@ -38,12 +39,15 @@ export function BurnedView({
   events,
   instances,
   enabled,
+  joinUrls,
 }: {
   api: BurnApi;
   fleet: FleetAgent[];
   events: LedgerEvent[];
   instances: import("../contracts").Instance[];
   enabled: boolean;
+  /** Passed to the join commands: what burn run needs besides the token. */
+  joinUrls?: JoinUrls;
 }) {
   const contained = useMemo(
     () => containedFleet(fleet, events),
@@ -325,6 +329,7 @@ export function BurnedView({
           role={rebuild.role}
           template={rebuild.template}
           suggestedName={rebuild.suggestedName}
+          joinUrls={joinUrls}
           onCreated={() => {}}
           onClose={() => setRebuild(undefined)}
         />

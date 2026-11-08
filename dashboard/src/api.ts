@@ -15,6 +15,11 @@ import type { ApiAuth, PeopleConfig } from "./auth";
 
 export interface ApiConfig extends PeopleConfig {
   burnUrl: string;
+  /**
+   * The AgentCore Gateway's MCP endpoint, which burn run connects agents
+   * to. The dashboard never calls it; it only shows it in join commands.
+   */
+  gatewayUrl?: string;
   localDev?: boolean;
   demoToken?: string;
 }
@@ -22,6 +27,7 @@ export interface ApiConfig extends PeopleConfig {
 export function readConfig(): ApiConfig {
   return {
     burnUrl: import.meta.env.VITE_BURN_API_URL?.trim() ?? "",
+    gatewayUrl: import.meta.env.VITE_BURN_GATEWAY_URL?.trim() ?? "",
     peopleDomain: import.meta.env.VITE_BURN_PEOPLE_DOMAIN?.trim() ?? "",
     peopleClientId: import.meta.env.VITE_BURN_PEOPLE_CLIENT_ID?.trim() ?? "",
     localDev: import.meta.env.VITE_BURN_LOCAL_DEV === "1",

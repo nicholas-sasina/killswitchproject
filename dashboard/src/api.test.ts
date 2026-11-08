@@ -289,4 +289,16 @@ describe("people API authentication", () => {
     expect(readConfig().peopleDomain).toBe("people.example.test");
     expect(readConfig().peopleClientId).toBe("public-client");
   });
+
+  it("reads the gateway URL for the join commands, blank when unset", () => {
+    vi.stubEnv("VITE_BURN_GATEWAY_URL", "");
+    expect(readConfig().gatewayUrl).toBe("");
+    vi.stubEnv(
+      "VITE_BURN_GATEWAY_URL",
+      " https://gw-1.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp ",
+    );
+    expect(readConfig().gatewayUrl).toBe(
+      "https://gw-1.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
+    );
+  });
 });

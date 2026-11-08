@@ -36,7 +36,8 @@ def test_dashboard_env_contains_only_burn_connection(tmp_path, monkeypatch, caps
     lines = [line for line in (tmp_path / "dashboard" / ".env.local").read_text().splitlines()
              if not line.startswith("#")]
     assert {line.split("=", 1)[0] for line in lines} == {
-        "VITE_BURN_API_URL", "VITE_BURN_PEOPLE_DOMAIN", "VITE_BURN_PEOPLE_CLIENT_ID", "VITE_BURN_DEMO_TOKEN"}
+        "VITE_BURN_API_URL", "VITE_BURN_GATEWAY_URL", "VITE_BURN_PEOPLE_DOMAIN", "VITE_BURN_PEOPLE_CLIENT_ID",
+        "VITE_BURN_DEMO_TOKEN"}
     assert token not in capsys.readouterr().out
 
 
@@ -82,3 +83,12 @@ def test_env_carries_the_sign_in_switch_under_the_name_the_cli_and_scripts_read(
     assert f"{names.PEOPLE_ENABLED_ENV}=on" in env  # read without AWS by burn_contracts.automation and the CLI
     assert "BURN_PEOPLE_DOMAIN=https://burn-people-x.auth.us-east-1.amazoncognito.com" in env  # burn login
     assert "BURN_PEOPLE_CLIENT_ID=clientid123" in env
+
+
+def test_the_dashboard_gets_the_gateway_url_for_its_join_commands():
+    gateway = "https://gw-1.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
+    for enabled in ("on", "off"):
+        text = make_env.dashboard_env(PEOPLE | {"BURN_GATEWAY_URL": gateway, "BURN_PEOPLE_ENABLED": enabled})
+        assert f"VITE_BURN_GATEWAY_URL={gateway}\n" in text
+    text = make_env.dashboard_env(PEOPLE | {"BURN_PEOPLE_ENABLED": "on"})  # gateway not deployed yet
+    assert "\nVITE_BURN_GATEWAY_URL=\n" in text

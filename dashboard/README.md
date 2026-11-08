@@ -142,6 +142,7 @@ Set these local fields, then run `npm run dev` and open http://localhost:5173 (t
 | `VITE_BURN_API_URL`          | Burn API base URL, without an endpoint path                                  |
 | `VITE_BURN_PEOPLE_DOMAIN`    | Cognito managed-login hostname or HTTPS origin                               |
 | `VITE_BURN_PEOPLE_CLIENT_ID` | Public people app client ID                                                  |
+| `VITE_BURN_GATEWAY_URL`      | Gateway MCP URL for `burn run`, shown in the join commands                   |
 | `VITE_BURN_LOCAL_DEV`        | `1` for local mocks only; defaults to `0`                                    |
 | `VITE_BURN_DEMO_TOKEN`       | Local mock token, used only with local-dev mode                              |
 | `VITE_SITE_URL`              | The website, for "Back to the website"; defaults to `http://localhost:5174/` |

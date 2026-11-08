@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import toolContract from "../../../contracts/mcp-tools.json";
 import type { BurnApi } from "../api";
 import type { Instance, Role, RoleSpec } from "../contracts";
+import { CONNECT_GUIDE_URL, joinCommands, type JoinUrls } from "../join";
 import { ErrorMessage } from "./common";
 import { SwarmDialog } from "./SwarmDialog";
 
@@ -54,12 +55,15 @@ export function AddAgent({
   role,
   template,
   suggestedName,
+  joinUrls,
   onCreated,
   onClose,
 }: {
   api: BurnApi;
   roles: Role[];
   instances: Instance[];
+  /** What the join commands set besides the token, so burn run can connect. */
+  joinUrls?: JoinUrls;
   /** Mint another join token for this existing role; capabilities unchanged. */
   role?: Role;
   /**
@@ -203,12 +207,7 @@ export function AddAgent({
     }
   }
 
-  const command = join
-    ? `read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN   # paste the token, press Enter\nburn run --role ${join.role} -- <your agent command>`
-    : "";
-  const clipboardCommand = join
-    ? `pbpaste | burn run --role ${join.role} --token-stdin -- <your agent command>`
-    : "";
+  const commands = join ? joinCommands(join.role, joinUrls) : undefined;
   async function copyToken() {
     if (!join?.token) return;
     try {
@@ -392,16 +391,28 @@ export function AddAgent({
           </button>
           <p role="status">{copyStatus}</p>
           <section aria-label="Join commands">
+            <p>
+              Run one of these where your agent runs. To install the burn CLI
+              there, see{" "}
+              <a
+                href={CONNECT_GUIDE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Connect your agent
+              </a>
+              .
+            </p>
             <h3>Join from a hidden prompt</h3>
             <pre className="swarm-command">
-              <code>{command}</code>
+              <code>{commands?.prompt}</code>
             </pre>
             <h3>Join from the clipboard (macOS)</h3>
             <p>
               Copy this command first, then use Copy token before running it.
             </p>
             <pre className="swarm-command">
-              <code>{clipboardCommand}</code>
+              <code>{commands?.clipboard}</code>
             </pre>
           </section>
           <button

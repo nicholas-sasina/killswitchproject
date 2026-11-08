@@ -57,6 +57,11 @@ function Dashboard({ config, auth }: { config: ApiConfig; auth?: PeopleAuth }) {
   const configured = Boolean(
     config.burnUrl && (config.localDev ? config.demoToken : auth?.idToken()),
   );
+  // The join commands point burn run at this dashboard's own API.
+  const joinUrls = useMemo(
+    () => ({ api: config.burnUrl, gateway: config.gatewayUrl }),
+    [config.burnUrl, config.gatewayUrl],
+  );
   const { state, error, updatedAt } = useEventFeed(api, configured);
   const events = useMemo(() => newestEvents(state), [state]);
   const view = useView();
@@ -289,6 +294,7 @@ function Dashboard({ config, auth }: { config: ApiConfig; auth?: PeopleAuth }) {
                   events={events}
                   instances={instances}
                   enabled={configured}
+                  joinUrls={joinUrls}
                 />
               </>
             ) : (
@@ -396,6 +402,7 @@ function Dashboard({ config, auth }: { config: ApiConfig; auth?: PeopleAuth }) {
                         enabled={configured}
                         sharedInstances={sharedInstances}
                         defaultStatus="active"
+                        joinUrls={joinUrls}
                       />
                     </section>
                   </div>
