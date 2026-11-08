@@ -113,6 +113,8 @@ export interface RoleFields {
   owner?: string | null;
   canaries?: boolean;
   auto_burn?: boolean;
+  /** What the gateway does with a credential in tool output; the API defaults it to replace. */
+  references?: "replace" | "report" | "off";
 }
 
 export interface RoleSpec extends RoleFields {

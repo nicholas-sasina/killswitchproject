@@ -199,7 +199,8 @@ export function byRole(
 
 /**
  * The role name an agent can be re-added through: exact match first, then the
- * `agent-<role>` convention that scenario and swarm agents follow.
+ * `agent-<role>` convention that scenario agents follow. The longest name
+ * wins, so `agent-code-reader` is code-reader's, not reader's.
  */
 export function roleForAgent(
   agent: { agentId: string; role?: string | null },
@@ -208,5 +209,34 @@ export function roleForAgent(
   if (agent.role && roleNames.includes(agent.role)) return agent.role;
   const byName = roleNames.find((name) => name === agent.agentId);
   if (byName) return byName;
-  return roleNames.find((name) => agent.agentId.endsWith(`-${name}`));
+  return roleNames
+    .filter((name) => agent.agentId.endsWith(`-${name}`))
+    .sort((a, b) => b.length - a.length)[0];
+}
+
+/** Role names: a lowercase letter or digit, then up to 31 more (contracts/burn.schema.json). */
+const ROLE_NAME_MAX = 32;
+
+/**
+ * A free name for a copy of a role: `<name>-2`, `-3`, and so on, shortened so
+ * it stays within the 32 characters a role name may have.
+ */
+export function copyName(name: string, taken: string[]): string {
+  for (let n = 2; ; n += 1) {
+    const suffix = `-${n}`;
+    const base = name
+      .slice(0, ROLE_NAME_MAX - suffix.length)
+      .replace(/-+$/, "");
+    const candidate = `${base}${suffix}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+}
+
+/**
+ * Whether a join token can start a new instance of this role. A scenario
+ * role's agent is started by its scenario, and the API refuses a join for one
+ * (403), so a token minted for it could never be used.
+ */
+export function joinable(role: { managed_by: string }): boolean {
+  return role.managed_by !== "scenario";
 }

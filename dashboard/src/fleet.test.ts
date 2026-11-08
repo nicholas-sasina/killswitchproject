@@ -1,6 +1,39 @@
 import { describe, expect, it } from "vitest";
 import type { AgentState, Instance } from "./contracts";
-import { liveFleet, markRevoked, mergeFleet } from "./fleet";
+import {
+  copyName,
+  joinable,
+  liveFleet,
+  markRevoked,
+  mergeFleet,
+  roleForAgent,
+} from "./fleet";
+
+describe("roles for rebuilding", () => {
+  it("matches the longest role name an agent id ends with", () => {
+    expect(
+      roleForAgent({ agentId: "agent-code-reader" }, ["reader", "code-reader"]),
+    ).toBe("code-reader");
+    expect(
+      roleForAgent({ agentId: "agent-x", role: "worker" }, ["worker"]),
+    ).toBe("worker");
+    expect(roleForAgent({ agentId: "agent-x" }, ["reader"])).toBeUndefined();
+  });
+
+  it("names a copy within 32 characters and never reuses a name", () => {
+    expect(copyName("reader", [])).toBe("reader-2");
+    expect(copyName("reader", ["reader-2"])).toBe("reader-3");
+    const long = "x".repeat(32);
+    expect(copyName(long, [])).toHaveLength(32);
+    expect(copyName("abc-".padEnd(32, "-"), [])).toBe("abc-2");
+  });
+
+  it("does not mint join tokens for scenario roles", () => {
+    expect(joinable({ managed_by: "scenario" })).toBe(false);
+    expect(joinable({ managed_by: "ui" })).toBe(true);
+    expect(joinable({ managed_by: "code" })).toBe(true);
+  });
+});
 
 function instance(fields: Partial<Instance>): Instance {
   return {
