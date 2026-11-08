@@ -19,6 +19,7 @@ import logging
 import re
 
 import boto3
+from botocore.exceptions import ClientError
 from burn_contracts.names import REGION, canary_secret_ref
 
 PLACEHOLDER = re.compile(
@@ -38,10 +39,15 @@ def _secrets():
 
 
 def _current_value(secret_ref: str) -> str | None:
+    """The secret's current string value, or None if it cannot be read for any reason (missing, access
+    denied, throttled, a KMS decryption failure, no string value...). Then only this placeholder shows
+    UNAVAILABLE and the rest of the tool response still returns."""
     try:
         return _secrets().get_secret_value(SecretId=secret_ref, VersionStage="AWSCURRENT")["SecretString"]
-    except _secrets().exceptions.ResourceNotFoundException:
-        log.warning("placeholder secret not found: %s", secret_ref)  # the name, never a value
+    except Exception as exc:  # any failure costs one placeholder, never the whole read_config/query_customers
+        # The error class (an AWS error code for ClientError) and the secret's name: never its message or a value.
+        reason = exc.response.get("Error", {}).get("Code") if isinstance(exc, ClientError) else None
+        log.warning("placeholder secret unreadable (%s): %s", reason or type(exc).__name__, secret_ref)
         return None
 
 
