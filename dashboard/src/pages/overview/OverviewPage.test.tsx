@@ -297,7 +297,10 @@ describe("the Overview", () => {
       "Needs a decision / 1",
     );
     expect(within(decide).getByText("Shared key / reported")).toBeTruthy();
-    expect(within(decide).getByRole("button", { name: "Rotate" })).toBeTruthy();
+    // Each Rotate names its key: a card can hold several.
+    expect(
+      within(decide).getByRole("button", { name: "Rotate crm_db_url" }),
+    ).toBeTruthy();
   });
 
   it("sends Register it to Add agents and keeps Ignore in this browser", () => {
