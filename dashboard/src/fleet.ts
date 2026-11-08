@@ -28,6 +28,8 @@ export interface FleetAgent {
   lastSeen?: string | null;
   /** Where this entry came from, for the few places it matters. */
   from: "scenario" | "instance";
+  /** The instance record itself, for lineage, tokens and replacement. */
+  instance?: Instance;
 }
 
 function fromInstance(instance: Instance): FleetAgent {
@@ -42,6 +44,7 @@ function fromInstance(instance: Instance): FleetAgent {
     createdAt: instance.created_at,
     lastSeen: instance.last_seen ?? instance.exited_at ?? null,
     from: "instance",
+    instance,
   };
 }
 
