@@ -58,7 +58,11 @@ function setup(
         return new Response("unavailable", { status: 503 });
       if (path === "/roles" && method === "GET") body = { roles: state.roles };
       else if (path === "/instances") body = { instances: state.instances };
-      else if (path === "/roles" && method === "POST") {
+      else if (
+        path.startsWith("/roles/") &&
+        !path.endsWith("/tokens") &&
+        method === "PUT"
+      ) {
         const created = JSON.parse(String(init?.body)) as Role;
         state.roles = [...state.roles, created];
         body = created;
@@ -173,7 +177,7 @@ describe("agent enrollment", () => {
       within(dialog).getByRole("button", { name: "Close" }),
     );
     expect(within(dialog).getAllByRole("checkbox").length).toBe(
-      toolContract.tools.length + 2 + 4 + 2,
+      toolContract.tools.length + 2 + 4 + 3,
     );
     expect(
       (screen.getByLabelText("Plant a canary credential") as HTMLInputElement)
@@ -184,6 +188,9 @@ describe("agent enrollment", () => {
     ) as HTMLInputElement;
     expect(autoBurn.checked).toBe(true);
     expect(autoBurn.disabled).toBe(false);
+    expect(
+      (screen.getByLabelText("Replace on burn") as HTMLInputElement).checked,
+    ).toBe(false);
     change("Role name", "worker");
     fireEvent.click(screen.getByLabelText("read_ticket"));
     fireEvent.click(screen.getByLabelText("api_key"));
@@ -203,7 +210,7 @@ describe("agent enrollment", () => {
     change("Lifetime (seconds)", "600");
     await click("Create role and token");
     expect(
-      JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
+      JSON.parse(String(fixture.calls("/roles/worker", "PUT")[0][1]?.body)),
     ).toEqual({
       name: "worker",
       tools: ["read_ticket"],
@@ -214,6 +221,7 @@ describe("agent enrollment", () => {
       owner: "platform",
       canaries: true,
       auto_burn: true,
+      replace_on_burn: false,
       managed_by: "ui",
     });
     expect(
@@ -284,7 +292,31 @@ describe("agent enrollment", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(screen.getByText("Connected · worker")).toBeTruthy();
-    expect(fixture.calls("/roles", "POST")).toHaveLength(0);
+    expect(fixture.calls("/roles/worker", "PUT")).toHaveLength(0);
+  });
+
+  it("sends the enabled replacement setting when creating a role", async () => {
+    const fixture = setup();
+    await show(fixture);
+    await click("Add agent");
+    change("Role name", "worker");
+    fireEvent.click(screen.getByLabelText("Replace on burn"));
+    await click("Create role and token");
+    expect(
+      JSON.parse(String(fixture.calls("/roles/worker", "PUT")[0][1]?.body)),
+    ).toMatchObject({ replace_on_burn: true });
+  });
+
+  it("rejects an existing name before writing a role", async () => {
+    const fixture = setup([role("worker")]);
+    await show(fixture);
+    await click("Add agent");
+    change("Role name", "worker");
+    await click("Create role and token");
+    expect(screen.getByRole("alert").textContent).toContain("already exists");
+    expect(
+      fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
+    ).toBe(false);
   });
 
   it.each([
@@ -308,7 +340,7 @@ describe("agent enrollment", () => {
       expect(autoBurn.checked).toBe(settings.auto_burn);
       await click("Create role and token");
       expect(
-        JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
+        JSON.parse(String(fixture.calls("/roles/worker", "PUT")[0][1]?.body)),
       ).toMatchObject(settings);
     },
   );
@@ -322,7 +354,9 @@ describe("agent enrollment", () => {
       change("Role name", name);
       await click("Create role and token");
       expect(screen.getByRole("alert").textContent).toContain("Role name must");
-      expect(fixture.calls("/roles", "POST")).toHaveLength(0);
+      expect(
+        fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
+      ).toBe(false);
     },
   );
 
@@ -337,7 +371,7 @@ describe("agent enrollment", () => {
     expect(screen.queryByText("private response")).toBeNull();
     fixture.state.failToken = false;
     await click("Create token");
-    expect(fixture.calls("/roles", "POST")).toHaveLength(1);
+    expect(fixture.calls("/roles/worker", "PUT")).toHaveLength(1);
     expect(screen.getByRole("region", { name: "Join commands" })).toBeTruthy();
   });
 
