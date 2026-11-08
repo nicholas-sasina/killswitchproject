@@ -1,0 +1,52 @@
+{
+  "dashboard_origin": "https://burn.example.com",
+  "severity_overrides": {},
+  "aggregation": {"window_seconds": 300, "individual_per_window": 3},
+  "digest": {"window_seconds": 3600},
+  "delivery_ttl_days": 14,
+  "destinations": [
+    {
+      "id": "slack-security",
+      "provider": "slack",
+      "enabled": true,
+      "min_severity": "medium",
+      "digest_low": true,
+      "secret_ref": "env:BURN_NOTIFY_SLACK_WEBHOOK",
+      "rate_per_minute": 20,
+      "options": {"private_channel_confirmed": true}
+    },
+    {
+      "id": "telegram-oncall",
+      "provider": "telegram",
+      "enabled": true,
+      "min_severity": "high",
+      "recipient": "-1001234567890",
+      "secret_ref": "env:BURN_NOTIFY_TELEGRAM_BOT_TOKEN",
+      "options": {"allowed_chat_ids": ["-1001234567890"]}
+    },
+    {
+      "id": "discord-security",
+      "provider": "discord",
+      "enabled": true,
+      "min_severity": "medium",
+      "exclude_categories": ["unregistered_access"],
+      "secret_ref": "env:BURN_NOTIFY_DISCORD_WEBHOOK",
+      "options": {"private_channel_confirmed": true}
+    },
+    {
+      "id": "teams-secops",
+      "provider": "teams",
+      "enabled": true,
+      "min_severity": "critical",
+      "secret_ref": "env:BURN_NOTIFY_TEAMS_WORKFLOW_URL"
+    },
+    {
+      "id": "email-secops",
+      "provider": "email",
+      "enabled": true,
+      "min_severity": "critical",
+      "recipient": "secops@example.com",
+      "options": {"from_address": "burn-alerts@example.com"}
+    }
+  ]
+}

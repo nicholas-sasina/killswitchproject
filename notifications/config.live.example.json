@@ -1,0 +1,40 @@
+{
+  "dashboard_origin": "https://burn.example.com",
+  "destinations": [
+    {
+      "id": "slack-test",
+      "provider": "slack",
+      "min_severity": "high",
+      "secret_ref": "env:BURN_NOTIFY_SLACK_WEBHOOK",
+      "options": {"private_channel_confirmed": true}
+    },
+    {
+      "id": "telegram-test",
+      "provider": "telegram",
+      "min_severity": "high",
+      "recipient": "-1000000000000",
+      "secret_ref": "env:BURN_NOTIFY_TELEGRAM_BOT_TOKEN",
+      "options": {"allowed_chat_ids": ["-1000000000000"]}
+    },
+    {
+      "id": "discord-test",
+      "provider": "discord",
+      "min_severity": "high",
+      "secret_ref": "env:BURN_NOTIFY_DISCORD_WEBHOOK",
+      "options": {"private_channel_confirmed": true}
+    },
+    {
+      "id": "teams-test",
+      "provider": "teams",
+      "min_severity": "high",
+      "secret_ref": "env:BURN_NOTIFY_TEAMS_WORKFLOW_URL"
+    },
+    {
+      "id": "email-test",
+      "provider": "email",
+      "min_severity": "high",
+      "recipient": "tester@example.com",
+      "options": {"from_address": "burn-alerts@example.com"}
+    }
+  ]
+}
