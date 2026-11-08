@@ -196,6 +196,38 @@ def test_real_swarm_creates_the_join_token_as_the_automation_person(monkeypatch)
     assert got["api"].base_url == "https://api.example.com"
 
 
+def test_real_swarm_stops_before_starting_anything_when_it_cannot_authenticate(monkeypatch):
+    from burn_contracts.automation import AutomationAuthError
+    monkeypatch.setattr(run_swarm, "load_dotenv", lambda: None)
+    monkeypatch.setenv("BURN_API_URL", "https://api.example.com")
+    monkeypatch.setenv("BURN_GATEWAY_URL", "https://gw.example.com/mcp")
+
+    def fail():
+        raise AutomationAuthError("sign-in is off and there is no demo token (NoCredentialsError)")
+
+    monkeypatch.setattr(run_swarm, "automation_headers", fail)
+    monkeypatch.setattr(run_swarm.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0})())
+    with pytest.raises(SystemExit, match="cannot authenticate to the Burn API: sign-in is off"):
+        run_main(monkeypatch)
+
+
+def test_real_swarm_with_sign_in_off_needs_no_aws(monkeypatch):
+    from burn_contracts import automation
+
+    def no_aws(service):
+        raise AssertionError(f"made an AWS call ({service})")
+
+    monkeypatch.setattr(automation, "_default", automation.AutomationPerson(client=no_aws))
+    monkeypatch.setattr(run_swarm, "load_dotenv", lambda: None)
+    for name, value in {"BURN_API_URL": "https://api.example.com", "BURN_GATEWAY_URL": "https://gw.example.com/mcp",
+                        "BURN_PEOPLE_ENABLED": "off", "BURN_DEMO_TOKEN": "demo-from-dotenv"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("BURN_LOCAL_DEV", raising=False)
+    monkeypatch.setattr(run_swarm.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0})())
+    got = run_main(monkeypatch)
+    assert got["api"].auth_headers() == {"x-burn-demo-token": "demo-from-dotenv"}
+
+
 def test_the_person_client_sends_only_the_headers_it_is_given(monkeypatch):
     import io
     import burn_cli.api

@@ -18,7 +18,7 @@ import threading
 from urllib.parse import urlsplit
 
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
-from burn_contracts.automation import automation_headers
+from burn_contracts.automation import AutomationAuthError, automation_headers
 from burn_contracts.names import DEMO_TOKEN_HEADER
 from swarm_launch import IMAGE, NETWORK, InstanceApi, PersonApi, start_workers
 
@@ -79,6 +79,10 @@ def main() -> int:
         if not (api_url and gateway):
             sys.exit("BURN_API_URL and BURN_GATEWAY_URL are required: run `make env` first")
         api = PersonApi(api_url, automation_headers)  # the join-token call, as the automation person
+        try:
+            automation_headers()  # sign in once now, so a failure stops here rather than midway
+        except AutomationAuthError as exc:
+            sys.exit(f"cannot authenticate to the Burn API: {exc}")
         if subprocess.run(["docker", "network", "inspect", NETWORK], capture_output=True).returncode:
             sys.exit(f"the demo stack's network {NETWORK} does not exist: start the stack first (make demo)")
 
