@@ -220,6 +220,8 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
             "owner": role.get("owner"), "egress": limits["egress"], "credentials": limits["credentials"],
             "last_seen": now, "exited_at": None,
             "session_token_sha256": session_token_hash(own_secrets["session_token"]),
+            # Only when the role sets it: an absent field means the Gateway's default mode applies.
+            **({"references": role["references"]} if role.get("references") else {}),
         })
     except BaseException:
         _discard_partial_instance(agent_id, minted, badge, session_id)

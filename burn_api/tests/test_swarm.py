@@ -958,3 +958,51 @@ def test_eval_role_names_are_reserved(env, reserved):
         assert status == 400 and "reserved" in body["error"]
     assert env.ddb.Table("burn-roles").scan()["Items"] == []
     assert call(env, "POST", "/roles", {"name": "evaluator", "tools": []})[0] == 201  # only eval and eval-*
+
+
+# --- the role's references mode reaches the instance's session row -----------------------------
+
+def test_a_report_role_gives_instances_a_references_report_row(env):
+    role = make_role(env, WORKER | {"references": "report"})
+    assert role["references"] == "report"
+    assert env.ddb.Table("burn-roles").get_item(Key={"name": "worker"})["Item"]["references"] == "report"
+    assert call(env, "GET", "/roles/worker")[1]["references"] == "report"
+    body = join(env, "worker")[1]
+    assert session_row(env, body["session_id"])["references"] == "report"
+
+
+def test_an_unset_role_leaves_the_field_off_the_row_and_reads_as_the_default(env):
+    make_role(env, WORKER)
+    assert "references" not in env.ddb.Table("burn-roles").get_item(Key={"name": "worker"})["Item"]
+    assert call(env, "GET", "/roles/worker")[1]["references"] == "replace"  # contract default
+    body = join(env, "worker")[1]
+    assert "references" not in session_row(env, body["session_id"])
+
+
+def test_a_child_takes_the_mode_from_its_own_role_not_its_parents(env):
+    make_role(env, WORKER | {"references": "off"})
+    make_role(env, HELPER | {"references": "report"})
+    make_role(env, {"name": "plain", "tools": ["notify"]})
+    env.ddb.Table("burn-roles").update_item(Key={"name": "worker"}, UpdateExpression="SET may_spawn = :m",
+                                            ExpressionAttributeValues={":m": ["helper", "plain"]})
+    parent = join(env, "worker")[1]
+    assert session_row(env, parent["session_id"])["references"] == "off"
+    assert session_row(env, spawn(env, parent["session_id"], "helper")[1]["session_id"])["references"] == "report"
+    assert "references" not in session_row(env, spawn(env, parent["session_id"], "plain")[1]["session_id"])
+
+
+@pytest.mark.parametrize("bad", ["block", "REPLACE", "", 1, True, ["report"]])
+def test_a_bad_references_value_is_a_400(env, bad):
+    assert call(env, "POST", "/roles", {"name": "x", "tools": [], "references": bad})[0] == 400
+    assert call(env, "PUT", "/roles/x", {"name": "x", "tools": [], "references": bad})[0] == 400
+    assert env.ddb.Table("burn-roles").scan()["Items"] == []
+
+
+def test_every_contract_value_is_accepted_and_put_can_clear_the_field(env):
+    for mode in ("replace", "report", "off"):
+        assert call(env, "PUT", "/roles/x", {"name": "x", "tools": [], "references": mode})[1]["references"] == mode
+    cleared = call(env, "PUT", "/roles/x", {"name": "x", "tools": []})[1]
+    assert cleared["references"] == "replace"
+    assert "references" not in env.ddb.Table("burn-roles").get_item(Key={"name": "x"})["Item"]
+    roles = {r["name"]: r for r in call(env, "GET", "/roles")[1]["roles"]}
+    assert roles["a"]["references"] == "replace"  # scenario roles
