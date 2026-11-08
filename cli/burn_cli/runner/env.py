@@ -18,6 +18,23 @@ ALLOWED_PREFIXES = ("LC_",)
 PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 LOOPBACK = "127.0.0.1,localhost"
 
+# What --allow-env may not pass through: the names burn run sets itself. A host copy would replace the instance's
+# own key, identity or endpoints, point its tools back at your real HOME, or route around the egress proxy's
+# attribution.
+RESERVED_PREFIXES = ("BURN_", "AWS_", "XDG_")
+RESERVED_NAMES = {"HOME", "PATH", "NO_PROXY", "no_proxy", *PROXY_NAMES}
+VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def pass_through_name(name: str) -> str:
+    """NAME for --allow-env, checked; ValueError if it is not a variable name or burn run sets it itself."""
+    if not VARIABLE_NAME.match(name):
+        raise ValueError(f"{name!r} is not an environment variable name")
+    if name in RESERVED_NAMES or name.startswith(RESERVED_PREFIXES):
+        raise ValueError(f"burn run sets {name} itself, so it cannot be passed through "
+                         f"(reserved: {', '.join(p + '*' for p in RESERVED_PREFIXES)}, HOME, PATH and the proxy variables)")
+    return name
+
 
 # A session token (bst_...) authenticates the supervisor's own calls. It must never be in the agent's environment,
 # whatever variable it is in, so this is checked by pattern on top of the allow-list.
@@ -118,9 +135,14 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
               proxy_base: str = "", home: str = "", local_token: str = "", progress_url: str = "",
-              task: dict | None = None) -> dict:
-    """Everything the agent process runs with: the allow-listed host environment plus its own values."""
+              task: dict | None = None, allow: tuple = ()) -> dict:
+    """Everything the agent process runs with: the allow-listed host environment plus its own values.
+
+    `allow` names host variables the user passed through with --allow-env (checked by pass_through_name). They
+    come before the instance's own values, which nothing replaces.
+    """
     env = scrub(host_env)
+    env.update({k: host_env[k] for k in allow if k in host_env and not SESSION_TOKEN.search(str(host_env[k]))})
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
         env.update({"HOME": home, "XDG_CONFIG_HOME": f"{home}/.config", "XDG_CACHE_HOME": f"{home}/.cache",
                     "XDG_DATA_HOME": f"{home}/.local/share", "XDG_STATE_HOME": f"{home}/.local/state"})

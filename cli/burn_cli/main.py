@@ -47,6 +47,14 @@ class UsageError(Exception):
     pass
 
 
+def _pass_through(name: str) -> str:
+    from .runner.env import pass_through_name
+    try:
+        return pass_through_name(name)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="burn", description="Command-line client for the Burn API.")
     p.add_argument("--json", action="store_true", help="print the raw API response")
@@ -88,6 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--user", help="when burn run is root, run the agent as this existing user "
                                       "(default: a uid of its own for each instance)")
     run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
+    run_p.add_argument("--allow-env", action="append", default=[], metavar="NAME", type=_pass_through,
+                       help="pass this variable from your environment to the agent (repeatable), such as a provider "
+                            "key. A burn cannot revoke it. Names burn run sets itself are refused")
     run_p.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
     env_p = sub.add_parser("env", help="show the environment `burn run` gives an instance")
     env_p.add_argument("--show", action="store_true", help="show the values of the kept variables")
@@ -327,7 +338,7 @@ def cmd_run(args):
     try:
         instance = Instance(InstanceApi(api_url), role, command, secrets=secrets, gateway_url=gateway.rstrip("/"),
                             enroll_token=token, session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv),
-                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin,
+                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin, allow_env=args.allow_env,
                             # read only so no task item can carry it; the agent never gets it
                             held_secrets=(config.get("BURN_DEMO_TOKEN", args.dotenv),))
     except BadTask as exc:

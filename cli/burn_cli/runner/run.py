@@ -42,7 +42,7 @@ class Instance:
                  secrets: dict | None = None,
                  proxy_url: str = "", heartbeat_every: float = 15.0, min_heartbeat_gap: float = 3.0,
                  stop_grace: float = STOP_GRACE, drop: Drop | None = None, user_arg: str | None = None, stdin_devnull: bool = False,
-                 progress_wait: float = 15.0, held_secrets: tuple = (),
+                 progress_wait: float = 15.0, held_secrets: tuple = (), allow_env: tuple = (),
                  sleep: Callable[[float], None] = time.sleep):
         self.api, self.role, self.command = api, role, command
         self._secrets = secrets  # handed over by the parent supervisor or the launcher; never kept on self.session
@@ -72,6 +72,7 @@ class Instance:
         self._wait = self._activity.wait  # how the loop waits for activity; tests drive it on a fake clock
         self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
         self._proxy_refusing = False  # within a streak of proxy refusals, logged once at its start
+        self.allow_env = tuple(dict.fromkeys(allow_env))  # --allow-env names, checked by the parser; this run only
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -153,7 +154,8 @@ class Instance:
         cleanups.append(lambda: shutil.rmtree(home, ignore_errors=True))  # last, so nothing recreates it behind us
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
                         spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token,
-                        progress_url=spawn.progress_url, task=self._task)
+                        progress_url=spawn.progress_url, task=self._task, allow=self.allow_env)
+        self._announce()
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,
@@ -187,6 +189,14 @@ class Instance:
         if self.drop:
             os.chown(home, self.drop.uid, self.drop.gid)
         return home
+
+    def _announce(self) -> None:
+        """Say on stderr what the agent gets beyond its own values: anything passed through."""
+        for name in self.allow_env:
+            if name in self.host_env:
+                log(f"{name} passes through to the agent; a burn cannot revoke it")
+            else:
+                log(f"{name} is not set, so nothing passes through")
 
     def _exit(self) -> None:
         if not self._token:
