@@ -22,7 +22,7 @@ A contract change updates this folder and the mocks together.
 | `mcp-tools.json` | MCP tools behind the Gateway |
 | `scenario.schema.json` | `/agents/scenarios/*.yaml` format |
 | `burn.schema.json` | `burn.yaml` format (roles defined in code); example in `examples/burn.yaml` |
-| `python/burn_contracts/` | Shared helpers: `ids.py`, `events.py`, `fingerprint.py`, `names.py` |
+| `python/burn_contracts/` | Shared helpers: `ids.py`, `events.py`, `fingerprint.py`, `names.py`, `progress.py` (task progress rules) |
 
 ## How to test it
 ```bash
@@ -235,7 +235,8 @@ Replace on burn adds `progress` (one entry per task item, see below), `generatio
 - Burn stamps each event with its own receive time and keeps one entry per item on the session row,
   `progress: {<item>: {"started_at", "done_at"}}`, at most `names.MAX_PROGRESS_ITEMS` = 500 items per
   instance. `done` without `started` counts as both at once; a repeat never moves a time. A broken rule is a
-  400 naming it (never a 409, which means burned or exited). Reads show counts only.
+  400 naming it (never a 409, which means burned or exited). Reads show counts only. `burn_contracts.progress`
+  holds these rules and the done/quarantined split, so the API, the mock and `burn run` agree.
 - **At burn time** (one instance of a role with `replace_on_burn`; never a role burn) Burn writes `replacement` on
   the burned instance: `{status, cutoff, cutoff_source, done, quarantined}`. `cutoff` is the earliest evidence of
   compromise on Burn's clock (`cutoff_source: evidence`: the blocked credential, canary use or refused call that

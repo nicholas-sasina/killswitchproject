@@ -594,3 +594,58 @@ def test_replaced_and_resumed_events_link_the_two_instances():
     assert events.make_event(agent_id="agent-a", source="burn", action="revoked")["replaces"] is None
     with pytest.raises(ValueError):
         events.make_event(agent_id=WORKER, source="instance", action="resumed", replaces="has space")
+
+
+def test_progress_events_are_checked_by_the_named_rule():
+    from burn_contracts import progress
+    assert progress.check_events([{"item": "w01-item-01", "state": "started"}]) == [("w01-item-01", "started")]
+    assert progress.check_events([]) == []
+    cases = [
+        ({"item": "w01"}, "item and state"), ({"item": "w01", "state": "done", "note": "x"}, "item and state"),
+        ({"item": "has space", "state": "done"}, "item id"), ({"item": "w01", "state": "finished"}, "state"),
+        ("w01", "item and state"),
+    ]
+    for event, rule in cases:
+        with pytest.raises(progress.ProgressError, match=rule):
+            progress.check_events([event])
+    with pytest.raises(progress.ProgressError, match="progress must be a list"):
+        progress.check_events({"item": "w01", "state": "done"})
+    with pytest.raises(progress.ProgressError, match=f"at most {names.MAX_PROGRESS_EVENTS} progress events"):
+        progress.check_events([{"item": f"i{n}", "state": "started"} for n in range(names.MAX_PROGRESS_EVENTS + 1)])
+    assert issubclass(progress.ProgressError, ValueError)
+
+
+def test_progress_is_stamped_by_the_caller_clock_and_never_moves():
+    from burn_contracts import progress
+    t1, t2, t3 = "2026-11-07T10:00:00.000Z", "2026-11-07T10:00:05.000Z", "2026-11-07T10:00:09.000Z"
+    state = progress.apply({}, [("a", "started"), ("b", "done")], t1)
+    assert state == {"a": {"started_at": t1, "done_at": None}, "b": {"started_at": t1, "done_at": t1}}
+    later = progress.apply(state, [("a", "started"), ("a", "done"), ("b", "done"), ("c", "started")], t2)
+    assert later["a"] == {"started_at": t1, "done_at": t2}  # a second started keeps the first time
+    assert later["b"] == {"started_at": t1, "done_at": t1}  # so does a second done
+    assert progress.apply(later, [("a", "started")], t3)["a"] == {"started_at": t1, "done_at": t2}
+    assert state["a"]["done_at"] is None  # the input is never changed
+    assert progress.counts(later) == {"items_started": 3, "items_done": 2}
+    assert progress.counts(None) == {"items_started": 0, "items_done": 0}
+    full = progress.apply({}, [(f"i{n}", "done") for n in range(names.MAX_PROGRESS_ITEMS)], t1)
+    assert progress.apply(full, [("i0", "done")], t2) == full  # known items never count again
+    with pytest.raises(progress.ProgressError, match=f"at most {names.MAX_PROGRESS_ITEMS} items"):
+        progress.apply(full, [("one-more", "started")], t2)
+
+
+def test_only_work_done_before_the_cutoff_is_trusted():
+    from burn_contracts import progress
+    cutoff = "2026-11-07T10:00:05.000Z"
+    before, at, after = "2026-11-07T10:00:01.000Z", cutoff, "2026-11-07T10:00:07.000Z"
+    state = {
+        "done-before": {"started_at": before, "done_at": before},
+        "done-at-cutoff": {"started_at": before, "done_at": at},       # not before it: not trusted
+        "in-flight": {"started_at": before, "done_at": None},          # working on it at the breach
+        "done-after": {"started_at": before, "done_at": after},
+        "started-after": {"started_at": after, "done_at": None},
+        "started-and-done-after": {"started_at": after, "done_at": after},
+    }
+    done, quarantined = progress.classify(state, cutoff)
+    assert done == ["done-before"]
+    assert quarantined == sorted(set(state) - {"done-before"})
+    assert progress.classify({}, cutoff) == ([], [])
