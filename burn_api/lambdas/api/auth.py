@@ -20,7 +20,8 @@ Sign-in on (BURN_PEOPLE_AUTH=1):
   join token or the instance's session token exactly as above. (POST /sessions is not exempt: it needs a person.)
 - The admin token is honored only when the API also runs with BURN_LOCAL_DEV=1, which a deployment never sets.
 
-In both modes the caller is returned so routes can record who did what (see caller.py).
+In both modes the caller is returned so routes can record who did what (see caller.py). With sign-in off, claims
+in an event are ignored entirely: no authorizer runs then, so they cannot have come from API Gateway.
 """
 import hashlib
 import hmac
@@ -129,13 +130,15 @@ def _own_credential(method: str, path: str, headers: dict, body: dict) -> caller
 
 def authenticate(event: dict, method: str, path: str, headers: dict, body: dict) -> caller.Caller | None:
     """Who is calling, or None when the request may not call this route."""
-    email = person(event)
-    if email:
-        return caller.Caller(actor=email, person=email)
     if not people_auth_on():
+        # Exactly as before sign-in. Claims are ignored: no authorizer runs in this mode, so any claims
+        # in an event were not put there by API Gateway (for example a direct invoke of the Lambda).
         if is_admin(headers):
             return caller.Caller(actor="admin", person=None)
         return _own_credential(method, path, headers, body)
+    email = person(event)
+    if email:
+        return caller.Caller(actor=email, person=email)
     if local_dev() and is_admin(headers):
         return caller.Caller(actor="admin", person=None)
     if is_exempt(method, path):

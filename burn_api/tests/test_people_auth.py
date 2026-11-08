@@ -84,10 +84,21 @@ def test_off_an_admin_caller_is_actor_admin_with_no_created_by(env):
     assert issued and all(e["actor"] == "admin" for e in issued)
 
 
-def test_off_claims_are_still_used_when_present(env):
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/roles", None), ("POST", "/sessions", {"agent_id": "agent-a"}),
+    ("POST", "/burn", {"agent_id": "agent-a"}), ("POST", "/roles/worker/tokens", {"uses": 1}),
+])
+def test_off_forged_claims_without_the_admin_token_are_401(env, method, path, body):
+    """With sign-in off no authorizer runs, so claims can only come from a forged event (a direct invoke)."""
     make_role(env, WORKER)
-    status, token = as_person(env, "POST", "/roles/worker/tokens", {"uses": 1})
-    assert status == 201 and token["created_by"] == PERSON
+    assert as_person(env, method, path, body)[0] == 401
+
+
+def test_off_claims_never_become_a_person_even_beside_the_admin_token(env):
+    make_role(env, WORKER)
+    status, token = request(env, "POST", "/roles/worker/tokens", {"uses": 1}, admin=True,
+                            claims={"sub": "x", "email": PERSON})
+    assert status == 201 and token["created_by"] is None  # the caller is the admin, not the claimed person
 
 
 # --- sign-in on: a person on every route but the exempt ones -----------------------------------
