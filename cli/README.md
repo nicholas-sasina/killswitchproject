@@ -16,9 +16,9 @@ from the same repository, which uv finds through the CLI's `[tool.uv.sources]` a
 checkout, `make burn ARGS="..."` runs the same CLI.
 
 ## Connect your agent
-`burn run` turns any command into a Burn instance. It joins with a join token, gives the command the instance's
-own credentials and a local MCP endpoint for its tools, and stops it when the instance is burned. Any harness that
-speaks MCP over HTTP works, with any model the instance's own AWS key can call.
+`burn run` turns any command into a Burn instance: `burn run claude`, `burn run opencode`, `burn run python agent.py`.
+It gives the command the instance's own credentials and a local MCP endpoint for its tools, and stops it when the
+instance is burned. Any harness that speaks MCP over HTTP works, with any model the instance's own AWS key can call.
 
 1. **Point `burn` at your stack.** Whoever runs it has these values (`make env` writes all but `BURN_PROXY_URL`, the
    egress proxy's address, to the repository's `.env`). The dashboard's join commands set the first two for you:
@@ -31,7 +31,28 @@ speaks MCP over HTTP works, with any model the instance's own AWS key can call.
    Without `BURN_PEOPLE_ENABLED=on`, `burn` asks AWS whether the stack requires sign-in. With no AWS access it
    assumes not, and then asks for a `BURN_DEMO_TOKEN` you should not have.
 2. **Sign in** with `burn login`.
-3. **Make a role**, in the dashboard or in code: `burn init` writes a starter `burn.yaml`, which you edit and
+3. **Run your agent:**
+   ```bash
+   burn run claude                                                       # asks before tools run
+   burn run claude -p "Summarise ticket T-1" --allowedTools mcp__burn    # headless
+   burn run python agent.py
+   ```
+   Everything after the command is the command's own, flags included, so `--` is optional.
+   - **The role** is named after the command, or after the script for `python`, `node`, `uv`, `npx` and other
+     launchers: `burn run python agent.py` runs as role `agent`. A name that would be `eval` or `eval-*` (kept for
+     the eval harness) or a scenario agent's is refused, and so is a command with no usable name, such as
+     `python -c ...`. Pass `--role` to choose an existing role instead; one that does not exist is an error, never
+     created.
+   - **A role it named and cannot find is created with full access:** every tool, the instance's own AWS key,
+     and no egress limits of its own.
+   - **An existing role is reused as it is.** `burn run` says on stderr whether it is Full access or Limited, so a
+     role someone narrowed is never mistaken for full access.
+   - **No join token:** as a signed-in person, `burn run` mints a one-use token for the run and joins with it. The
+     token is never printed, logged, put on a command line or given to the agent.
+
+### In CI and containers
+Where nobody signs in, give `burn run` a join token. A join token always wins over a sign-in.
+1. **Make a role**, in the dashboard or in code: `burn init` writes a starter `burn.yaml`, which you edit and
    `burn apply`. A role sets an instance's tools, credentials and egress. For a model on Bedrock, give it an AWS
    key and, behind the egress proxy, the Bedrock endpoint:
    ```yaml
@@ -43,8 +64,8 @@ speaks MCP over HTTP works, with any model the instance's own AWS key can call.
        credentials: [api_key, aws_key]
        egress: [bedrock-runtime.us-east-1.amazonaws.com]
    ```
-4. **Get a join token**, in the dashboard or with `burn token create coder --uses 1 --ttl 3600`. It is shown once.
-5. **Run your agent:**
+2. **Get a join token**, in the dashboard or with `burn token create coder --uses 1 --ttl 3600`. It is shown once.
+3. **Run your agent:**
    ```bash
    read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN    # paste the token; nothing lands in shell history
    burn run --role coder -- <any command>
@@ -227,19 +248,25 @@ until `burn apply` takes it over; after that the dashboard shows it read-only.
 
 ### `burn run`
 ```bash
+burn run claude                                        # signed in: role "claude", reused or created with full access
 read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN     # paste the token; nothing lands in shell history
 burn run --role worker -- python agent.py
 pbpaste | burn run --role worker --token-stdin -- python agent.py   # or read it from stdin
 burn env            # what an instance's environment would hold (values hidden; --show reveals the kept ones)
 ```
 `burn run` starts one instance:
+0. Without a join token, as the signed-in person (or with the local-development token): `GET /roles/{name}`; when
+   a role named after the command is missing, `POST /roles` with the full-access body (a 409 means another run
+   created it first, so it is read again and reused), while a missing `--role` is an error; then
+   `POST /roles/{name}/tokens {"uses": 1, "ttl": 300}`. The token stays inside `burn run`.
 1. `POST /instances {role, enroll_token}` with no auth header (the join token is the authority), retrying 429, 5xx and network errors with exponential backoff and
    jitter (new IAM keys take seconds to work, and 20 parallel spawns hit rate limits).
 2. Takes the instance's own badge, AWS key and provider key from the `secrets` field of that reply, which the API
    returns once, along with the instance's session token (`bst_...`). The session token authenticates the
    supervisor's heartbeat, exit and spawn calls (`Authorization: Bearer ...`) and stays in the supervisor: never in
    the agent's environment or any argv, and `burn run` refuses to pass on anything that looks like one. `burn run`
-   never uses or forwards your sign-in or the local-development token (`BURN_DEMO_TOKEN`); it needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
+   uses your sign-in or the local-development token (`BURN_DEMO_TOKEN`) only for step 0, never when it is given a
+   join token, and never forwards either. It needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
    not a reason to look elsewhere. A child started with `burn.spawn` gets its values from its parent's reply and
    receives them in its supervisor's exec environment (`BURN_ADOPT_SECRETS`), never on a command line, where every
    user in the container could read them.
@@ -340,8 +367,10 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
   gets "HTTP 401" says which of the two to do.
 - **Where is my sign-in kept, and who can read it?** In `~/.config/burn/credentials.json`, readable only by you.
   `burn logout` revokes the session and deletes the file.
-- **Does `burn run` need me to sign in?** No. An instance authenticates as itself with the join token and then
-  its own session token. Your sign-in is never sent from `burn run`, even when you are signed in on that machine.
+- **Does `burn run` need me to sign in?** Only when you give it no join token. Then your sign-in reads or creates
+  the role and mints a one-use join token, and nothing else. The instance itself authenticates with that token and
+  then its own session token. Given a join token, `burn run` never sends your sign-in, even when you are signed in
+  on that machine.
 - **Can I sign in on a machine without a browser?** `burn login` prints the sign-in address when it cannot open
   a browser. The reply comes back to `localhost:8976`, so open it on the same machine (or forward that port).
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
