@@ -33,7 +33,17 @@
 .swarm-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-start;
   gap: 8px;
+}
+/* Role actions size to their label. .burn-button is width:100% because it is
+   a card's full-width control; as a flex item here that made "Burn role"
+   stretch to the line and sit wider than the "New token" above it. */
+.swarm-actions .burn-button,
+.swarm-actions .secondary-button {
+  width: auto;
+  flex: 0 0 auto;
 }
 .swarm-filters {
   display: flex;
@@ -111,6 +121,14 @@
 .swarm-table th {
   background: var(--c-sunken);
   border-top: 1px solid var(--c-rule);
+}
+/* The action column is right-aligned so "Burn instance" shares an edge with
+   the role's own "Burn role" button directly above it. Both then sit 18px
+   from the panel edge instead of the row button floating wherever its
+   column happens to end. */
+.swarm-table th:last-child,
+.swarm-table td:last-child {
+  text-align: right;
 }
 .swarm-table .burn-button {
   display: inline-flex;
