@@ -128,7 +128,7 @@ describe("Incidents", () => {
     expect(worker.getAttribute("href")).toBe("#/agents/s7");
     expect(worker.textContent).toContain("worker-07");
     expect(worker.textContent).toContain(
-      "Burned by priya.nair@example.com: “read an unverified vendor page”",
+      "Burned by priya.nair@example.com: read an unverified vendor page",
     );
     expect(worker.textContent).toContain(
       "Badge revoked, 2 owned keys rotated, crm_db_url sent to its owner",
@@ -136,7 +136,7 @@ describe("Incidents", () => {
     expect(within(worker).getByText("Key open")).toBeTruthy();
     // The reader's burn is older than the events, so it says less.
     expect(rows[1].textContent).toContain("reader-01");
-    expect(rows[1].textContent).toContain("Burned before the events loaded");
+    expect(rows[1].textContent).toContain("Burned before the loaded events");
     expect(within(rows[1]).getByText("Burned")).toBeTruthy();
 
     const open = screen.getByRole("region", { name: /Still open/i });
@@ -152,7 +152,9 @@ describe("Incidents", () => {
     const how = screen.getByRole("region", { name: /How burns started/i });
     expect(how.textContent).toContain("A person pressed Burn1");
     expect(how.textContent).not.toContain("Canary");
-    expect(how.textContent).toContain("what started 1 other burn");
+    expect(how.textContent).toContain(
+      "For 1 other burn, the loaded events don’t name who or what started it.",
+    );
   });
 
   it("filters to open and burned incidents with counts that match the rows", () => {

@@ -196,11 +196,9 @@ export function IncidentsPage() {
                 </dl>
                 {causes.unknown > 0 && (
                   <CardNote>
-                    The loaded events don&rsquo;t say what started{" "}
                     {causes.unknown === 1
-                      ? "1 other burn"
-                      : `${causes.unknown} other burns`}
-                    .
+                      ? "For 1 other burn, the loaded events don’t name who or what started it."
+                      : `For ${causes.unknown} other burns, the loaded events don’t name who or what started them.`}
                   </CardNote>
                 )}
               </Card>

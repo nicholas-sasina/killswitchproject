@@ -4,7 +4,8 @@
  * when an event is not in the loaded history, the row says less rather than
  * guessing.
  *
- * The API writes a burn's cause into its `revoked` event:
+ * The API writes a burn's cause into its `revoked` event (model/burns.ts
+ * reads it the same way for every page):
  *   a person    actor = their email ("admin" in local development),
  *               detail "N session(s) revoked (<reason>)"
  *   a canary    secret_ref = the canary, detail "canary incident evt_…";
@@ -23,42 +24,33 @@ import {
 } from "../../features/flags/describe";
 import {
   burnReason,
+  burnTrigger,
   dayTime,
   findAgent,
-  isCanaryRef,
   isSameDay,
   keyName,
-  personLabel,
   shortTime,
+  triggerShort,
+  type BurnTrigger,
   type ConsoleAgent,
   type ConsoleModel,
   type Incident,
 } from "../../model";
 import { plural } from "../../plural";
 
-export type CauseKind =
-  /** Its canary was used from outside Burn; Burn burned it by itself. */
-  | "canary"
-  /** A person pressed Burn. */
-  | "person"
-  /** Burned with everyone who read one source. */
-  | "source"
-  /** The burn is recorded, but not who or what started it. */
-  | "unattributed"
-  /** The burn's event is older than the loaded history. */
-  | "unrecorded";
-
+/**
+ * Why an agent was burned. The trigger is the console's shared reading
+ * (model/burns.ts), so this list and the Overview word a burn the same way;
+ * the rest is what only this list has room for.
+ */
 export interface BurnCause {
-  kind: CauseKind;
-  /** Who pressed Burn, as the console writes people. */
-  actor?: string;
-  reason?: string;
-  /** For a source burn: what was read, "<tool>:<resource>". */
-  sourceRef?: string;
+  trigger: BurnTrigger;
+  /** For a burn of everyone who read one source: "<tool>:<resource>". */
+  source?: string;
   /** For a source burn: how many other agents the same burn took. */
   others?: number;
-  /** For a canary: where it was used from, when the API recorded it. */
-  ip?: string;
+  /** No event of this burn is in the loaded history. */
+  unloaded?: boolean;
 }
 
 const BURN_ACTIONS: ReadonlySet<string> = new Set([
@@ -73,10 +65,11 @@ export function burnEvents(events: LedgerEvent[]): LedgerEvent[] {
   return events.filter((event) => BURN_ACTIONS.has(event.action));
 }
 
+/** An event of this agent's burn, matched as burnTrigger matches it. */
 function about(agent: ConsoleAgent, event: LedgerEvent): boolean {
-  if (event.session_id)
-    return Boolean(agent.sessionId) && event.session_id === agent.sessionId;
-  return event.agent_id === agent.agentId;
+  return event.session_id
+    ? event.session_id === agent.sessionId || event.session_id === agent.key
+    : event.agent_id === agent.agentId;
 }
 
 /** The `revoked` event that burned this agent, newest first. */
@@ -97,67 +90,45 @@ export function burnCause(
   agent: ConsoleAgent,
   events: LedgerEvent[],
 ): BurnCause {
+  const trigger = burnTrigger(agent, events);
   const revoked = revokedEventFor(agent, events);
-  if (!revoked) return { kind: "unrecorded" };
-  const detail = revoked.detail ?? "";
-  if (isCanaryRef(revoked.secret_ref) || /^canary incident/i.test(detail)) {
-    const used = events.find(
-      (event) =>
-        event.action === "canary_used" &&
-        about(agent, event) &&
-        event.ts <= revoked.ts,
-    );
-    const ip = used?.detail?.match(/from ([0-9a-fA-F.:]+)\)?\s*$/)?.[1];
-    return { kind: "canary", ...(ip ? { ip } : {}) };
+  if (trigger.kind === "unknown" && !revoked && !agent.burnNote)
+    return { trigger, unloaded: true };
+  const reason = "reason" in trigger ? trigger.reason : "";
+  const source = reason.match(SOURCE_REASON)?.[1];
+  if (!source) return { trigger };
+  if (!revoked) return { trigger, source };
+  // The same POST /burn/by-source writes one revoked event per agent, all
+  // with the same reason and actor, within moments of each other.
+  const at = Date.parse(revoked.ts);
+  const together = new Set<string>();
+  for (const event of events) {
+    if (event.action !== "revoked" || event.agent_id === revoked.agent_id)
+      continue;
+    if (burnReason(event.detail) !== reason) continue;
+    if ((event.actor ?? "") !== (revoked.actor ?? "")) continue;
+    if (Math.abs(Date.parse(event.ts) - at) > 60_000) continue;
+    together.add(event.agent_id);
   }
-  const reason = burnReason(detail) || undefined;
-  const actor =
-    revoked.actor && revoked.actor !== "system"
-      ? personLabel(revoked.actor)
-      : undefined;
-  const source = reason?.match(SOURCE_REASON)?.[1];
-  if (source) {
-    const at = Date.parse(revoked.ts);
-    const together = new Set<string>();
-    for (const event of events) {
-      if (event.action !== "revoked" || event.agent_id === revoked.agent_id)
-        continue;
-      if (burnReason(event.detail) !== reason) continue;
-      if ((event.actor ?? "") !== (revoked.actor ?? "")) continue;
-      if (Math.abs(Date.parse(event.ts) - at) > 60_000) continue;
-      together.add(event.agent_id);
-    }
-    return {
-      kind: "source",
-      sourceRef: source,
-      others: together.size,
-      ...(actor ? { actor } : {}),
-    };
-  }
-  if (actor) return { kind: "person", actor, ...(reason ? { reason } : {}) };
-  return { kind: "unattributed", ...(reason ? { reason } : {}) };
+  return { trigger, source, others: together.size };
 }
 
-/** The "Why it was burned" column. */
+/**
+ * The "Why it was burned" column: the Overview's short line, with the
+ * canary's address and a source burn's reach when the events have them.
+ */
 export function causeSentence(cause: BurnCause): string {
-  switch (cause.kind) {
-    case "canary":
-      return `Its canary was used${cause.ip ? ` from ${cause.ip}` : ""}, outside Burn. Burned automatically`;
-    case "person":
-      return `Burned by ${cause.actor}${cause.reason ? `: “${cause.reason}”` : ""}`;
-    case "source": {
-      const others = cause.others ?? 0;
-      return others
-        ? `Read ${cause.sourceRef}; burned with the ${others === 1 ? "1 other" : `${others} others`} that read it`
-        : `Read ${cause.sourceRef}; burned as the only agent that read it`;
-    }
-    case "unattributed":
-      return cause.reason
-        ? `Burned: “${cause.reason}”`
-        : "Burned. No reason was recorded";
-    case "unrecorded":
-      return "Burned before the events loaded here, so the reason isn't shown";
-  }
+  if (cause.unloaded)
+    return "Burned before the loaded events, so the reason isn't shown";
+  const { trigger, others } = cause;
+  const short = triggerShort(trigger);
+  if (trigger.kind === "canary" && trigger.ip)
+    return `${short}, from ${trigger.ip}`;
+  if (cause.source && others !== undefined)
+    return others
+      ? `${short}, with the ${others === 1 ? "1 other" : `${others} others`} that read it`
+      : `${short}, the only agent that read it`;
+  return short;
 }
 
 /**
@@ -254,17 +225,17 @@ export interface CauseCounts {
   canary: number;
   person: number;
   source: number;
-  /** Burns whose trigger the loaded events don't say. */
+  /** Burns whose events don't name who or what started them. */
   unknown: number;
 }
 
 /** "How burns started": one count per burned agent, so they sum to the rows. */
 export function causeCounts(causes: BurnCause[]): CauseCounts {
   const counts: CauseCounts = { canary: 0, person: 0, source: 0, unknown: 0 };
-  for (const cause of causes) {
-    if (cause.kind === "canary") counts.canary += 1;
-    else if (cause.kind === "person") counts.person += 1;
-    else if (cause.kind === "source") counts.source += 1;
+  for (const { trigger, source } of causes) {
+    if (trigger.kind === "canary") counts.canary += 1;
+    else if (source) counts.source += 1;
+    else if (trigger.kind === "person") counts.person += 1;
     else counts.unknown += 1;
   }
   return counts;

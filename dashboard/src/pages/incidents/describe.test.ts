@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Instance, LedgerEvent } from "../../contracts";
+import { triggerShort } from "../../model";
 import {
   consoleValue,
   event,
@@ -54,12 +55,16 @@ describe("why an agent was burned", () => {
     );
     const cause = burnCause(w.incident("s7").agent, w.events);
     expect(cause).toEqual({
-      kind: "person",
-      actor: "priya.nair@example.com",
-      reason: "read an unverified vendor page",
+      trigger: {
+        kind: "person",
+        who: "priya.nair@example.com",
+        reason: "read an unverified vendor page",
+      },
     });
+    // The Overview's short line, word for word.
+    expect(causeSentence(cause)).toBe(triggerShort(cause.trigger));
     expect(causeSentence(cause)).toBe(
-      "Burned by priya.nair@example.com: “read an unverified vendor page”",
+      "Burned by priya.nair@example.com: read an unverified vendor page",
     );
   });
 
@@ -105,12 +110,12 @@ describe("why an agent was burned", () => {
     ];
     const w = world([burned("s7")], events);
     const cause = burnCause(w.incident("s7").agent, w.events);
-    expect(cause).toEqual({ kind: "canary", ip: "203.0.113.9" });
+    expect(cause).toEqual({ trigger: { kind: "canary", ip: "203.0.113.9" } });
     expect(causeSentence(cause)).toBe(
-      "Its canary was used from 203.0.113.9, outside Burn. Burned automatically",
+      "Its canary was used from outside, from 203.0.113.9",
     );
-    expect(causeSentence({ kind: "canary" })).toBe(
-      "Its canary was used, outside Burn. Burned automatically",
+    expect(causeSentence({ trigger: { kind: "canary" } })).toBe(
+      "Its canary was used from outside",
     );
   });
 
@@ -130,20 +135,20 @@ describe("why an agent was burned", () => {
     );
     const cause = burnCause(w.incident("s2").agent, w.events);
     expect(cause).toMatchObject({
-      kind: "source",
-      sourceRef: "read_ticket:T-4410",
+      trigger: { kind: "person" },
+      source: "read_ticket:T-4410",
       others: 2,
     });
     expect(causeSentence(cause)).toBe(
-      "Read read_ticket:T-4410; burned with the 2 others that read it",
+      "Burned by priya.nair@example.com: read read_ticket:T-4410, with the 2 others that read it",
     );
     expect(
       causeSentence({
-        kind: "source",
-        sourceRef: "read_ticket:T-1",
+        trigger: { kind: "reason", reason: "read read_ticket:T-1" },
+        source: "read_ticket:T-1",
         others: 0,
       }),
-    ).toBe("Read read_ticket:T-1; burned as the only agent that read it");
+    ).toBe("Burned: read read_ticket:T-1, the only agent that read it");
   });
 
   it("doesn't mistake a person's reason that starts with 'read' for a source burn", () => {
@@ -159,7 +164,9 @@ describe("why an agent was burned", () => {
         }),
       ],
     );
-    expect(burnCause(w.incident("s7").agent, w.events).kind).toBe("person");
+    expect(burnCause(w.incident("s7").agent, w.events)).toEqual({
+      trigger: expect.objectContaining({ kind: "person" }),
+    });
   });
 
   it("says so when nobody is recorded, or the burn is older than the events", () => {
@@ -174,9 +181,12 @@ describe("why an agent was burned", () => {
       ],
     );
     expect(causeSentence(burnCause(w.incident("s7").agent, w.events))).toBe(
-      "Burned. No reason was recorded",
+      "No reason was recorded",
     );
-    expect(burnCause(w.incident("s8").agent, w.events).kind).toBe("unrecorded");
+    expect(burnCause(w.incident("s8").agent, w.events).unloaded).toBe(true);
+    expect(causeSentence(burnCause(w.incident("s8").agent, w.events))).toBe(
+      "Burned before the loaded events, so the reason isn't shown",
+    );
   });
 
   it("uses only the burn of this agent's own session", () => {
@@ -194,7 +204,7 @@ describe("why an agent was burned", () => {
         }),
       ],
     );
-    expect(burnCause(w.incident("s7").agent, w.events).kind).toBe("unrecorded");
+    expect(burnCause(w.incident("s7").agent, w.events).unloaded).toBe(true);
   });
 });
 
@@ -345,12 +355,19 @@ describe("row details", () => {
   it("counts burns by how they started, one per agent", () => {
     expect(
       causeCounts([
-        { kind: "canary" },
-        { kind: "canary" },
-        { kind: "person" },
-        { kind: "source" },
-        { kind: "unattributed" },
-        { kind: "unrecorded" },
+        { trigger: { kind: "canary" } },
+        { trigger: { kind: "canary", ip: "203.0.113.9" } },
+        { trigger: { kind: "person", who: "the local admin", reason: "" } },
+        {
+          trigger: {
+            kind: "person",
+            who: "priya.nair@example.com",
+            reason: "read read_ticket:T-1",
+          },
+          source: "read_ticket:T-1",
+        },
+        { trigger: { kind: "reason", reason: "policy" } },
+        { trigger: { kind: "unknown" }, unloaded: true },
       ]),
     ).toEqual({ canary: 2, person: 1, source: 1, unknown: 2 });
   });
