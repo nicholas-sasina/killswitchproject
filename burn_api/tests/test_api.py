@@ -123,6 +123,7 @@ def test_preflight_needs_no_token_but_other_methods_do(env):
         assert out["statusCode"] == 204
         assert out["headers"]["access-control-allow-origin"] == "http://localhost:5173"
         assert "x-burn-demo-token" in out["headers"]["access-control-allow-headers"]
+        assert "authorization" in out["headers"]["access-control-allow-headers"].split(",")  # bearer tokens
     assert call(env, "GET", "/events", token="")[0] == 401
     assert call(env, "POST", "/burn", {"agent_id": "agent-a"}, token="")[0] == 401
 

@@ -9,6 +9,7 @@ import sys
 
 import aws_cdk as cdk
 from aws_cdk import aws_apigatewayv2 as apigw
+from aws_cdk import aws_apigatewayv2_authorizers as authorizers
 from aws_cdk import aws_apigatewayv2_integrations as integrations
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
@@ -22,6 +23,17 @@ sys.path.insert(0, str(REPO / "contracts" / "python"))
 from burn_contracts import names  # noqa: E402
 
 DASHBOARD_ORIGIN = "http://localhost:5173"
+# `-c burn:people_auth=on` switches people sign-in on: a JWT authorizer from the people pool on every
+# route except the instance routes, and BURN_PEOPLE_AUTH=1 on the Lambda. Off (the default), callers
+# see no change.
+PEOPLE_AUTH_CONTEXT = "burn:people_auth"
+# Routes that carry their own credential (a join token, or the instance's session token), which the
+# Lambda checks. They stay outside the authorizer.
+INSTANCE_ROUTES = [("/instances", "POST"), ("/instances/{session_id}/heartbeat", "POST"),
+                   ("/instances/{session_id}/exit", "POST")]
+# A $default route with an authorizer also catches CORS preflight requests, so the preflight needs a
+# route of its own without one (the Lambda answers OPTIONS without reading any credential).
+PREFLIGHT_ROUTE = ("/{proxy+}", "OPTIONS")
 BADGE_HELPER = REPO / "gateway" / "badges.py"  # shared with the gateway code that owns Cognito badges
 
 
@@ -105,14 +117,37 @@ class BurnApiStack(cdk.Stack):
             timeout=cdk.Duration.seconds(29), memory_size=256,
         )
 
+        people_auth = self.node.try_get_context(PEOPLE_AUTH_CONTEXT) == "on"
+        integration = integrations.HttpLambdaIntegration("Integration", fn)
+        authorizer = None
+        if people_auth:
+            # Values come from the BurnPeople stack via SSM, resolved at deploy time. The audience
+            # lists both app clients: people (CLI, dashboard) and the automation person (scripts).
+            def param(name):
+                return ssm.StringParameter.value_for_string_parameter(self, name)
+
+            authorizer = authorizers.HttpJwtAuthorizer(
+                "People", param(names.PEOPLE_ISSUER_PARAM),
+                jwt_audience=[param(names.PEOPLE_CLIENT_ID_PARAM), param(names.AUTOMATION_CLIENT_ID_PARAM)],
+            )
+            fn.add_environment(names.PEOPLE_AUTH_ENV, "1")
+
         api = apigw.HttpApi(
             self, "Api", api_name="burn-api",
-            default_integration=integrations.HttpLambdaIntegration("Integration", fn),
+            default_integration=integration,
+            default_authorizer=authorizer,
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_origins=[DASHBOARD_ORIGIN],
                 allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.PUT,
                                apigw.CorsHttpMethod.DELETE, apigw.CorsHttpMethod.OPTIONS],
-                allow_headers=["content-type", names.DEMO_TOKEN_HEADER],
+                allow_headers=["content-type", "authorization", names.DEMO_TOKEN_HEADER],
             ),
         )
+        if people_auth:
+            for path, method in [*INSTANCE_ROUTES, PREFLIGHT_ROUTE]:
+                api.add_routes(path=path, methods=[apigw.HttpMethod(method)], integration=integration,
+                               authorizer=apigw.HttpNoneAuthorizer())
         ssm.StringParameter(self, "UrlParam", parameter_name="/burn/api/url", string_value=api.api_endpoint)
+        # make_env reads this to decide whether the dashboard still gets the local admin token.
+        ssm.StringParameter(self, "PeopleEnabledParam", parameter_name=names.PEOPLE_ENABLED_PARAM,
+                            string_value="on" if people_auth else "off")
