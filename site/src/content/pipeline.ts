@@ -1,11 +1,17 @@
-// The "How it works" pipeline: six steps over 17 seconds. pipelineState(t) is
-// pure: the diagram renders whatever it returns for the current time, so the
-// tests, autoplay, the step buttons and reduced motion all agree.
+// The "How it works" pipeline: six steps over 23.8 seconds. pipelineState(t)
+// is pure: the diagram renders whatever it returns for the current time, so
+// the tests, autoplay, the step buttons and reduced motion all agree.
+
+// The times below are written for a 17 s loop. PIPELINE_PACE stretches every
+// one of them by the same factor, so the rhythm holds while each step stays
+// up long enough to read. Raise it to slow the diagram down.
+export const PIPELINE_PACE = 1.4;
+const ms = (time: number) => Math.round(time * PIPELINE_PACE);
 
 export const PIPELINE_STARTS: readonly number[] = [
   0, 3000, 5500, 8000, 10500, 13000,
-];
-export const PIPELINE_CYCLE_MS = 17000;
+].map(ms);
+export const PIPELINE_CYCLE_MS = ms(17000);
 export const PIPELINE_STEP_COUNT = PIPELINE_STARTS.length;
 
 export type PanelId =
@@ -26,17 +32,17 @@ export type LineTone = "idle" | "ink" | "ember";
 
 // When each detail inside a step lights up, in ms from the start of the loop.
 const AT = {
-  mark: [500, 1000, 1500, 2000],
-  ledgerDone: 2500,
-  chip: [3500, 4000, 4500],
-  exitDone: 5000,
-  identified: 6000,
-  credential: 8500,
-  decisionDone: 9000,
-  shared: 11000,
-  audit: 11500,
-  result: [13000, 13500, 14000, 14500],
-} as const;
+  mark: [500, 1000, 1500, 2000].map(ms),
+  ledgerDone: ms(2500),
+  chip: [3500, 4000, 4500].map(ms),
+  exitDone: ms(5000),
+  identified: ms(6000),
+  credential: ms(8500),
+  decisionDone: ms(9000),
+  shared: ms(11000),
+  audit: ms(11500),
+  result: [13000, 13500, 14000, 14500].map(ms),
+};
 
 /** Every moment the diagram changes. The page re-renders only at these. */
 export const PIPELINE_EVENTS: readonly number[] = [
