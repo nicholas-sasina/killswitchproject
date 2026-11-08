@@ -34,8 +34,8 @@ function show(value: ConsoleData) {
 
 const SHARED = "burn/shared/crm_db_url";
 
-/** The board's state: worker-07 burned by a person, one shared key open. */
-function boardState(flags = [flag({ flag_level: "reported" })]) {
+/** worker-07 burned by a person with one shared key open; reader-01 burned before the loaded events. */
+function burnedWithOpenKey(flags = [flag({ flag_level: "reported" })]) {
   const workers = Array.from({ length: 8 }, (_, index) =>
     instance(`s${index + 1}`, index === 6 ? "revoked" : "active", {
       created_at: today(1, index),
@@ -116,8 +116,8 @@ describe("Incidents", () => {
     ).toBeNull();
   });
 
-  it("shows the board: the hero's counts, the burned agents and what is still open", () => {
-    show(boardState());
+  it("shows the hero's counts, the burned agents and what is still open", () => {
+    show(burnedWithOpenKey());
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "1 agent burned today.1 key waits on its owner.",
     );
@@ -158,7 +158,7 @@ describe("Incidents", () => {
   });
 
   it("filters to open and burned incidents with counts that match the rows", () => {
-    show(boardState());
+    show(burnedWithOpenKey());
     const filter = screen.getByRole("group", { name: "Show" });
     expect(
       within(filter)
@@ -181,7 +181,7 @@ describe("Incidents", () => {
   });
 
   it("closes an incident once its key is decided", () => {
-    show(boardState([flag({ state: "dismissed" })]));
+    show(burnedWithOpenKey([flag({ state: "dismissed" })]));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "1 agent burned today.No key waits on its owner.",
     );
