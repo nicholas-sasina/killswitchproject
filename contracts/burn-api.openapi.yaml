@@ -411,6 +411,50 @@ paths:
         '401': { description: no valid session token for this instance }
         '200': { description: Exited, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
         '404': { description: no such session }
+  /instances/{session_id}:
+    get:
+      summary: One instance, as GET /instances lists it (a launcher reads it when its instance stops).
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200': { description: The instance, content: { application/json: { schema: { $ref: '#/components/schemas/Instance' } } } }
+        '404': { description: no such session }
+  /instances/{session_id}/replace:
+    post:
+      summary: Link a fresh instance as the replacement of a burned one.
+      description: |
+        Called by whatever started the burned instance (for example `make swarm`), after it joined a fresh
+        instance of the same role the normal way. The path names the burned instance; the body names the new one.
+        Burn never starts the replacement itself and never stores the task: the launcher keeps it, so a
+        compromised agent cannot rewrite it. The reply tells the launcher which items to skip (`done`) and which
+        to leave for a person (`quarantined`); it hands both to the new instance as `BURN_RESUME`.
+        The old instance's `replacement` must be `pending`. One TransactWriteItems updates both rows on
+        conditions (old: pending -> linked and `replaced_by`; new: `replaces` and `generation`), so exactly one
+        replacement is ever linked to a burned instance, however many launchers race. Writes a `replaced` event
+        on the old instance and a `resumed` event on the new one.
+      parameters:
+        - { name: session_id, in: path, required: true, schema: { type: string }, description: the burned instance }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              additionalProperties: false
+              properties:
+                session_id: { type: string, description: the fresh instance that takes over the task }
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Linked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReplaceResult' }
+        '400': { description: "the new instance is not one that may replace it: it must be of the same role, active, created after the old one was burned, and not already a replacement (nor the old instance itself)" }
+        '404': { description: no such session (the burned one) }
+        '409': { description: "the old instance's replacement is not pending: it was already linked, it was never marked (not burned, a role burn, or a role without replace_on_burn), or it needs a person" }
   /burns:
     post:
       summary: Burn a set of instances at once.
@@ -823,3 +867,51 @@ components:
         last_seen: { type: string, format: date-time, nullable: true }
         exited_at: { type: string, format: date-time, nullable: true }
         exposures: { type: integer, description: number of ledger entries }
+        generation:
+          type: integer
+          minimum: 0
+          default: 0
+          description: 0 for an instance that is not a replacement; a replacement is its predecessor's generation + 1.
+        replaces: { type: string, nullable: true, description: the burned instance (session_id) this one replaced }
+        replaced_by: { type: string, nullable: true, description: the instance (session_id) that replaced this burned one }
+        replacement:
+          allOf: [{ $ref: '#/components/schemas/Replacement' }]
+          nullable: true
+          description: Set when Burn burned this instance and its role has replace_on_burn (never for a role burn).
+        items_started: { type: integer, description: task items this instance reported started, finished ones included }
+        items_done: { type: integer, description: task items this instance reported done }
+    Replacement:
+      type: object
+      description: |
+        What a replacement may resume, decided when the instance was burned. Only item ids and Burn's own times.
+        An item counts as `done` only if it was done before `cutoff`. Anything started but not done before it (in
+        flight at the breach), or touched at or after it, is `quarantined`: a possibly compromised agent worked on
+        it, so it is left for a person and never retried automatically. Items never started are in neither list;
+        the replacement does them from the task its launcher holds.
+      required: [status, cutoff, cutoff_source, done, quarantined]
+      properties:
+        status:
+          type: string
+          enum: [pending, linked, needs_person]
+          description: "pending = waiting for its launcher to link a fresh instance; linked = replaced (see replaced_by); needs_person = not replaced automatically because the instance was already a third-generation replacement (names.MAX_REPLACEMENT_GENERATION)"
+        cutoff:
+          type: string
+          format: date-time
+          description: The clean cut-off on Burn's clock, the earliest evidence of compromise for this instance.
+        cutoff_source:
+          type: string
+          enum: [evidence, burn_time]
+          description: "evidence = the time of the event that caused the burn (a blocked outbound credential, a canary use, a refused call) or of this instance's first read of the poisoned source for a burn by source; burn_time = no evidence time was known (a manual burn), so the burn time is used"
+        done: { type: array, items: { $ref: '#/components/schemas/ItemId' } }
+        quarantined: { type: array, items: { $ref: '#/components/schemas/ItemId' } }
+    ReplaceResult:
+      type: object
+      required: [replaces, session_id, generation, cutoff, cutoff_source, done, quarantined]
+      properties:
+        replaces: { type: string, description: the burned instance }
+        session_id: { type: string, description: the replacement }
+        generation: { type: integer }
+        cutoff: { type: string, format: date-time }
+        cutoff_source: { type: string, enum: [evidence, burn_time] }
+        done: { type: array, items: { $ref: '#/components/schemas/ItemId' }, description: skip these }
+        quarantined: { type: array, items: { $ref: '#/components/schemas/ItemId' }, description: leave these for a person }

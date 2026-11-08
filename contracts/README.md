@@ -161,6 +161,8 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 team), `egress`, `credentials` (the narrowed credential types
 minted for the instance), `last_seen`, `exited_at`, `session_token_sha256` (the session token itself
 is returned once in the join reply and never stored; the supervisor never hands it to the agent).
+Replace on burn adds `progress` (one entry per task item, see below), `generation`, `replaces`,
+`replaced_by` and `replacement`.
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
 `burn-enroll-tokens` rows: `token_id`, `role`, `created_by` (the person who made the token, or null),
@@ -234,6 +236,18 @@ is returned once in the join reply and never stored; the supervisor never hands 
   `progress: {<item>: {"started_at", "done_at"}}`, at most `names.MAX_PROGRESS_ITEMS` = 500 items per
   instance. `done` without `started` counts as both at once; a repeat never moves a time. A broken rule is a
   400 naming it (never a 409, which means burned or exited). Reads show counts only.
+- **At burn time** (one instance of a role with `replace_on_burn`; never a role burn) Burn writes `replacement` on
+  the burned instance: `{status, cutoff, cutoff_source, done, quarantined}`. `cutoff` is the earliest evidence of
+  compromise on Burn's clock (`cutoff_source: evidence`: the blocked credential, canary use or refused call that
+  caused the burn, or for a burn by source this instance's first read of the source), else the burn time
+  (`cutoff_source: burn_time`). An item is `done` only if it was done before the cutoff; one in flight at the
+  cutoff or touched after it is `quarantined` for a person, never retried. `status` is `pending`, or
+  `needs_person` once the instance's `generation` reaches `names.MAX_REPLACEMENT_GENERATION` (3).
+- **The launcher** that started the instance (Burn never starts one, and never holds the task) joins a fresh
+  instance the normal way and calls `POST /instances/{old}/replace {"session_id": <new>}` with a person's token
+  (or the admin header before sign-in). One transaction links exactly one replacement: old `pending -> linked`
+  with `replaced_by`, new gets `replaces` and `generation` = old + 1. The reply's `done` and `quarantined` go
+  to the new agent as `BURN_RESUME`; it skips both and does the rest.
 
 ### Events
 - Build every event with `burn_contracts.events.make_event(...)`. It fills `event_id` and `ts`

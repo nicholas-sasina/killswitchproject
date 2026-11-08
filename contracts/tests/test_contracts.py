@@ -526,3 +526,53 @@ def test_progress_rides_on_the_heartbeat_and_a_broken_rule_is_not_a_409():
     assert "400" in op["responses"] and "409" in op["responses"]
     assert str(names.MAX_PROGRESS_ITEMS) in op["responses"]["400"]["description"]
     assert "Burn's clock" in op["description"]
+
+
+def test_replacement_names():
+    assert names.MAX_REPLACEMENT_GENERATION == 3  # at most 3 replacements per task, then a person decides
+    assert names.REPLACEMENT_STATUSES == ("pending", "linked", "needs_person")
+    assert names.CUTOFF_SOURCES == ("evidence", "burn_time")
+
+
+def _nullable_ref(prop, target):
+    return prop["allOf"] == [{"$ref": f"#/components/schemas/{target}"}] and prop["nullable"] is True
+
+
+def test_instances_show_their_replacement_links_and_progress_counts_only():
+    schemas = _api()["components"]["schemas"]
+    props = schemas["Instance"]["properties"]
+    assert props["generation"]["type"] == "integer" and props["generation"]["minimum"] == 0
+    for link in ("replaces", "replaced_by"):  # session ids, null when there is no link
+        assert props[link]["type"] == "string" and props[link]["nullable"] is True
+    assert _nullable_ref(props["replacement"], "Replacement")
+    assert props["items_done"]["type"] == props["items_started"]["type"] == "integer"
+    assert "progress" not in props  # list replies stay small: never the per-item map
+    replacement = schemas["Replacement"]
+    assert set(replacement["required"]) == {"status", "cutoff", "cutoff_source", "done", "quarantined"}
+    rprops = replacement["properties"]
+    assert tuple(rprops["status"]["enum"]) == names.REPLACEMENT_STATUSES
+    assert tuple(rprops["cutoff_source"]["enum"]) == names.CUTOFF_SOURCES
+    assert rprops["cutoff"]["format"] == "date-time"
+    for key in ("done", "quarantined"):
+        assert rprops[key]["items"] == {"$ref": "#/components/schemas/ItemId"}
+
+
+def test_the_replace_route_needs_a_person_and_documents_every_refusal():
+    api = _api()
+    assert api["paths"]["/instances/{session_id}"]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"] == {"$ref": "#/components/schemas/Instance"}
+    op = api["paths"]["/instances/{session_id}/replace"]["post"]
+    assert "security" not in op  # the global person (or, before sign-in, admin) requirement; never an instance
+    assert _schemes(api, op) == {"personBearer", "adminHeader"}
+    body = op["requestBody"]["content"]["application/json"]["schema"]
+    assert op["requestBody"]["required"] is True
+    assert body["required"] == ["session_id"] and body["additionalProperties"] is False
+    assert {"200", "400", "401", "404", "409"} <= set(op["responses"])
+    result = op["responses"]["200"]["content"]["application/json"]["schema"]
+    assert result == {"$ref": "#/components/schemas/ReplaceResult"}
+    required = set(api["components"]["schemas"]["ReplaceResult"]["required"])
+    assert {"replaces", "done", "quarantined", "cutoff"} <= required
+    assert "pending" in op["responses"]["409"]["description"]
+    for rule in ("same role", "active", "after", "already"):
+        assert rule in op["responses"]["400"]["description"], rule
+    assert "TransactWriteItems" in op["description"] or "exactly one" in op["description"]

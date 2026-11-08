@@ -200,3 +200,13 @@ RESUME_ENV = "BURN_RESUME"              # JSON {"done": [ids], "quarantined": [i
 def is_item_id(value) -> bool:
     # fullmatch: "$" alone would also accept a trailing newline.
     return isinstance(value, str) and bool(ITEM_ID_RE.fullmatch(value))
+
+
+# Replacements. When an instance of a role with replace_on_burn is burned (one instance, never the whole role), Burn
+# records a `replacement` on it: pending until its launcher links a fresh instance, then linked. Each replacement is
+# its predecessor's generation + 1; an instance at MAX_REPLACEMENT_GENERATION or above gets needs_person instead, so a
+# task is replaced at most this many times.
+MAX_REPLACEMENT_GENERATION = 3
+REPLACEMENT_STATUSES = ("pending", "linked", "needs_person")
+# Where the clean cut-off came from: the earliest evidence of compromise Burn has, or the burn time when it has none.
+CUTOFF_SOURCES = ("evidence", "burn_time")
