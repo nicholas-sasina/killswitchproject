@@ -162,6 +162,14 @@ The evaluation configuration audit counts the simulated-attacker sink as outside
 Custom Gateway/provider endpoints require owner verification rather than being declared safe
 from a hostname alone. A local configuration audit does not prove remote access controls.
 
+Before forwarding an allowed HTTPS request to the configured provider host, the proxy adds
+`x-burn-session-proof`, binding the authenticated session id and current timestamp to an HMAC
+made with the system fingerprint key. Agent-supplied copies are removed on every destination,
+and blocked requests receive no proof. The canary provider implementation uses this protocol
+to distinguish proxied traffic from outside use. The header is added after the exit check;
+it does not exempt canaries or other credentials from that check. Provider support must be
+deployed separately. Proxies never send the signing key to agents or upstream services.
+
 For a configuration without the simulated-attacker endpoint, explicitly set
 `BURN_SINK_URL=''`. This removes the sink from the allowlist and removes its private-address
 exception; it does not prove that the remaining services expose no outsider-readable

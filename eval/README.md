@@ -189,6 +189,9 @@ BURN_CANARY_PROBE_SOURCE=../.run/canary-source uv run --locked --python 3.12 --e
 
 Without the explicit source path, the optional canary-source tests skip. Unit-test success
 and measured handler behavior remain distinct from a deployed end-to-end check.
+The suite also checks the current proxy's signed session-origin header against the selected
+provider's verifier, including expiry, session tampering, and the wrong signing key. That
+protocol check requires a selected source containing `minter/lambdas/provider/session_proof.py`.
 
 The report defaults to this process's configured proxy endpoints. To audit an explicit
 configuration, create a private JSON file with exactly `gateway_url`, `provider_url`,

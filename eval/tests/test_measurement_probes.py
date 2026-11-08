@@ -1,5 +1,6 @@
 """Probe mechanics plus actual local-handler measurements (no deployed AWS)."""
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -13,6 +14,25 @@ from probes.__main__ import run_probe, write_private
 import layers
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_proxy_proof_matches_selected_provider_verifier():
+    source = os.getenv("BURN_CANARY_PROBE_SOURCE")
+    if not source:
+        pytest.skip("Set BURN_CANARY_PROBE_SOURCE to check the provider protocol")
+    from proxy.proof import HEADER, make_session_proof
+    path = Path(source) / "minter/lambdas/provider/session_proof.py"
+    spec = importlib.util.spec_from_file_location("selected_provider_proof", path)
+    provider = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(provider)
+    import secrets
+    key = secrets.token_bytes(32)
+    session = "sess.protocol.with.dots"
+    proof = make_session_proof(session, key, now=1000)
+    assert provider.verified_session({HEADER: proof}, key, now=1050) == session
+    assert provider.verified_session({HEADER: proof}, key, now=1201) is None
+    assert provider.verified_session({HEADER: proof.replace(session, "sess.someone.else")}, key, now=1050) is None
+    assert provider.verified_session({HEADER: proof}, secrets.token_bytes(32), now=1050) is None
 
 
 def test_actual_gateway_probe_records_provenance_and_exposure_without_values(tmp_path):

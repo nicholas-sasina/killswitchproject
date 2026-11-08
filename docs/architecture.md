@@ -83,6 +83,12 @@ inside the trust boundary and skip the body check: Bedrock (the model legitimate
 output in the conversation) and the Gateway (its interceptor checks arguments). A credential
 going to its own home service in its expected header is not a leak.
 
+Allowed HTTPS requests to the configured provider also receive a signed session-origin
+header after scanning. The proxy removes agent-supplied copies, then binds the authenticated
+session and timestamp to an HMAC using the system fingerprint key. The staged canary provider
+verifies that header to distinguish use through Burn from outside use. This protocol does not
+relax the exit check, and requires the matching provider implementation to be deployed.
+
 The proxy permits only exact configured destinations. Session `egress` lists can narrow the
 deployment allowlist, while missing or null lists retain legacy defaults. S3 is restricted to
 the demo's HTTPS `GET /` bucket-list operation without a query or body. The default configured

@@ -1,6 +1,8 @@
 import base64
 from dataclasses import dataclass, field
 import json
+import hashlib
+import hmac
 import secrets
 import socket
 from unittest.mock import patch
@@ -15,6 +17,7 @@ from burn_contracts.fingerprint import fingerprint
 from burn_detect import Scanner, SessionWindow
 from proxy.addon import BurnProxy
 from proxy.policy import ExitCheck, Settings, public_ip
+from proxy.proof import HEADER as PROOF_HEADER, make_session_proof
 from test_scanner import Generated, registered
 
 
@@ -318,3 +321,57 @@ def test_private_dns_destination_produces_blocked_event(setup):
         proxy._process(flow)
     assert json.loads(flow.response.content)["reason"] == "private_destination"
     assert state.events[-1]["action"] == "blocked"
+
+
+def test_provider_proof_binds_session_and_timestamp_to_hmac_key():
+    key = secrets.token_bytes(32)
+    session = "sess.with.dots:and-dashes"
+    proof = make_session_proof(session, key, now=1000.9)
+    expected = hmac.new(key, f"burn-session-proof:v1:{session}:1000".encode(), hashlib.sha256).hexdigest()
+    assert proof == f"v1.{session}.1000.{expected}"
+    assert make_session_proof(session + "x", key, now=1000) != proof
+
+
+@pytest.mark.parametrize("session", ["", "x" * 129, "sess\n", "sess/invalid", None])
+def test_invalid_provider_proof_session_fails_closed(session):
+    with pytest.raises(ValueError):
+        make_session_proof(session, secrets.token_bytes(32))
+
+
+@pytest.mark.parametrize("destination", ["provider", "sink", "gateway"])
+def test_only_authorized_provider_requests_get_fresh_proxy_proof(setup, destination):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = {"provider": settings.provider_url, "gateway": settings.gateway_url,
+                        "sink": settings.sink_url}[destination]
+    flow.request.headers.add(PROOF_HEADER, "agent-forged")
+    flow.request.headers.add("X-Burn-Session-Proof", "another-forged")
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow, headers_only=True)
+        assert PROOF_HEADER not in flow.request.headers
+        assert flow.response is None
+        with patch("proxy.proof.time.time", return_value=1000):
+            proxy._process(flow)
+    assert flow.response is None
+    if destination == "provider":
+        assert flow.request.headers.get_all(PROOF_HEADER) == [make_session_proof(state.session_id, scanner.key, now=1000)]
+    else:
+        assert PROOF_HEADER not in flow.request.headers
+    assert not state.events
+
+
+@pytest.mark.parametrize("active,leak", [(False, False), (True, True)])
+def test_refused_provider_requests_do_not_get_proof(setup, active, leak):
+    scanner, value, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent, active=active)
+    state.lookup = scanner.lookup
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state, value.encode() if leak else b"safe")
+    flow.request.url = settings.provider_url
+    flow.request.headers[PROOF_HEADER] = "forged"
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow)
+    assert flow.response.status_code == 403
+    assert PROOF_HEADER not in flow.request.headers

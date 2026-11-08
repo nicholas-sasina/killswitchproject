@@ -10,7 +10,8 @@ from mitmproxy import http
 
 from burn_contracts.names import is_agent_id
 from burn_detect import Scanner, SessionWindow
-from proxy.policy import ExitCheck, Settings, public_ip
+from proxy.policy import ExitCheck, Settings, host_of, public_ip
+from proxy.proof import HEADER as PROOF_HEADER, make_session_proof
 from proxy.state import AwsState
 
 
@@ -58,6 +59,9 @@ class BurnProxy:
     def _process(self, flow, connect=False, headers_only=False):
         with self.lock:
             try:
+                # Agent-supplied proofs never cross the trust boundary, including
+                # duplicates and requests to unrelated destinations.
+                flow.request.headers.pop(PROOF_HEADER, None)
                 self._initialize()
                 identity = self._identity(flow)
                 if not identity:
@@ -105,6 +109,8 @@ class BurnProxy:
                     agent_id=agent, window=self.windows[session], method=flow.request.method)
                 if decision.reason:
                     self._reply(flow, decision.reason, agent=agent, session=session, finding=decision.finding)
+                elif host == host_of(self.settings.provider_url) and flow.request.scheme == "https":
+                    flow.request.headers[PROOF_HEADER] = make_session_proof(session, self.checker.scanner.key)
             except Exception:
                 # Exceptions can embed a URL or body. Return only a constant, never a traceback.
                 flow.response = http.Response.make(403, b'{"blocked":true,"reason":"exit_check_unavailable"}',
