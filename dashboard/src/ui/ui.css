@@ -1,0 +1,688 @@
+/* The console's shared pieces. Values come from styles/tokens.css only.
+
+   Contrast: text on white uses --muted-2 (#71717a) at the quietest, never
+   --night-muted, which is under 3:1 on white. White text never sits on
+   --ember (3.6:1); ember fills that carry text use --ember-ink (5.9:1). */
+
+/* ---------- Mark ---------- */
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.mark-word {
+  font-weight: 800;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.mark-nav .mark-word {
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+
+.mark-sm {
+  gap: 6px;
+}
+
+.mark-sm .mark-word {
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.mark-dot {
+  color: var(--ember);
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--ink);
+  font: 600 14px/1 var(--font-sans);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+}
+
+.btn-sm {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* Ink on white: the primary action inside a card. */
+.btn-dark {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.btn-dark:hover:not(:disabled) {
+  background: var(--ink-soft);
+  border-color: var(--ink-soft);
+}
+
+/* White on night: the primary action on the stage. */
+.btn-white {
+  background: var(--paper);
+  border-color: var(--paper);
+  color: var(--ink);
+}
+
+.btn-white:hover:not(:disabled) {
+  background: var(--hairline);
+  border-color: var(--hairline);
+}
+
+/* Outlined on night. */
+.btn-ghost {
+  background: transparent;
+  border-color: var(--night-line);
+  color: var(--night-text);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--night-text);
+}
+
+/* Burn. Ember is only ever for burning. */
+.btn-ember {
+  background: var(--ember-ink);
+  border-color: var(--ember-ink);
+  color: var(--paper);
+}
+
+.btn-ember:hover:not(:disabled) {
+  border-color: var(--ember);
+  box-shadow: inset 0 0 0 1px var(--ember);
+}
+
+/* Burn, outlined on night ("Burn every worker"). */
+.btn-ghost-ember {
+  background: transparent;
+  border-color: var(--ember);
+  color: var(--ember);
+}
+
+.btn-ghost-ember:hover:not(:disabled) {
+  background: var(--ember-ink);
+  border-color: var(--ember-ink);
+  color: var(--paper);
+}
+
+/* A link that reads as text inside a card. */
+.text-link {
+  color: var(--ink);
+  font-weight: 600;
+  text-underline-offset: 3px;
+}
+
+.text-link:hover {
+  color: var(--ember-ink);
+}
+
+/* ---------- Card ---------- */
+
+.card {
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: var(--radius-console);
+  box-shadow: var(--shadow-stage);
+  min-width: 0;
+}
+
+.card-wide {
+  padding: 24px 28px 18px;
+}
+
+.card-narrow {
+  padding: 22px 24px 16px;
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+
+.card-head-rule {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.card-title {
+  margin: 0;
+  color: var(--ink);
+}
+
+.card-sub {
+  color: var(--muted-2);
+}
+
+.card-aside {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.card-note {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-2);
+}
+
+/* ---------- Hero (night) ---------- */
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  padding-block: 56px 40px;
+  color: var(--night-text);
+}
+
+.hero-main {
+  flex: 1 1 640px;
+  min-width: 0;
+  max-width: 760px;
+}
+
+.hero-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--night-muted);
+}
+
+.hero-crumbs li + li::before {
+  content: "/" / "";
+  margin-right: 10px;
+  color: var(--night-line);
+}
+
+.hero-crumbs a {
+  color: var(--night-muted);
+  text-decoration: none;
+}
+
+.hero-crumbs a:hover {
+  color: var(--night-text);
+}
+
+.hero-crumbs [aria-current="page"] {
+  color: var(--night-quiet);
+}
+
+.hero-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--night-muted);
+}
+
+.hero-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.hero-dot-ember {
+  background: var(--ember);
+}
+
+.hero-dot-quiet {
+  background: var(--night-line);
+}
+
+.hero-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-crumbs + .hero-heading,
+.hero-eyebrow + .hero-heading {
+  margin-top: 18px;
+}
+
+.hero-title {
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  color: var(--night-text);
+  text-wrap: balance;
+}
+
+.hero-line {
+  display: block;
+}
+
+.hero-lede {
+  margin-top: 20px;
+  max-width: 660px;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--night-muted);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.hero-stats {
+  display: flex;
+  gap: 40px;
+}
+
+.hero-stats dt {
+  color: var(--night-muted);
+}
+
+.hero-stats dd {
+  margin-top: 6px;
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--night-text);
+}
+
+.hero-stats-md {
+  gap: 32px;
+}
+
+.hero-stats-md dd {
+  font-size: 36px;
+}
+
+.hero-stats .is-ember {
+  color: var(--ember);
+}
+
+/* ---------- Pills ---------- */
+
+.pill {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill-neutral {
+  background: var(--hairline-soft);
+  color: var(--ink-soft);
+}
+
+.pill-flag {
+  background: var(--ember-tint);
+  color: var(--ember-ink);
+}
+
+.pill-burn {
+  background: var(--ember-ink);
+  color: var(--paper);
+}
+
+.pill-done {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* An agent's state on the night stage. */
+.status-pill {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--night-line);
+  white-space: nowrap;
+}
+
+.status-pill-running {
+  color: var(--night-quiet);
+}
+
+.status-pill-burned {
+  background: var(--ember-ink);
+  border-color: var(--ember);
+  color: var(--paper);
+}
+
+.status-pill-finished {
+  border-color: var(--night-dot);
+  color: var(--night-muted);
+}
+
+/* ---------- Squares ---------- */
+
+.square {
+  display: block;
+  flex: none;
+  border-radius: 4px;
+  border: 1.5px solid transparent;
+}
+
+.square-18 {
+  width: 18px;
+  height: 18px;
+}
+
+.square-14 {
+  width: 14px;
+  height: 14px;
+}
+
+.square-12 {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.square-running {
+  background: var(--night-raised);
+  border-color: var(--night-raised);
+}
+
+.square-burned {
+  background: var(--paper);
+  border-color: var(--ember);
+}
+
+.square-finished {
+  background: var(--hairline);
+  border-color: var(--hairline);
+}
+
+/* ---------- Dialog ---------- */
+
+.dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(16px, 18vh) 16px 16px;
+  overflow-y: auto;
+  background: var(--scrim);
+}
+
+.dialog {
+  padding: 26px 28px 24px;
+  outline: none;
+}
+
+.dialog-eyebrow {
+  color: var(--ember-ink);
+}
+
+.dialog-title {
+  margin-top: 8px;
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.dialog-body {
+  margin-top: 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+/* ---------- Filter ---------- */
+
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--hairline-soft);
+}
+
+.segmented button {
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 13px/1 var(--font-sans);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.segmented-count {
+  color: var(--muted-2);
+  font-weight: 500;
+}
+
+/* ---------- Tables ---------- */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  padding: 12px 12px 9px 0;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 11px 12px 11px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  vertical-align: middle;
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: 0;
+}
+
+.table .is-end {
+  text-align: right;
+}
+
+.table-sub {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+/* ---------- Facts, figures, chips ---------- */
+
+.facts-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.facts-row:last-child {
+  border-bottom: 0;
+}
+
+.facts dt {
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+.facts-row:has(.facts-note) dt .facts-label {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.facts-note {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.facts dd {
+  font-size: 13px;
+  font-weight: 500;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.figures {
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.figures-row {
+  display: flex;
+  min-height: 52px;
+}
+
+.figures-row .figure {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+}
+
+.figures-row .figure + .figure {
+  border-left: 1px solid var(--hairline);
+}
+
+.figures-grid {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+
+.figures-grid .figure {
+  padding: 14px 16px;
+  background: var(--surface);
+}
+
+.figure dt {
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.figure dd {
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.figures-grid .figure dd {
+  margin-top: 6px;
+}
+
+.figure .is-ember {
+  color: var(--ember-ink);
+}
+
+.chip {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--hairline-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* ---------- Empty and notices ---------- */
+
+.empty-state {
+  padding: 18px 0 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.empty-state-action {
+  margin-top: 12px;
+}
+
+.notice {
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.notice-info {
+  color: var(--muted);
+}
+
+.notice-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--hairline-soft);
+  color: var(--ink);
+}
+
+/* On the night stage. */
+.hero .notice-info,
+.page-notices .notice-info {
+  color: var(--night-muted);
+}
+
+.hero .notice-error,
+.page-notices .notice-error {
+  background: var(--night-raised);
+  color: var(--night-text);
+}
