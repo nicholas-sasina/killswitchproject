@@ -230,3 +230,150 @@
   line-height: 1.5;
   color: var(--muted-2);
 }
+
+/* ---------- Roles list: a row per role, as the Overview's Running now ---- */
+
+.roles-page {
+  padding-bottom: 64px;
+}
+
+.roles-page .roles-card {
+  padding-bottom: 12px;
+}
+
+.roles-page .roles-card .card-head-rule {
+  padding-bottom: 16px;
+}
+
+.roles-page .roles-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.roles-page .roles-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.roles-page .roles-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.roles-page .roles-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 150px;
+  align-items: start;
+  gap: 24px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.roles-page .roles-row-role {
+  min-width: 0;
+}
+
+.roles-page .roles-row-name {
+  display: block;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+/* The whole row opens the role. */
+.roles-page .roles-row-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.roles-page .roles-row-name:focus-visible {
+  outline: none;
+}
+
+.roles-page .roles-row:has(.roles-row-name:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.roles-page .roles-row:hover .roles-row-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.roles-page .roles-row-line {
+  display: block;
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+/* One line of squares sits level with the name; hundreds flow down. */
+.roles-page .roles-squares {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.roles-page .roles-row-counts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.roles-page .roles-row-running {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.roles-page .roles-row-note {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.roles-page .roles-row-note.is-ember {
+  color: var(--ember-ink);
+}
+
+.roles-page .roles-card .card-note {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.roles-page .roles-card .notice,
+.roles-page .roles-card .empty-state {
+  margin-top: 18px;
+}
+
+/* Narrow: name and counts on one line, the squares under them. */
+@media (max-width: 760px) {
+  .roles-page .roles-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 16px;
+  }
+
+  .roles-page .roles-squares {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-top: 0;
+  }
+
+  .roles-page .roles-squares:empty {
+    display: none;
+  }
+}
