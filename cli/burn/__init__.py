@@ -16,7 +16,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from burn_cli import config, retry
-from burn_cli.api import Api, ApiError
+from burn_cli.api import ApiError
+from burn_cli.runner.instance_api import InstanceApi
 
 __all__ = ["Session", "session", "spawn", "BurnError"]
 
@@ -34,11 +35,11 @@ class Session:
     credentials: list
 
 
-def _api() -> Api:
-    try:
-        return Api(*config.load())
-    except config.ConfigError as exc:
-        raise BurnError(str(exc)) from None
+def _api() -> InstanceApi:
+    url = config.get("BURN_API_URL")
+    if not url:
+        raise BurnError("BURN_API_URL not set. Export it or run `make env` to write .env.")
+    return InstanceApi(url)  # an instance authenticates as itself: no admin or person token
 
 
 @contextmanager
@@ -52,15 +53,16 @@ def session(role: str, token: str | None = None):
         raise BurnError("a join token is required: pass token= or set BURN_JOIN_TOKEN")
     api = _api()
     try:
-        r = retry.call(lambda: api.request("POST", "/sessions", {"role": role, "enroll_token": token}))
+        r = retry.call(lambda: api.join(role, token))
     except ApiError as exc:
         raise BurnError(str(exc)) from None
+    session_token = (r.get("secrets") or {}).get("session_token", "")  # kept here only, to end this session
     current = Session(r["session_id"], r["agent_id"], r.get("role", role), r["badge_ref"], r.get("credentials", []))
     try:
         yield current
     finally:
         try:
-            api.request("POST", f"/instances/{current.session_id}/exit")
+            api.exit(current.session_id, session_token)
         except ApiError:
             pass  # the instance may already be burned; the API times it out otherwise
 

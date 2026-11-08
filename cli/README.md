@@ -52,10 +52,13 @@ pbpaste | burn run --role worker --token-stdin -- python agent.py   # or read it
 burn env            # what an instance's environment would hold (values hidden; --show reveals the kept ones)
 ```
 `burn run` starts one instance:
-1. `POST /sessions {role, enroll_token}`, retrying 429, 5xx and network errors with exponential backoff and
+1. `POST /instances {role, enroll_token}` with no auth header (the join token is the authority), retrying 429, 5xx and network errors with exponential backoff and
    jitter (new IAM keys take seconds to work, and 20 parallel spawns hit rate limits).
 2. Takes the instance's own badge, AWS key and provider key from the `secrets` field of that reply, which the API
-   returns once. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
+   returns once, along with the instance's session token (`bst_...`). The session token authenticates the
+   supervisor's heartbeat, exit and spawn calls (`Authorization: Bearer ...`) and stays in the supervisor: never in
+   the agent's environment or any argv, and `burn run` refuses to pass on anything that looks like one. `burn run`
+   never uses or forwards the admin token (`BURN_DEMO_TOKEN`); it needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
    not a reason to look elsewhere. A child started with `burn.spawn` gets its values from its parent's reply and
    receives them in its supervisor's exec environment (`BURN_ADOPT_SECRETS`), never on a command line, where every
    user in the container could read them.

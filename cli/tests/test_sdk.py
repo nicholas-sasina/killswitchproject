@@ -15,12 +15,12 @@ def joined(fake, uses=1):
 def test_session_joins_retries_and_exits_cleanly(fake, monkeypatch):
     monkeypatch.setattr("time.sleep", lambda _: None)
     monkeypatch.setenv("BURN_JOIN_TOKEN", joined(fake))
-    fake.fail[("POST", "/sessions")] = [429]
+    fake.fail[("POST", "/instances")] = [429]
     with burn.session("worker") as me:
         assert me.agent_id.startswith("agent-worker-") and me.session_id in fake.instances
         assert fake.instances[me.session_id]["status"] == "active"
     assert fake.instances[me.session_id]["status"] == "exited"
-    assert len(fake.calls("POST", "/sessions")) == 2
+    assert len(fake.calls("POST", "/instances")) == 2
 
 
 def test_session_exits_even_when_the_body_raises(fake, monkeypatch):

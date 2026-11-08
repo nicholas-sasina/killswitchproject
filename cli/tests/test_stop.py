@@ -92,7 +92,7 @@ def test_no_spawn_once_the_instance_is_stopping(stack):
     inst._stopping.set()
     with pytest.raises(ApiError) as exc:
         inst.spawn_child("worker", ["true"])
-    assert exc.value.status == 409 and not stack.calls("POST", "/sessions")
+    assert exc.value.status == 409 and not stack.calls("POST", "/instances")
 
 
 def test_a_spawn_that_loses_the_race_with_shutdown_ends_its_session(stack):
@@ -100,11 +100,12 @@ def test_a_spawn_that_loses_the_race_with_shutdown_ends_its_session(stack):
     parent = stack.add_instance("sess_p", "worker")
     inst = instance(stack, py("pass"))
     inst.session = {"session_id": "sess_p", "agent_id": parent["agent_id"]}
+    inst._token = stack.session_tokens["sess_p"]
     original = stack.handle
 
     def stop_while_the_session_is_being_made(method, path, query, body):
         out = original(method, path, query, body)
-        if (method, path) == ("POST", "/sessions"):
+        if (method, path) == ("POST", "/instances"):
             inst._stopping.set()
         return out
 
@@ -115,11 +116,27 @@ def test_a_spawn_that_loses_the_race_with_shutdown_ends_its_session(stack):
     assert child["status"] == "exited" and inst._children == []
 
 
-def test_a_failure_during_setup_still_ends_the_session(stack):
+def test_a_reply_without_a_session_token_fails_clearly_and_makes_no_unauthenticated_exit_call(stack):
     from burn_cli.runner.credentials import MissingSecrets
-    stack.omit_secrets = True
-    with pytest.raises(MissingSecrets):
+    original = stack.handle
+
+    def without_token(method, path, query, body):
+        status, out = original(method, path, query, body)
+        if (method, path) == ("POST", "/instances") and status == 201:
+            out = {**out, "secrets": {k: v for k, v in out["secrets"].items() if k != "session_token"}}
+        return status, out
+
+    stack.handle = without_token
+    with pytest.raises(MissingSecrets, match="API too old: no session token in the join reply"):
         instance(stack, py("pass")).run()
+    assert not [r for r in stack.requests if r[1].endswith("/exit")]  # nothing to authenticate it with
+
+
+def test_a_failure_during_setup_still_ends_the_session(stack, monkeypatch):
+    inst = instance(stack, py("pass"))
+    monkeypatch.setattr("burn_cli.runner.run.child_env", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        inst.run()
     (row,) = stack.instances.values()
     assert row["status"] == "exited"
 
@@ -152,7 +169,7 @@ def test_spawn_never_puts_secrets_in_the_child_supervisors_argv(stack, monkeypat
 
     def with_secrets(method, path, query, body):
         status, out = original(method, path, query, body)
-        if (method, path) == ("POST", "/sessions") and status == 201:
+        if (method, path) == ("POST", "/instances") and status == 201:
             out = {**out, "secrets": secrets_field}
         return status, out
 
@@ -170,6 +187,7 @@ def test_spawn_never_puts_secrets_in_the_child_supervisors_argv(stack, monkeypat
     monkeypatch.setattr(runmod.subprocess, "Popen", Recorder)
     inst = instance(stack, py("pass"))
     inst.session = {"session_id": "sess_p", "agent_id": parent["agent_id"]}
+    inst._token = stack.session_tokens["sess_p"]
     result = inst.spawn_child("worker", ["true"])
     (argv,) = seen
     joined = " ".join(argv)
@@ -221,6 +239,6 @@ subprocess.run([sys.executable, "-c", {scan!r}])"""
     values = []
     for issued in stack.issued:
         values += [issued["badge"]["client_secret"], issued["api_key"], issued["aws_key"]["secret_access_key"],
-                   issued["aws_key"]["access_key_id"]]
+                   issued["aws_key"]["access_key_id"], issued["session_token"]]
     for value in values:
         assert value not in commandlines
