@@ -33,10 +33,12 @@ def _now() -> str:
 
 
 def end_session(session: dict, status: str = "revoked", idle_before: str | None = None) -> bool:
-    """Flip an active session to `revoked` (burned) or `exited` and delete its Cognito client.
+    """Flip an active session to `revoked` (burned) or `exited`, then drop its badge.
 
     The status flip is the real kill switch (the gateway checks it on every call).
-    Deleting the client only stops new tokens being issued. Returns False if the session
+    Deleting the Cognito client only stops new tokens being issued, and deleting
+    the stored badge secret after it only reclaims storage: see
+    _delete_badge_secret. Returns False if the session
     was no longer active (someone else ended it first), so an end is never recorded twice.
     With `idle_before`, the session also has to still be unseen since then (`last_seen` older), so
     a heartbeat that lands first wins over the idle sweep.
@@ -59,7 +61,35 @@ def end_session(session: dict, status: str = "revoked", idle_before: str | None 
         badges.delete_badge(session["client_id"])
     except Exception as exc:  # already ended in DynamoDB; a leftover client is harmless
         print(f"delete_badge failed for {session['session_id']}: {type(exc).__name__}")
+    _delete_badge_secret(session.get("agent_id"))
     return True
+
+
+def _delete_badge_secret(agent_id: str | None) -> None:
+    """Drop the stored badge now its session has ended.
+
+    Nothing a caller or an auditor reads is lost. The secret holds client_id,
+    which the session row keeps anyway; client_secret, which stopped working
+    the moment the Cognito client above was deleted; and a token url and scope
+    that are identical for every badge. The record of what happened is
+    untouched: the session row with its revoked_at or exited_at stamp, the
+    exposure ledger, the fingerprints (kept and marked rotated, so an old
+    value is still caught), and the canary.
+
+    Best effort, exactly like the client deletion above. The status flip is
+    what contains the agent, so a storage cleanup failure must never raise;
+    a later reset or `reset.py --orphans-only` picks up anything missed.
+
+    A session row always carries its agent id, but the guard below keeps this
+    a no-op rather than a crash for a caller holding only part of one.
+    """
+    if not agent_id:
+        return
+    try:
+        boto3.client("secretsmanager", region_name=names.REGION).delete_secret(
+            SecretId=names.agent_secret_ref(agent_id, "badge"), ForceDeleteWithoutRecovery=True)
+    except Exception as exc:
+        print(f"badge secret delete failed for {agent_id}: {type(exc).__name__}")
 
 
 def revoke_sessions(agent_id: str) -> list[str]:
@@ -346,7 +376,7 @@ def _recheck_after_write(agent_id, session_id, badge, token_id, parent_session):
         allowed = not tokens.get(token_id, consistent=True)["revoked"]
     if allowed:
         return
-    end_session({"session_id": session_id, "client_id": badge["client_id"]}, "revoked")
+    end_session({"session_id": session_id, "agent_id": agent_id, "client_id": badge["client_id"]}, "revoked")
     try:
         minter_client.call("DELETE", f"/agents/{agent_id}/credentials")
     except Exception as exc:
