@@ -1,16 +1,24 @@
 /**
- * Two views, addressed by hash so each is a real location: it survives a
+ * Three views, addressed by hash so each is a real location: it survives a
  * reload, can be bookmarked, and can be put on a second screen during a demo.
+ *
+ *   overview  what the agents are doing right now, and containment detail
+ *   fleet     roles, join tokens and instance lineage
+ *   alerts    only what needs an operator, worst first
+ *
+ * Splitting them keeps any one page from becoming a long stack of equally
+ * weighted panels, and means an unmounted view stops polling.
  *
  * Hash rather than history routing because the dashboard is served as static
  * files by Vite with no server-side rewrite, so a path like /alerts would
  * 404 on reload.
  *
- * Deliberately not a routing library. Two routes do not justify a dependency.
+ * Deliberately not a routing library. Three routes do not justify a
+ * dependency.
  */
 import { useEffect, useState } from "react";
 
-export const VIEWS = ["overview", "alerts"] as const;
+export const VIEWS = ["overview", "fleet", "alerts"] as const;
 export type View = (typeof VIEWS)[number];
 
 export function viewFromHash(hash: string): View {

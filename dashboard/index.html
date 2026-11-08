@@ -11,18 +11,15 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Burn · Agent containment</title>
     <script>
-      // Resolve the theme before first paint. Without this the page renders
-      // paper and then flips to ink once React mounts, which is a visible
-      // flash on every reload. Kept inline and tiny for that reason; the
-      // same logic lives in src/theme.ts for everything after mount.
+      // Resolve the system theme before first paint. Without this the page
+      // renders light and then flips to dark once React mounts, which is a
+      // visible flash on every reload. Kept inline and tiny for that reason;
+      // src/theme.ts owns everything after mount.
       (function () {
         try {
-          var stored = localStorage.getItem("burn.theme");
           var dark =
-            stored === "dark" ||
-            ((!stored || stored === "system") &&
-              window.matchMedia &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches);
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
           var theme = dark ? "dark" : "light";
           document.documentElement.dataset.theme = theme;
           document.documentElement.style.colorScheme = theme;
@@ -30,8 +27,7 @@
             .querySelector('meta[name="theme-color"]')
             .setAttribute("content", dark ? "#0d0b0a" : "#f1ede4");
         } catch (error) {
-          // Blocked storage or no matchMedia: the paper default already set
-          // on <html> stands.
+          // No matchMedia: the light default already on <html> stands.
         }
       })();
     </script>

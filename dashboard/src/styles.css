@@ -105,6 +105,16 @@
   --f-sans: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   --gutter: 3.6rem;
+  --radius: 4px;
+
+  /* Spacing scale. Deliberately uneven so the page has a rhythm instead of
+     one repeated gap: tight inside a group, wide between groups. */
+  --s-1: 6px;
+  --s-2: 10px;
+  --s-3: 16px;
+  --s-4: 22px;
+  --s-5: 32px;
+  --s-6: 48px;
 
   font-family: var(--f-sans);
   font-size: 16px;
@@ -190,27 +200,34 @@ h3 {
   color: var(--c-ink-3);
 }
 
-/* --- Shell --------------------------------------------------------------- */
+/* --- Shell ---------------------------------------------------------------
+   A persistent sidebar and a content column, the standard arrangement for a
+   console. It beats a top tab bar here: navigation stays visible without
+   competing with each view's own header, the connection state has a home
+   that is not the corner of a toolbar, and the content column gets the full
+   height for the dense data that is the point of the product.
+   ----------------------------------------------------------------------- */
 
-.app-shell {
-  max-width: 1860px;
-  margin: 0 auto;
-  padding: 0 clamp(16px, 2.2vw, 34px);
+.app-frame {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  min-height: 100dvh;
 }
 
-.site-header {
+.sidebar {
   display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 28px;
-  border-bottom: 1px solid var(--c-rule-bright);
-  min-height: 62px;
+  flex-direction: column;
+  gap: var(--s-5);
+  border-right: 1px solid var(--c-rule);
+  background: var(--c-module);
+  padding: var(--s-4) var(--s-4) var(--s-4);
+  position: sticky;
+  top: 0;
+  height: 100dvh;
 }
-.header-identity {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  min-width: 0;
+.sidebar-brand {
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--c-rule);
 }
 .brand {
   display: flex;
@@ -234,112 +251,99 @@ h3 {
 }
 .brand-word {
   font-family: var(--f-mono);
-  font-size: 1.1rem;
+  font-size: 1.06rem;
   font-weight: 700;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.26em;
   /* Optical correction for the trailing tracking. */
-  margin-right: -0.28em;
+  margin-right: -0.26em;
 }
-.tagline {
+
+/* Navigation items carry a hint line, so the label does not have to do all
+   the explaining and the list has some vertical texture. */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side-link {
+  display: block;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--radius);
+  border-left: 2px solid transparent;
+  text-decoration: none;
+  color: var(--c-ink-2);
+}
+.side-link:hover {
+  background: var(--c-sunken);
+  color: var(--c-ink);
+}
+.side-link[aria-current="page"] {
+  background: var(--c-sunken);
+  border-left-color: var(--c-ember);
+  color: var(--c-ink);
+}
+.side-label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
   font-family: var(--f-mono);
-  font-size: 0.72rem;
-  font-weight: 400;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--c-ink-3);
-  border-left: 1px solid var(--c-rule);
-  padding-left: 24px;
-  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
-.tagline span {
+/* Attention count as a mono figure, not a round badge. */
+.side-label b {
+  margin-left: auto;
+  font-family: var(--f-mono);
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--c-ember-text);
+}
+.side-hint {
+  display: block;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--c-ink-3);
+  margin-top: 1px;
+}
+.side-link[aria-current="page"] .side-hint {
   color: var(--c-ink-2);
 }
 
-/* Primary navigation: ruled tabs, the active one marked by an ember edge. */
-.view-nav {
-  display: flex;
-  align-items: stretch;
-  margin-left: 6px;
-}
-.view-tab {
-  background: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  padding: 0 16px;
-  font-family: var(--f-mono);
-  font-size: 0.74rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--c-ink-3);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-}
-.view-tab:hover {
-  color: var(--c-ink);
-}
-.view-tab[aria-current="page"] {
-  color: var(--c-ink);
-  border-bottom-color: var(--c-ember);
-}
-/* Attention count rides the tab as a mono figure, not a round badge. */
-.view-tab b {
-  font-weight: 700;
-  font-size: 0.74rem;
+.sidebar-foot .connection {
+  text-transform: none;
   letter-spacing: 0;
-  color: var(--c-ember-text);
+  font-size: 0.72rem;
+  align-items: flex-start;
 }
-.view-tab[data-quiet="true"] b {
+.sidebar-foot .connection > span {
+  margin-top: 0.34em;
+}
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--c-rule);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.sidebar-note {
+  font-size: 0.72rem;
+  line-height: 1.45;
   color: var(--c-ink-3);
-  font-weight: 500;
-}
-
-.header-status {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-.summary {
-  display: flex;
-  margin: 0;
-  gap: 20px;
-}
-.summary > div {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-.summary dt {
-  font-family: var(--f-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--c-ink-3);
-}
-.summary dd {
-  margin: 0;
-  order: -1;
-  font-family: var(--f-mono);
-  font-size: 1.2rem;
-  font-weight: 600;
-  line-height: 1.1;
-}
-.green-text {
-  color: var(--c-nominal);
 }
 
 /* Connection state: a 7px square, never a pulsing dot. */
 .connection {
   font-family: var(--f-mono);
   font-size: 0.68rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
+  line-height: 1.4;
 }
 .connection > span {
   width: 7px;
@@ -354,35 +358,118 @@ h3 {
   background: var(--c-ember);
 }
 
-/* Theme control: three ruled segments sharing hairlines. */
-.theme-switch {
-  display: flex;
-  border: 1px solid var(--c-rule-bright);
+.content {
+  min-width: 0;
+  padding: 0 clamp(18px, 2.4vw, 40px) var(--s-6);
 }
-.theme-option {
-  background: transparent;
-  border: 0;
-  border-left: 1px solid var(--c-rule-bright);
-  padding: 5px 9px;
-  font-family: var(--f-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--c-ink-3);
-}
-.theme-option:first-child {
-  border-left: 0;
-}
-.theme-option:hover {
-  color: var(--c-ink);
-}
-.theme-option[aria-pressed="true"] {
-  background: var(--c-ink);
-  color: var(--c-module);
+main {
+  padding: 0;
 }
 
-main {
-  padding: 22px 0 0;
+/* --- Page header ---------------------------------------------------------
+   What this view is, in a sentence, with its figures at display scale. The
+   rest of the page is dense ruled data; without an entry point like this it
+   reads as a schematic.
+   ----------------------------------------------------------------------- */
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-4) var(--s-6);
+  padding: var(--s-6) 0 var(--s-4);
+  margin-bottom: var(--s-5);
+  border-bottom: 1px solid var(--c-rule);
+}
+.page-head-text {
+  max-width: 62ch;
+  min-width: 0;
+}
+/* The one place the humanist sans runs at display size, which keeps it
+   distinct from the mono labels that mark data regions. */
+.page-head h2 {
+  font-family: var(--f-sans);
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+.page-head[data-attention="true"] h2::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--c-ember);
+  margin-left: 10px;
+  vertical-align: 0.32em;
+}
+.page-head-text p {
+  margin-top: var(--s-2);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--c-ink-2);
+}
+.page-figures {
+  display: flex;
+  margin: 0;
+  flex-wrap: wrap;
+  gap: var(--s-5);
+}
+.page-figures > div {
+  display: flex;
+  flex-direction: column;
+}
+.page-figures dd {
+  margin: 0;
+  /* Figure above label, while the markup keeps dt first. */
+  order: -1;
+  font-family: var(--f-mono);
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--c-ink);
+}
+.page-figures dt {
+  font-family: var(--f-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--c-ink-3);
+  margin-top: var(--s-1);
+}
+.page-figures > div[data-tone="nominal"] dd {
+  color: var(--c-nominal);
+}
+.page-figures > div[data-tone="ember"] dd {
+  color: var(--c-ember-text);
+}
+.page-figures > div[data-tone="caution"] dd {
+  color: var(--c-caution);
+}
+.page-head-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-2);
+}
+.page-meta {
+  font-family: var(--f-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-ink-3);
+  white-space: nowrap;
+}
+
+/* Two collapsed modules read as one group, so they sit closer together than
+   the gap between groups. */
+.forensics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
 }
 
 /* --- Modules ------------------------------------------------------------- */
@@ -391,6 +478,9 @@ main {
 .panel {
   background: var(--c-module);
   border: 1px solid var(--c-rule);
+  border-radius: var(--radius);
+  /* So heading strips and table headers follow the corner. */
+  overflow: hidden;
   min-width: 0;
 }
 .panel-heading {
@@ -567,6 +657,8 @@ main {
 }
 .agent-grid {
   display: grid;
+  border-radius: var(--radius);
+  overflow: hidden;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   /* Cards share hairlines instead of each drawing its own border. */
   gap: 1px;
@@ -578,7 +670,7 @@ main {
   flex-direction: column;
   min-width: 0;
   background: var(--c-module);
-  padding: 0 16px 14px;
+  padding: 0 var(--s-4) var(--s-4);
   position: relative;
 }
 .agent-card.selected {
@@ -601,7 +693,7 @@ main {
   background: none;
   border: 0;
   text-align: left;
-  padding: 14px 0 12px;
+  padding: var(--s-4) 0 var(--s-3);
 }
 .card-top {
   display: flex;
@@ -614,10 +706,10 @@ main {
 }
 .agent-card h2 {
   font-family: var(--f-mono);
-  font-size: 0.96rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  letter-spacing: -0.01em;
-  margin: 10px 0 12px;
+  letter-spacing: -0.02em;
+  margin: var(--s-3) 0 var(--s-4);
   overflow-wrap: anywhere;
 }
 .session {
@@ -642,10 +734,11 @@ main {
 }
 .exposure {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 8px;
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: var(--s-4);
+  padding-top: var(--s-3);
   border-top: 1px solid var(--c-rule);
 }
 .exposure > strong {
@@ -657,14 +750,15 @@ main {
 .exposure > span {
   font-family: var(--f-mono);
   font-size: 0.64rem;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--c-ink-3);
+  white-space: nowrap;
 }
 .exposure > .inspect {
-  margin-left: auto;
+  flex-basis: 100%;
+  margin-top: var(--s-2);
   color: var(--c-ink-2);
-  white-space: nowrap;
 }
 .agent-card > .burn-button {
   margin-top: auto;
@@ -705,6 +799,7 @@ main {
   font-family: var(--f-mono);
   font-size: 0.72rem;
   font-weight: 600;
+  border-radius: var(--radius);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   transition:
@@ -753,6 +848,7 @@ main {
   border: 1px solid var(--c-rule-bright);
   min-height: 34px;
   padding: 7px 14px;
+  border-radius: var(--radius);
   font-family: var(--f-mono);
   font-size: 0.72rem;
   font-weight: 500;
@@ -790,6 +886,7 @@ textarea {
   border: 1px solid var(--c-rule-bright);
   padding: 8px 10px;
   margin-top: 6px;
+  border-radius: var(--radius);
   font-family: var(--f-mono);
   font-size: 0.84rem;
   letter-spacing: 0;
@@ -803,15 +900,17 @@ input::placeholder {
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(370px, 0.85fr);
-  gap: 20px;
+  /* Asymmetric on purpose: the stream is a rail you glance at, not a second
+     equal column. */
+  grid-template-columns: minmax(0, 1.9fr) minmax(360px, 0.8fr);
+  gap: var(--s-6);
   align-items: start;
-  margin-bottom: 22px;
+  margin-bottom: var(--s-5);
 }
 .detail-column {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--s-6);
   min-width: 0;
 }
 
@@ -864,6 +963,8 @@ tbody tr:first-child td {
 
 /* --- Event stream -------------------------------------------------------- */
 
+/* A rail, not a third equal panel: recessed surface, no heavy frame, and it
+   stays put while the left column scrolls. */
 .feed-panel {
   position: sticky;
   top: 14px;
@@ -871,6 +972,10 @@ tbody tr:first-child td {
   flex-direction: column;
   height: calc(100dvh - 120px);
   min-height: 380px;
+  background: var(--c-sunken);
+}
+.feed-panel > .panel-heading {
+  background: transparent;
 }
 .feed-panel > .panel-heading,
 .feed-panel > .panel-footnote {
@@ -1026,6 +1131,8 @@ tbody tr:first-child td {
 /* Severity ribbon: counts by tier, reads like a control panel readout. */
 .alert-ribbon {
   display: grid;
+  border-radius: var(--radius);
+  overflow: hidden;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px;
   background: var(--c-rule);
@@ -1111,6 +1218,7 @@ tbody tr:first-child td {
   border: 1px solid var(--c-rule-bright);
   color: var(--c-ink-2);
   font-family: var(--f-mono);
+  border-radius: var(--radius);
   font-size: 0.7rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1397,9 +1505,10 @@ tbody tr:first-child td {
 /* --- Ledger -------------------------------------------------------------- */
 
 /* Scrollable while collapsed by default: the header carries the summary so a
-   closed ledger still reports what it found. */
+   closed ledger still reports what it found. Sized to show about seven of
+   these two-line rows before clamping, with the column header sticky. */
 .ledger-scroll {
-  max-height: 24rem;
+  max-height: 29rem;
   overflow: auto;
   scrollbar-color: var(--c-rule-bright) var(--c-module);
 }
@@ -1493,19 +1602,6 @@ tbody tr:first-child td {
   letter-spacing: 0.02em;
 }
 
-footer {
-  border-top: 1px solid var(--c-rule);
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  color: var(--c-ink-3);
-  font-family: var(--f-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 16px 0 22px;
-}
-
 /* --- Dialog -------------------------------------------------------------- */
 
 dialog {
@@ -1513,6 +1609,7 @@ dialog {
   width: calc(100% - 32px);
   border: 1px solid var(--c-rule-bright);
   border-top: 3px solid var(--c-ember);
+  border-radius: var(--radius);
   background: var(--c-module);
   color: var(--c-ink);
   padding: 26px 28px 24px;
@@ -1568,6 +1665,9 @@ dialog .error {
   }
 }
 @media (max-width: 1280px) {
+  .app-frame {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
   .workspace-grid {
     grid-template-columns: 1fr;
   }
@@ -1575,28 +1675,60 @@ dialog .error {
     position: static;
     height: 540px;
   }
-  .tagline {
-    display: none;
+  .page-head h2 {
+    font-size: 1.4rem;
   }
 }
-@media (max-width: 1000px) {
-  .site-header {
+/* Below this the sidebar stops being a column and becomes a bar across the
+   top, because 200px of chrome is too much of a narrow screen. */
+@media (max-width: 900px) {
+  .app-frame {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 0 20px;
+    gap: var(--s-3) var(--s-4);
+    border-right: 0;
+    border-bottom: 1px solid var(--c-rule);
+    padding: var(--s-3) clamp(18px, 2.4vw, 40px);
   }
-  .header-status {
-    gap: 16px;
-    padding: 10px 0;
+  .sidebar-brand {
+    padding-bottom: 0;
+    border-bottom: 0;
   }
-  .view-nav {
-    order: 3;
-    width: 100%;
-    margin-left: 0;
-    border-top: 1px solid var(--c-rule);
+  .side-nav {
+    flex-direction: row;
+    gap: var(--s-1);
   }
-  .view-tab {
-    padding: 10px 14px 8px 0;
-    margin-right: 16px;
+  .side-link {
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: var(--s-1) var(--s-2);
+  }
+  .side-link[aria-current="page"] {
+    border-left-color: transparent;
+    border-bottom-color: var(--c-ember);
+    background: transparent;
+  }
+  .side-hint {
+    display: none;
+  }
+  .sidebar-foot {
+    margin-top: 0;
+    margin-left: auto;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .sidebar-note {
+    display: none;
+  }
+  .page-head {
+    padding-top: var(--s-5);
   }
   .burn-outcome {
     grid-template-columns: 1fr 1fr;
@@ -1606,18 +1738,17 @@ dialog .error {
   }
 }
 @media (max-width: 680px) {
-  .header-identity {
-    gap: 14px;
-    padding: 10px 0;
-  }
-  .summary {
-    gap: 14px;
-  }
   .agent-grid {
     grid-template-columns: 1fr;
   }
   .burn-outcome {
     grid-template-columns: 1fr;
+  }
+  .page-figures {
+    gap: var(--s-4);
+  }
+  .page-figures dd {
+    font-size: 1.6rem;
   }
   .trail-row {
     grid-template-columns: 5rem minmax(0, 1fr);
@@ -1640,10 +1771,6 @@ dialog .error {
     flex-direction: column;
     gap: 1px;
     text-align: center;
-  }
-  footer {
-    flex-direction: column;
-    gap: 6px;
   }
   :root {
     --gutter: 3rem;

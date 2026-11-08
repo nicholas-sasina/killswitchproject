@@ -2,11 +2,14 @@
 
 ## What it does
 
-Two views, each a bookmarkable location.
+Three views in a sidebar, each a bookmarkable location.
 
 **Overview** (`#/overview`) shows live agent status, credential exposure and containment activity
 with agents and events side by side. Burn an agent and inspect its CloudTrail history alongside
 blocked events from real traffic.
+
+**Fleet** (`#/fleet`) holds roles, join tokens and instance lineage, so managing the swarm
+does not share a page with watching containment.
 
 **Alerts** (`#/alerts`) shows only the events that need an operator, most serious first, with what
 each one proves and what to do about it beside every field recorded for it. Severity reflects what
@@ -40,8 +43,11 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
   itself when a burned agent is selected.
 - CloudTrail groups calls by key so repetition collapses into one line with a count, and draws at
   most eight rows per group behind a "show all" control.
-- Theme is paper, ink, or follow-the-system, persisted in `localStorage` under `burn.theme`. An
-  inline script in `index.html` resolves it before first paint so reloads do not flash.
+- Theme follows the operating system's light or dark setting. There is no in-app switch: the
+  machine already knows, and it tracks sunset and policy without being asked. An inline script in
+  `index.html` resolves it before first paint so reloads do not flash, and a `matchMedia` listener
+  follows later changes.
+- An unmounted view stops polling, so sitting on Alerts issues no role or instance requests.
 - One roles request and one instances request refresh the entire role panel every five seconds,
   including the waiting view, with cancellation and no overlapping requests.
 - Confirming Burn highlights the card with returned rotation/flag counts for ten seconds; full references remain below the ledger.
@@ -112,9 +118,11 @@ stopped traffic without exposing agent credential values.
 The dashboard keeps polling every ten seconds and shows the API's lag note while waiting. If you
 collapsed the panel it is not polling at all; reopen it to resume.
 
-**Why does the interface look like paper?** Burn is an audit ledger with a kill switch, so it is
-built like an incident sheet rather than a console: ruled columns, hairline rules, monospace for
-anything you would compare or quote, and one signal colour. Ember means severity or destruction
+**Why does the interface look like this?** Burn is an audit ledger with a kill switch, so it is
+built like an incident sheet: ruled columns, hairline rules, monospace for anything you would
+compare or quote, and one signal colour. Navigation sits in a sidebar so it never competes with a
+view's own header, and each view opens with a title, a sentence and its figures rather than
+dropping straight into a dense table. Ember means severity or destruction
 and nothing else, so a filled ember control always deserves attention. Severity is written as
 well as coloured, which keeps it readable for colour-blind operators and on a washed-out
 projector. Both themes are audited to WCAG AA for text and 3:1 for control boundaries, so neither
