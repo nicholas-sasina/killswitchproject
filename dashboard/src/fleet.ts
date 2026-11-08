@@ -147,6 +147,10 @@ export interface ContainedAgent {
  * matched by session: one agent name can have several sessions, and each
  * keeps its own burn time rather than borrowing the latest one. A session
  * with no matching event in the stream loaded shows no time.
+ *
+ * An event that names no session (the local mock writes them so) matches
+ * by agent id, but only when that agent id has a single burned session, so
+ * no session borrows another's burn. Swarm agent ids are one per session.
  */
 export function containedFleet(
   fleet: FleetAgent[],
@@ -163,12 +167,20 @@ export function containedFleet(
     // Event ids sort by time, so the largest is the most recent revocation.
     if (!seen || event.event_id > seen.event_id) map.set(key, event);
   }
-  return fleet
-    .filter((entry) => entry.status === "revoked")
+  const burned = fleet.filter((entry) => entry.status === "revoked");
+  const sessionsPerAgent = new Map<string, number>();
+  for (const entry of burned)
+    sessionsPerAgent.set(
+      entry.agentId,
+      (sessionsPerAgent.get(entry.agentId) ?? 0) + 1,
+    );
+  return burned
     .map((entry) => {
-      const event = entry.sessionId
-        ? bySession.get(entry.sessionId)
-        : byAgent.get(entry.agentId);
+      const event =
+        (entry.sessionId ? bySession.get(entry.sessionId) : undefined) ??
+        (!entry.sessionId || sessionsPerAgent.get(entry.agentId) === 1
+          ? byAgent.get(entry.agentId)
+          : undefined);
       return {
         entry,
         revokedAt: event?.ts,

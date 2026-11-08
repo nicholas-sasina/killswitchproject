@@ -1,4 +1,5 @@
 export * from "./activity";
+export * from "./burns";
 export * from "./console";
 export * from "./incidents";
 export * from "./keys";
