@@ -5,6 +5,177 @@
 instances, burning an instance, a role, a lineage or a token) and inspects agents: ledger, blast radius and
 the event stream. It is the terminal twin of the dashboard. `import burn` is a small SDK for the code it runs.
 
+## Install
+```bash
+uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"
+burn --help
+```
+This needs [uv](https://docs.astral.sh/uv/) and no checkout; uv fetches Python 3.12 or later when the machine has none.
+To update, run the same command with `--reinstall`. Use uv rather than pip or pipx: `burn` depends on `burn-contracts`
+from the same repository, which uv finds through the CLI's `[tool.uv.sources]` and pip and pipx ignore. In a
+checkout, `make burn ARGS="..."` runs the same CLI.
+
+## Connect your agent
+`burn run` turns any command into a Burn instance. It joins with a join token, gives the command the instance's
+own credentials and a local MCP endpoint for its tools, and stops it when the instance is burned. Any harness that
+speaks MCP over HTTP works, with any model the instance's own AWS key can call.
+
+1. **Point `burn` at your stack.** Whoever runs it has these values (`make env` writes all but `BURN_PROXY_URL`, the
+   egress proxy's address, to the repository's `.env`). The dashboard's join commands set the first two for you:
+   ```bash
+   export BURN_API_URL=https://...           # the Burn API
+   export BURN_GATEWAY_URL=https://.../mcp   # the MCP Gateway your agents' tools come from
+   export BURN_PROXY_URL=http://...          # optional: the egress proxy
+   export BURN_PEOPLE_ENABLED=on BURN_PEOPLE_DOMAIN=... BURN_PEOPLE_CLIENT_ID=...   # sign-in
+   ```
+   Without `BURN_PEOPLE_ENABLED=on`, `burn` asks AWS whether the stack requires sign-in. With no AWS access it
+   assumes not, and then asks for a `BURN_DEMO_TOKEN` you should not have.
+2. **Sign in** with `burn login`.
+3. **Make a role**, in the dashboard or in code: `burn init` writes a starter `burn.yaml`, which you edit and
+   `burn apply`. A role sets an instance's tools, credentials and egress. For a model on Bedrock, give it an AWS
+   key and, behind the egress proxy, the Bedrock endpoint:
+   ```yaml
+   version: 1
+   roles:
+     - name: coder
+       owner: my-team
+       tools: [read_ticket, notify]
+       credentials: [api_key, aws_key]
+       egress: [bedrock-runtime.us-east-1.amazonaws.com]
+   ```
+4. **Get a join token**, in the dashboard or with `burn token create coder --uses 1 --ttl 3600`. It is shown once.
+5. **Run your agent:**
+   ```bash
+   read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN    # paste the token; nothing lands in shell history
+   burn run --role coder -- <any command>
+   ```
+
+### What your agent gets
+| Variable | What |
+|---|---|
+| `BURN_MCP_URL` | Burn's tools: MCP over streamable HTTP, on 127.0.0.1 |
+| `BURN_LOCAL_TOKEN` | The bearer the local endpoints require |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | The instance's own AWS key, when the role has `aws_key` |
+| `BURN_API_KEY` | The instance's own provider key, when the role has `api_key` |
+| `BURN_SPAWN_URL`, `BURN_PROGRESS_URL` | Start a child instance; report task progress (see [`burn run`](#burn-run)) |
+| `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE` | Who it is |
+| `BURN_TASK`, `BURN_RESUME` | Its task and where to resume, when a launcher sets them |
+
+Nothing else from your environment reaches it except an allow-list: `PATH`, locale and terminal settings, `TMPDIR`,
+`AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables. Its `HOME` is a new, empty directory. `burn env`
+names everything that would be removed.
+
+### Connect your harness
+Every harness connects the same way: MCP over streamable HTTP at `$BURN_MCP_URL`, sending
+`Authorization: Bearer $BURN_LOCAL_TOKEN`. `burn run` swaps that bearer for the instance's badge token on the way to
+the Gateway, so the agent never holds the badge.
+
+**Claude Code**: a `.mcp.json` in the directory it runs in. Claude Code expands `${VAR}` in `url` and `headers`.
+```json
+{
+  "mcpServers": {
+    "burn": {
+      "type": "http",
+      "url": "${BURN_MCP_URL}",
+      "headers": { "Authorization": "Bearer ${BURN_LOCAL_TOKEN}" }
+    }
+  }
+}
+```
+`claude -p` loads it at once, but under `burn run` it starts with no settings, so it is denied every call to Burn's
+tools unless you allow them: add `--allowedTools mcp__burn` after the prompt (the flag takes a list, so it would
+read a prompt placed after it as a tool name). An interactive session asks you to approve the server first, on every
+run, because `HOME` is new each time.
+
+**Codex CLI**: `config.toml` does not expand variables, so pass the server on the command line, through a shell
+that does:
+```bash
+burn run --role coder -- sh -c 'exec codex -c mcp_servers.burn.url="$BURN_MCP_URL" -c mcp_servers.burn.bearer_token_env_var=BURN_LOCAL_TOKEN'
+```
+This gives Codex Burn's tools but not a model: under `burn run` its sign-in and `OPENAI_API_KEY` do not reach it.
+
+**OpenAI Agents SDK** (`pip install "openai-agents[litellm]"`):
+```python
+import asyncio, os
+from agents import Agent, Runner, set_tracing_disabled
+from agents.extensions.models.litellm_model import LitellmModel
+from agents.mcp import MCPServerStreamableHttp
+
+set_tracing_disabled(True)  # traces are uploaded to OpenAI, which needs an OpenAI key
+
+
+async def main():
+    async with MCPServerStreamableHttp(name="burn", client_session_timeout_seconds=30, params={
+        "url": os.environ["BURN_MCP_URL"],
+        "headers": {"Authorization": f"Bearer {os.environ['BURN_LOCAL_TOKEN']}"},
+    }) as burn:  # the default timeout, 5 s, can be short for a call that goes on to the Gateway
+        agent = Agent(name="coder", mcp_servers=[burn],
+                      model=LitellmModel("bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"))
+        print((await Runner.run(agent, "Summarise ticket T-1")).final_output)
+
+asyncio.run(main())
+```
+
+**LangChain and LangGraph** (`pip install "langchain[mcp]" langchain-aws`). `create_agent` builds a LangGraph
+graph, and `langchain[mcp]` installs the MCP client, `langchain.mcp`.
+```python
+import asyncio, os
+from langchain.agents import create_agent
+from langchain.mcp import MCPAdapter
+from langchain_aws import ChatBedrockConverse
+
+
+async def main():
+    burn = MCPAdapter({"mcpServers": {"burn": {
+        "url": os.environ["BURN_MCP_URL"],
+        "headers": {"Authorization": f"Bearer {os.environ['BURN_LOCAL_TOKEN']}"},
+    }}})
+    model = ChatBedrockConverse(model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0", region_name="us-east-1")
+    agent = create_agent(model, await burn.list_tools())
+    result = await agent.ainvoke({"messages": "Summarise ticket T-1"})
+    print(result["messages"][-1].content)
+
+asyncio.run(main())
+```
+
+**Strands Agents** (`pip install strands-agents`):
+```python
+import os
+from strands import Agent
+from strands.models import BedrockModel
+from strands.tools.mcp import MCPClient
+
+burn = MCPClient(url=os.environ["BURN_MCP_URL"],
+                 headers={"Authorization": f"Bearer {os.environ['BURN_LOCAL_TOKEN']}"})
+with burn:
+    model = BedrockModel(model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0", region_name="us-east-1")
+    Agent(model=model, tools=burn.list_tools_sync())("Summarise ticket T-1")
+```
+
+### Models
+The instance's own AWS key calls Bedrock, so every harness above can use it, and burning the instance cuts it off
+from the model as well as its tools. That key may call only the models the stack allows: this repository's stack
+allows Claude Haiku 4.5, `us.anthropic.claude-haiku-4-5-20251001-v1:0`, in us-east-1.
+
+`burn run` strips the environment, so set non-secret settings inside the command:
+```bash
+burn run --role coder -- env CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1 \
+  ANTHROPIC_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0 claude -p "Summarise ticket T-1" --allowedTools mcp__burn
+burn run --role coder -- env AWS_REGION_NAME=us-east-1 python agent.py   # LiteLLM, for the Agents SDK
+```
+Other providers' keys, such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, are removed like any other secret, and
+`burn run` has no way to pass one through. Codex connects to Burn's tools as above, but a model for it is not
+covered here: its sign-in and `OPENAI_API_KEY` do not reach it.
+
+### Containment
+On a laptop `burn run` is not root, so the agent runs as you. It can read your files, your `burn login` session in
+`~/.config/burn` and `burn run`'s own environment. The new `HOME` only stops tools finding things by accident.
+Real isolation takes two things:
+- a container or a separate user: run `burn run` as root, for example as a container's PID 1, and each agent
+  runs under a uid of its own (see [who the agent runs as](#burn-run));
+- the network rule that gives agents no route out except the egress proxy. `HTTPS_PROXY` alone is a convenience
+  that a process can ignore.
+
 ## How it works
 - `argparse` + `urllib` for the API client; PyYAML and jsonschema for `burn.yaml`.
 - `BURN_API_URL` comes from the environment, else from the repo-root `.env` (`make env`).
@@ -174,6 +345,9 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
 - **Can I sign in on a machine without a browser?** `burn login` prints the sign-in address when it cannot open
   a browser. The reply comes back to `localhost:8976`, so open it on the same machine (or forward that port).
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
+- **Why can't my agent use my `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`?** `burn run` passes on only an allow-list of
+  your environment, and a provider key is a secret like any other. A key the agent took from your shell would
+  outlive a burn; the instance's own AWS key does not. Use Bedrock with that key (see [Models](#models)).
 - **What is task progress for?** When an instance of a role with "replace on burn" is burned, its launcher starts
   a clean replacement, which skips the items finished before the breach. Progress is how Burn knows which those
   are: the agent posts item ids to `BURN_PROGRESS_URL` and they reach Burn with the next heartbeat, stamped with
