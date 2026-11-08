@@ -18,6 +18,7 @@ import {
   createPulseBus,
   incidentCounts,
   incidents,
+  shortTime,
 } from "../../model";
 import { OverviewPage } from "./OverviewPage";
 
@@ -301,6 +302,58 @@ describe("the Overview", () => {
     expect(
       within(decide).getByRole("button", { name: "Rotate crm_db_url" }),
     ).toBeTruthy();
+  });
+
+  it("dates a role burn from its revoked events, which name no session", () => {
+    // POST /burns revokes the sessions first, so each agent's revoked event
+    // carries no session_id (burn_api burn.py). Their last calls were
+    // yesterday: only the events can say they were burned today.
+    const yesterday = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+    const reason = "worker role burned from the console";
+    const at = today(0, 42);
+    show(
+      data({
+        instances: [
+          ...workers(2),
+          instance("w3", "worker", "revoked", { last_seen: yesterday }),
+          instance("w4", "worker", "revoked", { last_seen: yesterday }),
+        ],
+        events: ["w3", "w4"].map((session) =>
+          event({
+            ts: at,
+            agent_id: `agent-worker-${session}`,
+            session_id: null,
+            source: "burn",
+            action: "revoked",
+            detail: `0 session(s) revoked (${reason})`,
+          }),
+        ),
+      }),
+    );
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "2 agents were burned today.The other 2 kept working.",
+    );
+    const stats = document.querySelector("dl.hero-stats") as HTMLElement;
+    expect(stats.textContent).toContain("Burned today2");
+    expect(screen.getByText(`Incident 02 / ${shortTime(at)}`)).toBeTruthy();
+    const worker = screen.getByRole("group", { name: /^worker agents/ });
+    expect(worker.getAttribute("aria-label")).toBe(
+      "worker agents: 2 running, 2 burned today",
+    );
+    expect(
+      within(worker).getByRole("link", {
+        name: `worker-03, burned at ${shortTime(at)}`,
+      }),
+    ).toBeTruthy();
+    const rows = within(card("Burned today")).getAllByRole("link", {
+      name: /^worker-0[34]/,
+    });
+    expect(
+      rows.map((row) => row.querySelector(".ov-burned-why")?.textContent),
+    ).toEqual([
+      `worker, ${shortTime(at)}. Burned: ${reason}`,
+      `worker, ${shortTime(at)}. Burned: ${reason}`,
+    ]);
   });
 
   it("sends Register it to Add agents and keeps Ignore in this browser", () => {
