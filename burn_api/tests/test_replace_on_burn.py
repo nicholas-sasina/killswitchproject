@@ -50,8 +50,13 @@ def replacement_of(env, session_id):
     return session_row(env, session_id).get("replacement")
 
 
-def add_event(env, agent_id, session_id, action, ts, source="gateway"):
-    event = make_event(agent_id=agent_id, source=source, action=action, session_id=session_id) | {"ts": ts}
+def add_event(env, agent_id, session_id, action, ts, source="gateway", **fields):
+    """An event as the Gateway or egress proxy writes it. A blocked event that stopped a credential names it
+    (here the instance's own key, which a burn rotates rather than flags)."""
+    if action == "blocked" and not fields.get("policy_only"):
+        fields = {"secret_ref": f"burn/{agent_id}/api_key", "secret_type": "api_key", "owner": "agent"} | fields
+    fields.pop("policy_only", None)
+    event = make_event(agent_id=agent_id, source=source, action=action, session_id=session_id, **fields) | {"ts": ts}
     env.ddb.Table("burn-events").put_item(Item={"stream": names.EVENTS_STREAM, **event})
 
 
@@ -203,6 +208,24 @@ def test_a_blocked_call_before_the_burn_is_the_cutoff(env):
     record = replacement_of(env, inst["session_id"])
     assert (record["cutoff"], record["cutoff_source"]) == ("2026-11-07T20:00:00.000Z", "evidence")
     assert (record["done"], record["quarantined"]) == (["before"], ["after"])
+
+
+def test_a_blocked_policy_denial_is_not_evidence_but_a_blocked_credential_is(env):
+    """Most blocked events are policy denials (destination not allowed, payload too large, ...) with no credential
+    in them; one harmless denied request must not quarantine everything after it."""
+    replacing_role(env)
+    denied, leaked, fingerprinted = instances(env, 3)
+    add_event(env, denied["agent_id"], denied["session_id"], "blocked", EARLY, source="egress", policy_only=True,
+              detail="destination_not_allowed")
+    add_event(env, leaked["agent_id"], leaked["session_id"], "blocked", EARLY, source="egress")
+    add_event(env, fingerprinted["agent_id"], fingerprinted["session_id"], "blocked", EARLY, source="egress",
+              secret_ref=None, fingerprint="b" * 64)  # a credential of unknown format: fingerprint only
+    for inst in (denied, leaked, fingerprinted):
+        burn_instance(env, inst["session_id"])
+    assert replacement_of(env, denied["session_id"])["cutoff_source"] == "burn_time"
+    for inst in (leaked, fingerprinted):
+        assert (replacement_of(env, inst["session_id"])["cutoff"],
+                replacement_of(env, inst["session_id"])["cutoff_source"]) == (EARLY, "evidence")
 
 
 def test_a_refused_call_before_the_burn_is_the_cutoff(env):

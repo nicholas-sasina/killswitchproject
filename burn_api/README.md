@@ -73,9 +73,9 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
 - **Replace on burn.** When one instance of a role with `replace_on_burn` is burned (`POST /burns` scope
   `instance`, a burn by source, or a canary burn), Burn writes `replacement` on its session after the
   revoke and rotation: `pending`, or `needs_person` once the instance is the third replacement in a row.
-  `cutoff` is the earliest evidence of compromise on Burn's clock: the canary use, a blocked or refused
-  call, or for a burn by source the instance's first read of that source (`cutoff_source: evidence`);
-  otherwise the burn time (`burn_time`). Items reported done before the cutoff are `done`; everything else
+  `cutoff` is the earliest evidence of compromise on Burn's clock: the canary use, a blocked credential
+  (not a plain policy denial), a refused call, or for a burn by source the instance's first read of that
+  source (`cutoff_source: evidence`); otherwise the burn time (`burn_time`). Items reported done before the cutoff are `done`; everything else
   the instance started is `quarantined`. A role, lineage or token burn, and `POST /burn {agent_id}`, never
   write one. Its launcher reads it and starts the replacement; Burn never starts anything.
 - **The 29 s API limit.** A burn is a few DynamoDB calls plus one minter call (IAM key rotation). With 10

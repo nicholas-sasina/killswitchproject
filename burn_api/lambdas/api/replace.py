@@ -7,8 +7,9 @@ and links it with POST /instances/{old}/replace. Burn never starts anything itse
 
 - cutoff: the earliest evidence of compromise on Burn's clock (cutoff_source "evidence"): the evidence the burn
   path passed (a canary incident's arrival, or for a burn by source this instance's first read of the source),
-  or a blocked call, refused call or canary use recorded against this session. With none before the burn, the
-  burn time (cutoff_source "burn_time").
+  or a blocked credential, refused call or canary use recorded against this session. With none before the burn,
+  the burn time (cutoff_source "burn_time"). A policy denial (a blocked request that carried no credential) is no
+  evidence: one harmless denied request would otherwise quarantine everything after it.
 - done / quarantined: burn_contracts.progress.classify. Only items done before the cutoff are trusted.
 - status: pending, or needs_person once the instance's generation reaches names.MAX_REPLACEMENT_GENERATION.
 
@@ -82,13 +83,19 @@ def _replaces_on_burn(role: str | None) -> bool:
     return item.get("replace_on_burn") is True
 
 
+def _carried_credential(event: dict) -> bool:
+    """A blocked event that stopped a credential leaving (it names one), not a policy denial."""
+    return event.get("action") != "blocked" or bool(event.get("secret_ref") or event.get("fingerprint"))
+
+
 def _evidence(agent_id: str, session_id: str) -> list[str]:
-    """Times of blocked calls, refused calls and canary uses recorded for this session (each instance has its
-    own agent id; a scenario agent's other sessions are left out)."""
+    """Times of blocked credentials, refused calls and canary uses recorded for this session (each instance has
+    its own agent id; a scenario agent's other sessions are left out)."""
     rows = db.query_all(db.table(names.EVENTS_TABLE), IndexName="by_agent",
                         KeyConditionExpression=Key("agent_id").eq(agent_id),
                         FilterExpression=Attr("action").is_in(list(EVIDENCE_ACTIONS)))
-    return [r["ts"] for r in rows if r.get("ts") and r.get("session_id") in (None, session_id)]
+    return [r["ts"] for r in rows
+            if r.get("ts") and r.get("session_id") in (None, session_id) and _carried_credential(r)]
 
 
 def _iso(moment: datetime) -> str:
