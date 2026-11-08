@@ -315,7 +315,7 @@ def test_fragments_below_the_threshold_are_not_recognized_and_pass(aws):
     assert delivered(body) == f"note: {value[:30]} end" and ledger_rows(aws, "agent-alpha") == {}
 
 
-# ---- resolving references in tool arguments (step 4) -----------------------------------------
+# ---- resolving references in tool arguments -------------------------------------------------
 
 def call_with(session, tool, arguments):
     from conftest import request_event
@@ -363,6 +363,48 @@ def test_other_references_are_refused(aws, accepts_refs, ref):
     session = put_session(aws, tools=("query_customers",))
     status, text = call_with(session, "query_customers", {"query": "{{burn:ref:" + ref + "}}"})
     assert status == "refused" and "reference not allowed" in text
+
+
+def test_a_reference_received_in_a_message_is_not_resolved(aws, accepts_refs):
+    sender = put_session(aws, tools=("query_customers", "read_config"))
+    shared, _ = register_connection_string(aws)
+    store_secret("burn/shared/crm_db_url", shared)
+    respond(sender, f"DB={shared}")
+    exit_check.inherit(sender, "agent-beta", "Root=1-h#1")  # agent-beta got a message from agent-alpha
+    receiver = put_session(aws, agent_id="agent-beta", tools=("query_customers",))
+    status, text = call_with(receiver, "query_customers", {"query": "{{burn:ref:burn/shared/crm_db_url}}"})
+    assert status == "refused" and "reference not allowed" in text
+
+
+def test_a_reference_to_a_rotated_version_is_not_resolved(aws, accepts_refs):
+    session = put_session(aws, tools=("query_customers", "read_config"))
+    shared, _ = register_connection_string(aws)
+    store_secret("burn/shared/crm_db_url", shared)
+    respond(session, f"DB={shared}")
+    table = aws.Table("burn-fingerprints")
+    for row in table.scan()["Items"]:  # what the minter does on rotation: the old version's rows are kept, as rotated
+        if row.get("secret_ref") == "burn/shared/crm_db_url":
+            table.put_item(Item={**row, "status": "rotated"})
+    bump_version(aws)
+    status, text = call_with(session, "query_customers", {"query": "{{burn:ref:burn/shared/crm_db_url}}"})
+    assert status == "refused" and "reference not allowed" in text
+
+
+def test_a_credential_that_cannot_be_read_refuses_the_call(aws, accepts_refs):
+    session = put_session(aws, tools=("query_customers",))  # own key, but no secret stored
+    status, text = call_with(session, "query_customers", {"query": "{{burn:ref:burn/agent-alpha/api_key}}"})
+    assert status == "refused" and "credential unavailable" in text
+
+
+def test_a_failing_check_refuses_the_call(aws, accepts_refs, monkeypatch):
+    import resolve
+    session = put_session(aws, tools=("query_customers",))
+
+    def denied(*args, **kwargs):
+        raise RuntimeError("AccessDenied")
+    monkeypatch.setattr(resolve._exposures(), "query", denied)
+    status, text = call_with(session, "query_customers", {"query": "{{burn:ref:burn/shared/crm_db_url}}"})
+    assert status == "refused" and "could not be checked" in text
 
 
 def test_send_message_never_resolves_even_if_declared(aws, accepts_refs):
