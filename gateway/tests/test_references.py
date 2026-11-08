@@ -193,6 +193,22 @@ def test_seen_wins_once_plaintext_reached_the_agent(aws):
     assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["status"] == "seen"
 
 
+def test_a_row_without_a_status_is_never_turned_into_referenced(aws):
+    """Rows from before statuses existed recorded plaintext; a later replaced read must not hide them from a burn."""
+    value = register_api_key(aws)
+    aws.Table("burn-exposures").put_item(Item={
+        "agent_id": "agent-alpha", "secret_ref_or_fp": "burn/agent-alpha/api_key", "secret_ref": "burn/agent-alpha/api_key",
+        "fingerprint": "f" * 64, "source": "tool_response", "via": "read_config", "first_seen": "2026-11-07T00:00:00.000Z",
+        "last_seen": "2026-11-07T00:00:00.000Z", "seen_in": {"Root=1-old#1"}})
+    session = put_session(aws)
+    body = respond(session, f"KEY={value}")
+    assert value not in delivered(body)  # the agent still only gets the reference
+    row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
+    assert row["status"] == "seen" and "Root=1-a#1" in row["seen_in"]
+    respond(session, f"KEY={value}")  # a retry of the same call changes nothing
+    assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["seen_in"] == {"Root=1-old#1", "Root=1-a#1"}
+
+
 # ---- source_ref and handoff ------------------------------------------------------------------
 
 def test_source_ref_comes_from_the_tools_resource_argument(aws):
