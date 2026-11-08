@@ -36,6 +36,7 @@ def main():
         ("BURN_GATEWAY_URL", "/burn/gateway/url"),
         ("BURN_PROVIDER_URL", "/burn/provider/url"),
         ("BURN_COGNITO_TOKEN_URL", "/burn/identity/token-url"),
+        ("BURN_API_URL", "/burn/api/url"),  # instances' heartbeats and exit reports
     ):
         if os.environ.get(variable):
             values[variable] = os.environ[variable]
