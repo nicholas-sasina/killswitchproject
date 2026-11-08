@@ -19,6 +19,7 @@ from burn_infra.gateway import BurnGatewayStack
 from burn_infra.identity import BurnIdentityStack
 from burn_infra.minter import BurnMinterStack
 from burn_infra.people import BurnPeopleStack
+from burn_infra.site import BurnSiteStack
 
 app = cdk.App()
 # Account comes from the caller's credentials at deploy time; it is never
@@ -34,6 +35,7 @@ people = BurnPeopleStack(app, "BurnPeople", env=env)  # Cognito people (sign-in)
 api = BurnApiStack(app, "BurnApi", env=env)      # Burn API
 if app.node.try_get_context("burn:people_auth") == "on":
     api.add_stack_dependency(people)  # deploy order only: with sign-in on, the API reads the people values from SSM
+BurnSiteStack(app, "BurnSite", env=env)          # public website (S3 + CloudFront)
 
 for stack in app.node.children:
     if isinstance(stack, cdk.Stack):

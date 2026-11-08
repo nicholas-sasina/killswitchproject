@@ -674,3 +674,7 @@ def test_the_cutoff_compares_times_not_strings():
 def test_a_burned_instance_learns_it_before_its_body_is_checked():
     description = _api()["paths"]["/instances/{session_id}/heartbeat"]["post"]["description"]
     assert "404, then 409, then 400" in description
+
+
+def test_site_names():
+    assert names.SITE_URL_PARAM == "/burn/site/url"

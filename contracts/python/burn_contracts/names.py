@@ -73,6 +73,9 @@ CLI_LOOPBACK_PORT = 8976
 CLI_REDIRECT_URI = f"http://localhost:{CLI_LOOPBACK_PORT}/callback"
 DASHBOARD_REDIRECT_URI = "http://localhost:5173/"
 
+# The public website (the BurnSite stack) publishes its address, https://<distribution domain>, here.
+SITE_URL_PARAM = "/burn/site/url"
+
 # Header mock servers add so the dashboard can show a MOCK banner.
 MOCK_HEADER = "x-burn-mock"
 
