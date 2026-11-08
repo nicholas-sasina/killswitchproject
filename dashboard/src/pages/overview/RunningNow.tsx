@@ -115,7 +115,7 @@ export function RunningNow({
         <div className="ov-legend" aria-label="Legend">
           <span className="ov-legend-item">
             <span className="square square-running square-12" />
-            Running agent
+            Running
           </span>
           <span className="ov-legend-item">
             <span className="square square-burned square-12" />
