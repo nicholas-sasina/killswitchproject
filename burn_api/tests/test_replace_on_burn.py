@@ -359,3 +359,37 @@ def test_a_single_instance_burn_is_not_noticeably_slower(env, monkeypatch):
     with_hook = timed(victims[runs + 1:])
     print(f"\ninstance burn median on moto: {without:.1f} ms without the hook, {with_hook:.1f} ms with it")
     assert with_hook - without < 50  # four small DynamoDB calls; generous for a loaded test machine
+
+
+# --- a burn by source ----------------------------------------------------------------------------
+
+from test_by_source import SOURCE, ledger, row  # noqa: E402,F401 (ledger is a fixture)
+
+
+def test_a_burn_by_source_cuts_off_at_each_instances_first_read(env, ledger):
+    replacing_role(env)
+    reader, messaged = instances(env, 2)
+    progress = {"a": started("2026-11-07T19:00:00.000Z", "2026-11-07T19:59:00.000Z"),
+                "b": started("2026-11-07T19:00:00.000Z", "2026-11-07T20:02:00.000Z")}
+    for inst in (reader, messaged):
+        set_row(env, inst["session_id"], progress=progress)
+    row(ledger, reader["agent_id"], "burn/shared/crm_db_url", source_ref=SOURCE, first_seen="2026-11-07T20:00:00.000Z")
+    row(ledger, messaged["agent_id"], "burn/shared/crm_db_url", source_ref=SOURCE,
+        first_seen="2026-11-07T20:03:00.000Z", source="handoff", via=reader["agent_id"])
+    status, out = call(env, "POST", "/burn/by-source", {"source_ref": SOURCE})
+    assert status == 200 and out["failed"] == []
+
+    first, second = replacement_of(env, reader["session_id"]), replacement_of(env, messaged["session_id"])
+    assert (first["cutoff"], first["cutoff_source"]) == ("2026-11-07T20:00:00.000Z", "evidence")
+    assert (first["done"], first["quarantined"]) == (["a"], ["b"])
+    assert (second["cutoff"], second["cutoff_source"]) == ("2026-11-07T20:03:00.000Z", "evidence")
+    assert (second["done"], second["quarantined"]) == (["a", "b"], [])
+
+
+def test_the_earliest_evidence_wins(env, ledger):
+    replacing_role(env)
+    [inst] = instances(env, 1)
+    row(ledger, inst["agent_id"], "burn/shared/crm_db_url", source_ref=SOURCE, first_seen="2026-11-07T20:00:00.000Z")
+    add_event(env, inst["agent_id"], inst["session_id"], "blocked", "2026-11-07T19:45:00.000Z")
+    call(env, "POST", "/burn/by-source", {"source_ref": SOURCE})
+    assert replacement_of(env, inst["session_id"])["cutoff"] == "2026-11-07T19:45:00.000Z"
