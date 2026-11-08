@@ -18,6 +18,9 @@ class FakeApi:
         self.tokens: dict[str, dict] = {}
         self.requests: list[tuple[str, str, dict, dict]] = []  # method, path, body, headers
         self.fail: dict[tuple[str, str], list[int]] = {}
+        self.badge_url = ""  # where issued badges say tokens are minted (tests point it at a fake issuer)
+        self.omit_secrets = False  # simulate an API that predates the `secrets` field
+        self.issued: list[dict] = []  # every secrets object handed out, so tests can look for leaks
         self.heartbeat_status = 200  # set to 409 to simulate a burn
         self.lock = threading.Lock()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
@@ -93,11 +96,24 @@ class FakeApi:
                 return 403, {"error": "role is not in the parent's may_spawn"}
         session_id = "sess_" + secrets.token_hex(8)
         inst = self.add_instance(session_id, role, body.get("parent_session"), token_id)
+        reply_secrets = self._secrets(inst, self.roles[role].get("credentials", []))
         return 201, {"session_id": session_id, "agent_id": inst["agent_id"], "role": role,
+                     **({} if self.omit_secrets else {"secrets": reply_secrets}),
                      "badge_ref": f"burn/{inst['agent_id']}/badge", "parent_session": body.get("parent_session"),
                      "token_id": token_id, "tools": self.roles[role].get("tools", []), "egress": None,
                      "credentials": [{"secret_ref": f"burn/{inst['agent_id']}/{t}", "type": t, "owner": "agent"}
                                      for t in self.roles[role].get("credentials", [])]}
+
+    def _secrets(self, inst, credentials):
+        out = {"badge": {"client_id": inst["agent_id"], "client_secret": "badge-secret-" + secrets.token_hex(8),
+                         "token_url": self.badge_url, "scope": "burn/tools"}}
+        if "api_key" in credentials:
+            out["api_key"] = "mpk_live_" + secrets.token_hex(12)
+        if "aws_key" in credentials:
+            out["aws_key"] = {"access_key_id": "AKIA" + secrets.token_hex(8).upper(),
+                              "secret_access_key": "aws-secret-" + secrets.token_hex(12)}
+        self.issued.append(out)
+        return out
 
     def _burns(self, body):
         scope, ident = body["scope"], body["id"]

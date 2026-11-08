@@ -22,7 +22,7 @@ the event stream. It is the terminal twin of the dashboard. `import burn` is a s
 | `burn_cli/retry.py` | Exponential backoff with jitter |
 | `burn_cli/runner/run.py` | `burn run`: session, lifecycle, heartbeat, stop on burn |
 | `burn_cli/runner/env.py` | Scrubbing the host environment and building the instance's |
-| `burn_cli/runner/credentials.py` | Credential sources: Secrets Manager, and a fake for tests and the mocks |
+| `burn_cli/runner/credentials.py` | The instance's own values, taken from the join reply's `secrets` |
 | `burn_cli/runner/badge.py` | Badge token minting and refresh |
 | `burn_cli/runner/mcp_proxy.py` | The local MCP endpoint |
 | `burn_cli/runner/spawn_endpoint.py` | The local spawn endpoint |
@@ -54,8 +54,11 @@ burn env            # what an instance's environment would hold (values hidden; 
 `burn run` starts one instance:
 1. `POST /sessions {role, enroll_token}`, retrying 429, 5xx and network errors with exponential backoff and
    jitter (new IAM keys take seconds to work, and 20 parallel spawns hit rate limits).
-2. Reads the instance's own badge, AWS key and provider key from Secrets Manager with the host's AWS access
-   (`BURN_CREDENTIAL_SOURCE=aws`, the default; `fake` is for the mock servers).
+2. Takes the instance's own badge, AWS key and provider key from the `secrets` field of that reply, which the API
+   returns once. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
+   not a reason to look elsewhere. A child started with `burn.spawn` gets its values from its parent's reply and
+   receives them in its supervisor's exec environment (`BURN_ADOPT_SECRETS`), never on a command line, where every
+   user in the container could read them.
 3. Starts the command with an **allow-list** of your environment (`PATH`, `LANG`, `LC_*`, `TZ`, `TERM`, `TMPDIR`,
    `AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables such as `SSL_CERT_FILE`); everything else is removed,
    including `AWS_*` credentials, `BURN_JOIN_TOKEN`, the API token, database passwords, DSNs and proxy URLs with
@@ -125,7 +128,7 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
 - **Why does `burn apply` refuse a role?** The API answers 409 when a role is managed elsewhere, for example
   made in the dashboard. Run `burn pull` to bring it into `burn.yaml` first.
 - **Does the agent get my AWS credentials?** No. `burn run` removes them from the agent's environment and gives it
-  only its own key. `burn run` itself uses your AWS access to read that key.
+  only its own key, which it received from the API when the instance joined. `burn run` needs no AWS access.
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
 - **Where can I see a join token again?** Nowhere: only its hash is stored. Create another one.
 - **Why is the blast radius empty right after a burn?** CloudTrail can lag 5-15 minutes; the CLI says so when there is nothing yet.
