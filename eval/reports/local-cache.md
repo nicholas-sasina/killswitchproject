@@ -1,7 +1,7 @@
 # Local cache operation measurements
 
 Measured 2026-11-08 UTC against clean product commit
-`5fb397170442b36dc85c573553f245c64a648f21` (PR #57). These are local moto
+`5fb397170442b36dc85c573553f245c64a648f21`. These are local moto
 observations of the actual Gateway RESPONSE handler, including reference replacement
 and its second scan. They are not deployed AWS measurements or dollar costs.
 

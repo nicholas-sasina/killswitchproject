@@ -10,10 +10,9 @@ in `us-east-1`. Every command is run from the repo root unless stated otherwise.
 - Python 3.12 and [uv](https://docs.astral.sh/uv/), Node.js 24+, Docker (Docker Desktop or Colima).
 - [gitleaks](https://github.com/gitleaks/gitleaks) for the pre-commit secret gate.
 
-The shared-account integration owner deploys and resets the shared stack. Local tests and
-the Docker emulator check below are separate from that stack. Live demos, end-to-end checks
-and load tests can create paid resources or change sessions; coordinate approval before
-running them against the shared account.
+Local tests and the Docker emulator check below need no AWS account. Deploys, resets, live
+demos, end-to-end checks and load tests run against a deployed stack: they can create paid
+resources and change sessions, so run them only on a stack you operate.
 
 ## First-time setup
 
@@ -112,11 +111,11 @@ Load tests normally create one badge per simulated agent, or share the explicitl
 |---|---|
 | Dashboard says "API unreachable" | The API accepts browser requests only from `http://localhost:5173`. Open exactly that URL (not `127.0.0.1`). `make dashboard` refuses to start if port 5173 is taken; use the existing dashboard or stop only a dev server you started. |
 | Dashboard shows a MOCK DATA banner | The configured service returned `x-burn-mock: true`. Point the local configuration at the intended service and restart the dashboard. |
-| Dashboard asks to connect | Required local configuration is missing. The integration owner can generate it with `make env`; local mock development uses the mock service URL and token. |
+| Dashboard asks to connect | Required local configuration is missing. Generate it with `make env` against a deployed stack; local mock development uses the mock service URL and token. |
 | An agent exits at start with "no AWS key of its own" | Its session has no minted AWS key. Run `make reset && make demo`. Agents never fall back to the host's credentials. |
 | An agent's first model call fails with `InvalidClientTokenId` | A new IAM key takes a few seconds to become valid. The agent retries for about 20 seconds. |
 | Blast radius is empty | CloudTrail lag. Wait a few minutes and reload. |
-| `make deploy` fails on a name conflict | Ask the integration owner to inspect the existing stack and resource ownership. `make teardown` destroys resources and is not a general repair command. |
+| `make deploy` fails on a name conflict | Inspect the existing stack and which resources it owns before changing anything. `make teardown` destroys resources and is not a general repair command. |
 
 ## Teardown
 
