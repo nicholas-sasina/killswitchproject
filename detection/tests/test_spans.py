@@ -1,5 +1,6 @@
 """Finding spans and the canary flag: additive fields that let the Gateway replace a credential."""
 import base64
+import json
 import secrets
 import string
 
@@ -13,18 +14,29 @@ def _rand(n):
     return "".join(secrets.choice(ALNUM) for _ in range(n))
 
 
-def _scanner(*credentials):
-    """credentials: (value, body, metadata) tuples registered the way the minter does."""
+def _registered(*credentials):
+    """credentials: (metadata, parts) registered the way the minter's fingerprints.register
+    writes them; parts are (part, text, exact, shingles)."""
     key = secrets.token_bytes(32)
     rows = {}
-    for value, body, meta in credentials:
-        exact = fingerprint(value, key)
-        rows[exact] = dict(meta, fingerprint=exact, kind="exact", part="value")
-        parts = shingle_fingerprints(body, key)
-        for index, fp in parts:
-            rows.setdefault(fp, dict(meta, part="random", fingerprint=fp, kind="shingle", index=index,
-                                     n_shingles=len(parts)))
+    for meta, parts in credentials:
+        for part, text, exact, shingles in parts:
+            if exact:
+                fp = fingerprint(text, key)
+                rows[fp] = dict(meta, part=part, fingerprint=fp, kind="exact")
+            if shingles:
+                windows = shingle_fingerprints(text, key)
+                for index, fp in windows:
+                    rows.setdefault(fp, dict(meta, part=part, fingerprint=fp, kind="shingle", index=index,
+                                             n_shingles=len(windows)))
     return Scanner(key=key, lookup=lambda fps: {fp: rows[fp] for fp in fps if fp in rows})
+
+
+def _scanner(*credentials):
+    """credentials: (value, body, metadata) tuples registered the way the minter registers an
+    api key: the whole value exact, the random body as shingles."""
+    return _registered(*((meta, [("value", value, True, False), ("random", body, False, True)])
+                         for value, body, meta in credentials))
 
 
 def _api_key(agent="agent-a", **extra):
@@ -123,3 +135,34 @@ def test_locating_pieces_never_changes_what_is_found():
     assert f.kind == "shingle"  # same finding as before spans existed; only the location is new
     [fragment] = known(scanner.scan(f"TOKEN={value[:26]}"))
     assert fragment.spans == ()  # a real fragment is still not locatable
+
+
+def _aws_key(agent="agent-a"):
+    """An AWS key registered the way the minter registers one: the access key id and the
+    secret access key, each as an exact fingerprint plus shingles."""
+    key_id = "A" + "KIA" + "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16))
+    secret = "".join(secrets.choice(ALNUM + "+/") for _ in range(40))
+    meta = {"secret_ref": f"burn/{agent}/aws_key", "owner_agent_id": agent, "secret_type": "aws_key",
+            "version": 1, "status": "active"}
+    parts = [("access_key_id", key_id, True, True), ("secret_access_key", secret, True, True)]
+    return key_id, secret, (meta, parts)
+
+
+def test_both_parts_of_an_aws_key_in_an_env_file_are_located():
+    key_id, secret, credential = _aws_key()
+    text = f"AWS_ACCESS_KEY_ID={key_id}\nAWS_SECRET_ACCESS_KEY={secret}\n"
+    [f] = known(_registered(credential).scan(text))
+    assert (f.secret_ref, f.kind, f.canary) == ("burn/agent-a/aws_key", "exact", False)  # one finding, by key id
+    assert [text[a:b] for a, b in f.spans] == [key_id, secret]
+    assert (f.start, f.end) == f.spans[0]
+
+
+def test_an_aws_secret_without_its_key_id_is_located():
+    _, secret, credential = _aws_key()
+    scanner = _registered(credential)
+    layouts = {"env": f"AWS_SECRET_ACCESS_KEY={secret}\n",
+               "json": json.dumps({"aws_secret_access_key": secret})}
+    for layout, text in layouts.items():
+        [f] = known(scanner.scan(text))
+        assert f.secret_ref == "burn/agent-a/aws_key", layout
+        assert [text[a:b] for a, b in f.spans] == [secret], layout
