@@ -484,19 +484,17 @@ def test_the_help_says_what_a_non_root_agent_can_read(capsys):
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="needs root to switch users")
-def test_real_process_the_agent_cannot_read_the_supervisors_environment(stack):
-    out = stack.tmp / "probe.json"
-    stack.tmp.chmod(0o777)
+def test_real_process_the_agent_cannot_read_the_supervisors_environment(stack, capfd):
     from burn_cli.runner import privs
-    code = f"""
+    code = """
         import json, os
         try:
             open(f"/proc/{os.getppid()}/environ", "rb").read(); readable = True
         except OSError:
             readable = False
-        json.dump({{"uid": os.getuid(), "gid": os.getgid(), "supervisor_environ_readable": readable}}, open({str(out)!r}, "w"))"""
+        print(json.dumps({"uid": os.getuid(), "gid": os.getgid(), "supervisor_environ_readable": readable}))"""
     assert instance(stack, py(code), drop=privs.resolve(None)).run() == 0
-    result = json.loads(out.read_text())
+    result = json.loads(capfd.readouterr().out.strip().splitlines()[-1])
     assert result["uid"] != 0 and result["gid"] != 0 and result["supervisor_environ_readable"] is False
 
 
