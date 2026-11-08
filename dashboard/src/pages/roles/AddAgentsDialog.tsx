@@ -1,6 +1,6 @@
 // STUB: the role page's branch restyles Add agents into the console's
 // Dialog. Until then this mounts the existing AddAgent flow unchanged.
-import { AddAgent } from "../../components/AddAgent";
+import { AddAgent } from "./AddAgent";
 import { useConsole } from "../../data/ConsoleData";
 
 export interface AddAgentsDialogProps {

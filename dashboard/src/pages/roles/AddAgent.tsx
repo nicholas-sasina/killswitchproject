@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import toolContract from "../../../contracts/mcp-tools.json";
-import type { BurnApi } from "../api";
-import type { Instance, Role, RoleSpec } from "../contracts";
-import { CONNECT_GUIDE_URL, joinCommands, type JoinUrls } from "../join";
-import { ErrorMessage } from "./common";
-import { SwarmDialog } from "./SwarmDialog";
+import toolContract from "../../../../contracts/mcp-tools.json";
+import type { BurnApi } from "../../api";
+import type { Instance, Role, RoleSpec } from "../../contracts";
+import { CONNECT_GUIDE_URL, joinCommands, type JoinUrls } from "../../join";
+import { ErrorMessage } from "../../components/common";
+import { SwarmDialog } from "../../components/SwarmDialog";
 
 const rolePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const roleNameConflict =
