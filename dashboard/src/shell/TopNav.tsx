@@ -11,7 +11,7 @@ const SECTIONS: { section: Section; label: string }[] = [
 
 /**
  * The white bar inset from the page edges, as on the website: the mark, the
- * four places, then the region, Add agents and the signed-in person.
+ * four places, then the region, Connect an agent and the signed-in person.
  */
 export function TopNav({
   route,
@@ -72,7 +72,7 @@ export function TopNav({
           className="btn btn-dark btn-sm topbar-add"
           onClick={onAddAgents}
         >
-          Add agents
+          Connect an agent
         </button>
         <PersonMenu email={email} logoutUrl={logoutUrl} onSignOut={onSignOut} />
       </div>

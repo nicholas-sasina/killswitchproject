@@ -236,6 +236,82 @@
   letter-spacing: -0.01em;
 }
 
+/* ---------- Connect an agent ---------- */
+
+.add-agents .connect-step {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.add-agents .connect-step > * {
+  align-self: stretch;
+}
+
+.add-agents .connect-step > .segmented {
+  align-self: flex-start;
+}
+
+.add-agents .connect-command {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.add-agents .connect-command .add-code {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.add-agents select.add-input {
+  width: 100%;
+}
+
+.add-agents .connect-wait {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.add-agents .connect-tokens {
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.add-agents .connect-disclosure {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.add-agents .connect-disclosure::after {
+  content: " +";
+  text-decoration: none;
+}
+
+.add-agents .connect-disclosure[aria-expanded="true"]::after {
+  content: " \2212";
+}
+
+.add-agents .connect-token-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.add-agents .add-bare .add-form {
+  margin-top: 6px;
+}
+
 @media (max-width: 560px) {
   .add-agents .add-pair {
     grid-template-columns: minmax(0, 1fr);
