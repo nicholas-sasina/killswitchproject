@@ -8,8 +8,8 @@ that ticket and sends the file out through its own HTTP tool (e.g. curl). This
 listener is where it lands.
 
 What this does, and nothing else:
-  - listens on 127.0.0.1 only (a local stand-in; integration's rule is no
-    third-party hosts);
+  - listens on 127.0.0.1 only (a local stand-in; it never contacts a host other
+    than the provider);
   - reads ONLY what is POSTed to it - no Burn API call, no table read, no other
     source;
   - extracts key-shaped tokens from the body;
@@ -29,10 +29,10 @@ whether it arrived over HTTP (the listener) or the attacker already has it and
 pastes it in (stdin): extract key-shaped tokens, present each to the provider,
 report refused/accepted and a fingerprint.
 
-    make attack            # listen on 127.0.0.1:8099
-    make attack PORT=9000
-    pbpaste | make attack  # the attacker already has the text; try it
-    make attack FROM=-     # read the leaked text from stdin
+    make attack                 # listen on 127.0.0.1:8099
+    make attack ATTACK_PORT=9000
+    pbpaste | make attack       # the attacker already has the text; try it
+    make attack FROM=-          # read the leaked text from stdin
     make attack FROM=leak.txt
 """
 import argparse
@@ -42,6 +42,7 @@ import re
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import unquote_plus, urlsplit
 
 HOST = "127.0.0.1"  # local stand-in only; never bind a routable interface
 DEFAULT_PORT = 8099
@@ -55,12 +56,18 @@ AWS_KEY = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"
 
 
 def extract_keys(text: str) -> list[str]:
-    """Every distinct key-shaped token in `text`, in the order first seen."""
-    matches = [(m.start(), m.group(0)) for pattern in (PROVIDER_KEY, AWS_KEY)
-               for m in pattern.finditer(text or "")]
+    """Every distinct key-shaped token in `text`, in the order first seen.
+
+    The text is scanned both as given and url-decoded, so a percent-encoded or
+    form-encoded leak still matches: `%3Dmpk_live_...` puts a hex digit right
+    before the prefix, which the lookbehind would otherwise reject.
+    """
     seen: dict[str, None] = {}
-    for _, token in sorted(matches, key=lambda pair: pair[0]):
-        seen.setdefault(token, None)
+    for variant in dict.fromkeys([text or "", unquote_plus(text or "")]):
+        matches = sorted(((m.start(), m.group(0)) for pattern in (PROVIDER_KEY, AWS_KEY)
+                          for m in pattern.finditer(variant)), key=lambda pair: pair[0])
+        for _, token in matches:
+            seen.setdefault(token, None)
     return list(seen)
 
 
@@ -84,7 +91,10 @@ def present_to_provider(provider_url: str, token: str, get=None) -> str:
         import httpx
 
         def get(url, headers):  # noqa: E306 - tiny default, injected in tests
-            return httpx.get(url, headers=headers, timeout=30).status_code
+            # trust_env=False: an outsider does not go through Burn's egress proxy.
+            # Honouring HTTP(S)_PROXY in a `burn run` shell would add x-burn-session-proof
+            # (or be blocked), so the provider would not see an outside use and might not burn.
+            return httpx.get(url, headers=headers, timeout=30, trust_env=False).status_code
 
     status = get(provider_url.rstrip("/") + "/v1/whoami", {"Authorization": f"Bearer {token}"})
     return "accepted" if status == 200 else "refused"
@@ -113,6 +123,14 @@ def process_payload(body: str, provider_url: str, present=present_to_provider, o
     return results
 
 
+def received_text(path: str, body: str) -> str:
+    """Everything the attacker received in one request: the POST body plus the
+    query string (a form POST or `curl --data-urlencode` may put the leak there).
+    Both are scanned; extract_keys url-decodes them."""
+    query = urlsplit(path).query
+    return f"{body}\n{query}" if query else body
+
+
 class AuditHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
         length = int(self.headers.get("content-length") or 0)
@@ -121,8 +139,10 @@ class AuditHandler(BaseHTTPRequestHandler):
         self.send_header("content-type", "application/json")
         self.end_headers()
         self.wfile.write(b'{"received": true}')
-        print(f"\n--- POST {self.path} from {self.client_address[0]} ---")
-        process_payload(body, self.server.provider_url, present=self.server.present)
+        # Only the path is echoed, never the query string: a token placed in the
+        # query must not be printed. It is still scanned (received_text includes it).
+        print(f"\n--- POST {urlsplit(self.path).path} from {self.client_address[0]} ---")
+        process_payload(received_text(self.path, body), self.server.provider_url, present=self.server.present)
 
     def do_GET(self) -> None:  # noqa: N802
         self.send_response(404)
@@ -167,6 +187,7 @@ def main() -> int:
     # One-shot: the attacker already has the text (piped in or a file). Same pipeline.
     source = args.source or ("-" if not sys.stdin.isatty() else "")
     if source:
+        print(f"reading leaked text from {'stdin' if source == '-' else source}", file=sys.stderr)
         process_payload(read_leaked(source), provider_url)
         return 0
 

