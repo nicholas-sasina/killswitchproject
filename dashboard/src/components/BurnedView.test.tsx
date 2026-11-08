@@ -43,7 +43,7 @@ function fakeApi(roles: Role[]) {
       keys: [],
       events: [],
     })),
-    saveRole: vi.fn(async (spec: Role) => ({ ...spec, managed_by: "ui" })),
+    createRole: vi.fn(async (spec: Role) => ({ ...spec, managed_by: "ui" })),
     createToken: vi.fn(async (role: string) => ({
       token_id: "t1",
       role,
@@ -131,8 +131,8 @@ describe("rebuilding a burned agent", () => {
         screen.getByRole("button", { name: "Create role and token" }),
       );
     });
-    expect(api.saveRole).toHaveBeenCalledTimes(1);
-    const spec = api.saveRole.mock.calls[0][0];
+    expect(api.createRole).toHaveBeenCalledTimes(1);
+    const spec = api.createRole.mock.calls[0][0];
     expect(spec.name).toBe("a-role-name-that-is-thirty-two-3");
     expect(spec.name.length).toBeLessThanOrEqual(32);
     expect(spec.references).toBe("report");

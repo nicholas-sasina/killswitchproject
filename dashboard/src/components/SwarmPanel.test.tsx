@@ -58,12 +58,11 @@ function setup(
         return new Response("unavailable", { status: 503 });
       if (path === "/roles" && method === "GET") body = { roles: state.roles };
       else if (path === "/instances") body = { instances: state.instances };
-      else if (
-        path.startsWith("/roles/") &&
-        !path.endsWith("/tokens") &&
-        method === "PUT"
-      ) {
+      else if (path === "/roles" && method === "POST") {
         const created = JSON.parse(String(init?.body)) as Role;
+        if (state.roles.some((role) => role.name === created.name)) {
+          return new Response("conflict", { status: 409 });
+        }
         state.roles = [...state.roles, created];
         body = created;
       } else if (path.endsWith("/tokens")) {
@@ -210,7 +209,7 @@ describe("agent enrollment", () => {
     change("Lifetime (seconds)", "600");
     await click("Create role and token");
     expect(
-      JSON.parse(String(fixture.calls("/roles/worker", "PUT")[0][1]?.body)),
+      JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
     ).toEqual({
       name: "worker",
       tools: ["read_ticket"],
@@ -292,7 +291,7 @@ describe("agent enrollment", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(screen.getByText("Connected · worker")).toBeTruthy();
-    expect(fixture.calls("/roles/worker", "PUT")).toHaveLength(0);
+    expect(fixture.calls("/roles", "POST")).toHaveLength(0);
   });
 
   it("sends the enabled replacement setting when creating a role", async () => {
@@ -303,7 +302,7 @@ describe("agent enrollment", () => {
     fireEvent.click(screen.getByLabelText("Replace on burn"));
     await click("Create role and token");
     expect(
-      JSON.parse(String(fixture.calls("/roles/worker", "PUT")[0][1]?.body)),
+      JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
     ).toMatchObject({ replace_on_burn: true });
   });
 
@@ -317,6 +316,32 @@ describe("agent enrollment", () => {
     expect(
       fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
     ).toBe(false);
+  });
+
+  it("shows a 409 when another operator creates the name after the role list loads", async () => {
+    const fixture = setup();
+    await show(fixture);
+    await click("Add agent");
+    change("Role name", "worker");
+    fireEvent.click(screen.getByLabelText("Replace on burn"));
+    const existing: Role = {
+      ...role("worker"),
+      tools: ["read_ticket"],
+      egress: ["first.example.test"],
+    };
+    fixture.state.roles.push(existing);
+    await click("Create role and token");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "A role with that name already exists",
+    );
+    expect(fixture.calls("/roles", "POST")).toHaveLength(1);
+    expect(
+      fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
+    ).toBe(false);
+    expect(
+      fixture.state.roles.filter((role) => role.name === "worker"),
+    ).toEqual([existing]);
+    expect(fixture.tokens).toHaveLength(0);
   });
 
   it.each([
@@ -340,7 +365,7 @@ describe("agent enrollment", () => {
       expect(autoBurn.checked).toBe(settings.auto_burn);
       await click("Create role and token");
       expect(
-        JSON.parse(String(fixture.calls("/roles/worker", "PUT")[0][1]?.body)),
+        JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
       ).toMatchObject(settings);
     },
   );
@@ -371,7 +396,7 @@ describe("agent enrollment", () => {
     expect(screen.queryByText("private response")).toBeNull();
     fixture.state.failToken = false;
     await click("Create token");
-    expect(fixture.calls("/roles/worker", "PUT")).toHaveLength(1);
+    expect(fixture.calls("/roles", "POST")).toHaveLength(1);
     expect(screen.getByRole("region", { name: "Join commands" })).toBeTruthy();
   });
 

@@ -6,6 +6,8 @@ import { ErrorMessage } from "./common";
 import { SwarmDialog } from "./SwarmDialog";
 
 const rolePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const roleNameConflict =
+  "A role with that name already exists. Choose a new role name.";
 
 function Choices({
   title,
@@ -126,7 +128,7 @@ export function AddAgent({
       return;
     }
     if (!created && roles.some((existing) => existing.name === name)) {
-      setError("That role already exists. Choose a new role name.");
+      setError(roleNameConflict);
       return;
     }
     const hosts = egress.split(/[\s,]+/).filter(Boolean);
@@ -171,7 +173,15 @@ export function AddAgent({
           ...(template?.references ? { references: template.references } : {}),
           managed_by: "ui",
         };
-        target = await api.saveRole(spec);
+        target = await api.createRole(spec).catch((error: unknown) => {
+          if (
+            error instanceof Error &&
+            error.message === "API request failed (HTTP 409)."
+          ) {
+            throw new Error(roleNameConflict);
+          }
+          throw error;
+        });
         setCreated(target);
         onCreated(target);
       }
