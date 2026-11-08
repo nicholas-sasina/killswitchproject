@@ -15,9 +15,11 @@ is replaced by a fresh instance that resumes its task (when the role has replace
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
@@ -42,13 +44,39 @@ def docker(argv: list[str], env: dict | None = None) -> subprocess.CompletedProc
     return result
 
 
-def remove_other_images(keep: str, run=subprocess.run) -> list[str]:
+FRESH = timedelta(minutes=10)  # a tag built or tagged this recently may be another checkout's, about to run it
+DOCKER_TIME = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d:\d\d)(\.\d+)?\s*(Z|[+-]\d\d:?\d\d)?")
+
+
+def last_built(inspected: str) -> datetime | None:
+    """The later of an image's Created and Metadata.LastTagTime, as `docker image inspect` prints them, or None.
+
+    Both count: a fully cached build keeps the image's old Created, but giving it a new tag moves LastTagTime.
+    """
+    found = []
+    for value in inspected.strip().split("|"):
+        match = DOCKER_TIME.match(value.strip())
+        if not match:
+            continue
+        day, clock, fraction, zone = match.groups()
+        zone = "+00:00" if zone in (None, "Z") else zone if ":" in zone else f"{zone[:3]}:{zone[3:]}"
+        try:  # at most microseconds: docker prints nanoseconds
+            found.append(datetime.fromisoformat(f"{day}T{clock}{(fraction or '')[:7]}{zone}"))
+        except ValueError:
+            continue
+    return max(found) if found else None
+
+
+def remove_other_images(keep: str, run=subprocess.run, now: datetime | None = None) -> list[str]:
     """Remove the swarm worker images that older code or other checkouts left behind, keeping `keep`. Returns them.
 
-    Each code change builds a new tag, so they pile up. A tag that any container (running or stopped) was created from
-    is left alone: another checkout's swarm still starts its replacements from it. (`docker rmi` alone would only refuse
-    an image's last tag; an image with two tags loses one even while a container uses it.) Nothing is forced.
+    Each code change builds a new tag, so they pile up. Left alone: a tag that any container (running or stopped) was
+    created from, since another checkout's swarm still starts its replacements from it (`docker rmi` alone would only
+    refuse an image's last tag; an image with two tags loses one even while a container uses it); and a tag built or
+    tagged in the last ten minutes, which another checkout may be about to run. When docker cannot say, the tag is kept.
+    Nothing is forced.
     """
+    now = now or datetime.now(timezone.utc)
     listed = run(["docker", "image", "ls", IMAGE_NAME, "--format", "{{.Repository}}:{{.Tag}}"],
                  capture_output=True, text=True)
     if listed.returncode:
@@ -60,6 +88,11 @@ def remove_other_images(keep: str, run=subprocess.run) -> list[str]:
         users = run(["docker", "ps", "-a", "-q", "--filter", f"ancestor={tag}"], capture_output=True, text=True)
         if users.returncode or users.stdout.strip():
             continue  # in use, or docker could not say: keep it
+        inspected = run(["docker", "image", "inspect", "-f", "{{.Created}}|{{.Metadata.LastTagTime}}", tag],
+                        capture_output=True, text=True)
+        built = None if inspected.returncode else last_built(inspected.stdout)
+        if built is None or now - built < FRESH:
+            continue
         if run(["docker", "rmi", tag], capture_output=True, text=True).returncode == 0:
             removed.append(tag)
     return removed
