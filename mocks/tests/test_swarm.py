@@ -140,3 +140,17 @@ def test_a_role_instance_gets_its_secret_values_once_and_a_scenario_agent_does_n
     instance = check(client.get("/instances"), "/instances")["instances"][0]
     assert "secrets" not in json.dumps(instance)
     assert "secrets" not in start(client, scenario[1]["agents"][0]["id"])
+
+
+def test_the_badge_in_a_join_reply_gets_a_token_the_mock_mcp_server_accepts(client):
+    import base64
+    make_role(client, WORKER)
+    token = token_for(client, "worker")["token"]
+    reply = join(client, "worker", token)
+    badge = reply["secrets"]["badge"]
+    assert badge["client_id"] == reply["agent_id"] and badge["token_url"].endswith("/mock-token")
+    basic = base64.b64encode(f"{badge['client_id']}:{badge['client_secret']}".encode()).decode()
+    issued = client.post("/mock-token", headers={"Authorization": f"Basic {basic}"},
+                         data={"grant_type": "client_credentials"})
+    assert issued.status_code == 200 and issued.json()["access_token"] == "mock-" + reply["agent_id"]
+    assert client.post("/mock-token").status_code == 401

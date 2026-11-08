@@ -2,13 +2,17 @@
 
 import argparse
 import json
+import os
+import re
 import secrets
+import urllib.request
 
 import jsonschema
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import MOCK_HEADER
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import TextContent, Tool
 from starlette.responses import JSONResponse
 
@@ -16,6 +20,24 @@ if __package__:
     from .mock_data import CONTRACTS, DEFAULT_SCENARIO, Credentials, load_scenario
 else:
     from mock_data import CONTRACTS, DEFAULT_SCENARIO, Credentials, load_scenario
+
+
+API_URL = os.environ.get("BURN_MOCK_API_URL", "http://127.0.0.1:8700")
+# Containers reach this server as host.docker.internal; DNS-rebinding protection stays on for every other host.
+ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*", "host.docker.internal:*"]
+ALLOWED_ORIGINS = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*", "http://host.docker.internal:*"]
+INSTANCE_AGENT = re.compile(r"^agent-[a-z0-9-]+-[0-9a-f]{6}$")
+
+
+def lookup_instance(agent_id: str):
+    """The newest instance with this agent id from the mock Burn API, or None. Checked on every call, so an
+    instance that was burned or exited is refused straight away."""
+    try:
+        with urllib.request.urlopen(API_URL + "/instances", timeout=3) as response:
+            instances = json.loads(response.read())["instances"]
+    except (OSError, ValueError, KeyError):
+        return None
+    return next((i for i in instances if i["agent_id"] == agent_id), None)
 
 
 class MockHeaderMiddleware:
@@ -32,7 +54,8 @@ class MockHeaderMiddleware:
 
 
 class ScenarioMCP(FastMCP):
-    def __init__(self, scenario_path=DEFAULT_SCENARIO):
+    def __init__(self, scenario_path=DEFAULT_SCENARIO, instance_lookup=lookup_instance):
+        self.instance_lookup = instance_lookup
         self.scenario = load_scenario(scenario_path)
         self.agents = {agent["id"]: agent for agent in self.scenario["agents"]}
         self.definitions = {tool["name"]: tool for tool in
@@ -42,7 +65,10 @@ class ScenarioMCP(FastMCP):
         self.inboxes = {agent_id: [] for agent_id in self.agents}
         self.revoked = set()
         # Stateless transport keeps caller identity tied to each HTTP request.
-        super().__init__("Burn development tools", stateless_http=True, json_response=True)
+        super().__init__("Burn development tools", stateless_http=True, json_response=True,
+                         transport_security=TransportSecuritySettings(
+                             enable_dns_rebinding_protection=True, allowed_hosts=ALLOWED_HOSTS,
+                             allowed_origins=ALLOWED_ORIGINS))
 
         @self.custom_route("/mock/revoke/{agent_id}", methods=["POST"])
         async def revoke(request):
@@ -58,23 +84,32 @@ class ScenarioMCP(FastMCP):
         return app
 
     def caller(self):
+        """(agent id, its record) from the bearer. A scenario agent is known up front; a role instance is looked up
+        live in the Burn API, so one that was burned or has exited is refused."""
         request = self.get_context().request_context.request
         header = request.headers.get("authorization", "") if request else ""
         scheme, _, token = header.partition(" ")
         agent_id = token.removeprefix("mock-")
-        if scheme.lower() != "bearer" or not token.startswith("mock-") or agent_id not in self.agents:
-            raise ToolError("BURN: A mock bearer token for a scenario agent is required")
-        if agent_id in self.revoked:
+        if scheme.lower() != "bearer" or not token.startswith("mock-"):
+            raise ToolError("BURN: A mock bearer token for a scenario agent or a role instance is required")
+        if agent_id in self.agents:
+            if agent_id in self.revoked:
+                raise ToolError("BURN: Mock badge has been revoked")
+            return agent_id, self.agents[agent_id]
+        instance = self.instance_lookup(agent_id) if INSTANCE_AGENT.match(agent_id) else None
+        if instance is None:
+            raise ToolError("BURN: A mock bearer token for a scenario agent or a role instance is required")
+        if instance["status"] != "active":
             raise ToolError("BURN: Mock badge has been revoked")
-        return agent_id
+        self.inboxes.setdefault(agent_id, [])
+        return agent_id, {"tools": instance.get("tools", []), "send_to": []}
 
     async def list_tools(self):
         self.caller()
         return [Tool(**definition) for definition in self.definitions.values()]
 
     async def call_tool(self, name, arguments):
-        agent_id = self.caller()
-        agent = self.agents[agent_id]
+        agent_id, agent = self.caller()
         if name not in self.definitions or name not in agent["tools"]:
             raise ToolError("BURN: Tool is not allowed for this agent")
         # Caller identity comes only from the bearer token, never an injected argument.
@@ -104,7 +139,7 @@ class ScenarioMCP(FastMCP):
                                   for customer in customers]}
         if name == "send_message":
             recipient = args["to"]
-            if recipient not in self.agents or recipient not in self.agents[agent_id].get("send_to", []):
+            if recipient not in self.agents or recipient not in self.agents.get(agent_id, {}).get("send_to", []):
                 raise ToolError("BURN: Recipient is not allowed for this agent")
             self.inboxes[recipient].append({"from": agent_id, "text": args["text"], "ts": utc_now_iso()})
             return {"delivered": True, "message_id": "msg_" + secrets.token_hex(12)}
