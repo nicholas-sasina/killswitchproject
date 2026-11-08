@@ -31,9 +31,12 @@
   font-family: var(--f-sans);
 }
 
-/* No paper past the stage when the page overscrolls. The dashboard
-   brings its own paper back. */
-:root:has(.signin) {
+/* Night from the first paint when the sign-in screen is next
+   (public/first-paint.js marks that before React mounts), and no paper past
+   the stage when the page overscrolls. The dashboard brings its own paper
+   back. */
+:root:has(.signin),
+:root[data-stage="signin"]:not(:has(.app-frame)) {
   background: #18181b;
 }
 
