@@ -433,7 +433,15 @@ paths:
               required: [source_ref]
               properties:
                 tool: { type: string, description: 'optional: tool name, if source_ref is only the resource id' }
-                source_ref: { type: string, maxLength: 260, example: 'read_ticket:T-1001' }
+                source_ref:
+                  type: string
+                  maxLength: 4096
+                  example: 'read_ticket:T-1001'
+                  description: >-
+                    As recorded on ledger rows ('<tool>:<resource>'), or with `tool`, the resource itself.
+                    A resource that is not printable, longer than 200 characters or starts with 'sha256:'
+                    is recorded as '<tool>:sha256:<hex sha-256 of the resource>'; sending the resource with
+                    `tool` finds it either way.
                 since: { type: string, format: date-time, description: 'default: all time' }
                 reason: { type: string, maxLength: 200 }
       responses:
@@ -596,7 +604,7 @@ components:
           enum: [seen, referenced]
           default: seen
           description: 'seen = the plaintext reached the agent; referenced = it only ever got {{burn:ref:...}}. A burn never flags a credential whose exposures are all referenced.'
-        source_ref: { type: string, nullable: true, description: "what the agent read it from: '<tool>:<resource>' (e.g. read_ticket:T-1001), or the tool alone" }
+        source_ref: { type: string, nullable: true, description: "what the agent read it from: '<tool>:<resource>' (e.g. read_ticket:T-1001), '<tool>:sha256:<hex>' for a resource that is not printable, longer than 200 characters or starts with 'sha256:', or the tool alone" }
     RoleName:
       type: string
       pattern: '^[a-z0-9][a-z0-9-]{0,31}$'

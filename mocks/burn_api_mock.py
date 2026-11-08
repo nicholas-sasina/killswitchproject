@@ -8,6 +8,7 @@ import secrets
 from contextlib import asynccontextmanager, suppress
 from typing import Literal
 
+from burn_contracts import tools
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import MOCK_HEADER, ROLE_NAME_RE, agent_secret_ref
 from fastapi import FastAPI, Header, HTTPException, Query
@@ -58,7 +59,7 @@ class RoleSpec(BaseModel):
 
 class BySourceRequest(BaseModel):
     tool: str | None = None
-    source_ref: str = Field(max_length=260)
+    source_ref: str = Field(min_length=1, max_length=4096)
     since: str | None = None
     reason: str | None = Field(default=None, max_length=200)
 
@@ -188,7 +189,7 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
 
     @app.post("/burn/by-source")
     async def burn_by_source(body: BySourceRequest):
-        source_ref = body.source_ref if body.tool is None or ":" in body.source_ref else f"{body.tool}:{body.source_ref}"
+        source_ref = tools.requested_source_ref(body.source_ref, body.tool)
         result = state.burn_by_source(source_ref, body.since)
         if not result["readers"]:
             raise HTTPException(404, "Nobody read that source in the window")

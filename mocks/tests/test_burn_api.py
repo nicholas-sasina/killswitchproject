@@ -202,6 +202,17 @@ def test_burn_by_source_burns_readers_and_who_they_messaged(client, scenario):
     assert client.post("/burn/by-source", json={"source_ref": "read_ticket:nobody"}).status_code == 404
 
 
+def test_burn_by_source_keeps_the_tool_when_the_resource_has_a_colon(client, scenario):
+    agent_id = scenario[1]["agents"][0]["id"]
+    shared = shared_secret_ref(scenario[1]["shared_credentials"][0]["name"])
+    state = client.app.state.mock
+    start(client, agent_id)
+    state.record(agent_id, shared, tool="read_config")
+    state.ledgers[agent_id][shared]["source_ref"] = "read_config:s3://bucket/key"
+    body = client.post("/burn/by-source", json={"tool": "read_config", "source_ref": "s3://bucket/key"}).json()
+    assert body["source_ref"] == "read_config:s3://bucket/key" and [b["agent_id"] for b in body["burned"]] == [agent_id]
+
+
 def test_roles_default_references_to_replace(client):
     role = check(client.post("/roles", json={"name": "reader2", "tools": ["read_ticket"]}), "/roles", "post", 201)
     assert role["references"] == "replace"
