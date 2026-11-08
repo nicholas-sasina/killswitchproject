@@ -1,6 +1,6 @@
-"""BurnNotifications: PROPOSED stack for the infra owner. Not wired into infra/app.py.
+"""BurnNotifications: the notification pipeline, deployed on its own from notifications/infra/app.py.
 
-    burn-events DynamoDB stream (NEW_IMAGE)          <- enabled by branch ws/notifications-infra (docs/DEPLOYMENT.md)
+    burn-events DynamoDB stream (NEW_IMAGE)          <- enabled by the BurnData stack (infra/burn_infra/data.py)
       -> EventBridge Pipe (filter: eventName = INSERT; input template keeps only burn_notify.events.FORWARDED)
       -> SQS burn-notify (SSE, redrive to burn-notify-dlq after 5 receives)
       -> Lambda burn-notify (batch 1, ReportBatchItemFailures) -> Slack / Telegram / Discord / Teams / SES

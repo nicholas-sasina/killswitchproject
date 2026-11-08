@@ -1,19 +1,18 @@
 # Deploying Burn notifications
 
-**Status (2026-11-08): deployed to the team account, approved by the workstream owner and the infra
-owner.**
-- `BurnData` has the `burn-events` stream (PR #120).
-- `BurnNotifications` is created and running with the `[TEST]` label (`-c burn:notify_notice=...`).
-- Real ledger events were delivered end to end (stream → Pipe → SQS → Lambda) to Slack, Telegram and
-  Discord, and the flush Lambda's summaries arrived.
-- SES accepted the emails, but they were not observed in the Gmail inbox. A @gmail.com sender fails
-  Gmail's sender alignment, so use a verified domain sender instead.
-- To make alerts normal, redeploy without `burn:notify_notice`.
+Deploying changes two things: it enables a stream on the existing `burn-events` table (in `BurnData`),
+then creates the new `BurnNotifications` stack that reads it. Nothing else in Burn changes.
+
+- **Testing a deployment:** pass `-c burn:notify_notice="SYNTHETIC TEST - ..."` and every message is
+  labelled `[TEST]`. Redeploy without it to make alerts normal.
+- **Email sender:** send from a verified SES **domain** identity with DKIM, plus SPF and DMARC records
+  for that domain. Mailbox providers check that the From domain is authenticated. A free-mail sender
+  such as a @gmail.com address is not aligned when sent through SES, and may be rejected, filtered or
+  dropped.
 
 ## What changes on existing resources
-Exactly one change, prepared on branch `ws/notifications-infra` (`infra/burn_infra/data.py`, +6/−2).
-That branch has no PR yet; it is for the infra owner to open. The synthesized `BurnData` template
-differs from `main` in two places only:
+Exactly one change, in `infra/burn_infra/data.py` (#120). The synthesized `BurnData` template gains two
+things only:
 
 ```diff
 + "StreamSpecification": {"StreamViewType": "NEW_IMAGE"}     # on burn-events
@@ -89,7 +88,7 @@ SES needs no secret: the role is allowed to send from the verified identity.
 | `BURN_NOTIFY_METRICS` | `1` (EMF metrics in `Burn/Notifications`) |
 | `BURN_DASHBOARD_ORIGIN` | from `-c burn:dashboard_origin`, a bare `https://` origin |
 
-## Deployment steps (after approval)
+## Deployment steps
 ```bash
 export AWS_PROFILE=<approved profile> AWS_REGION=us-east-1
 
@@ -147,7 +146,7 @@ aws sqs get-queue-attributes --queue-url "$(aws sqs get-queue-url --queue-name b
 The test message goes straight onto the queue, so it checks the queue → Lambda → providers part only.
 **The stream → Pipe → input template part is checked only by a real ledger event**, for example the
 team's demo run (`make demo`) or a canary presentation through the deployed mock provider. That writes
-a genuine (test-agent) event to `burn-events` and needs its own approval. Check its delivery row in
+a genuine (test-agent) event to the shared `burn-events` ledger, so agree it with the team first. Check its delivery row in
 `burn-notify-state`, and confirm the Pipe shows no failures:
 `aws pipes describe-pipe --name burn-events-to-notify` and the `burn-notify-dlq` count.
 
@@ -163,7 +162,7 @@ Real Burn events flow automatically from then on.
 | Disable one destination | set `"enabled": false` in the config and redeploy the stack | none |
 | Remove the notifications stack | `uv run --group infra npx -y aws-cdk@2 destroy --app "python infra/app.py" BurnNotifications $CTX` | none; delivery history is deleted |
 | Remove the secrets | `aws secretsmanager delete-secret --secret-id burn-notify/<name> --recovery-window-in-days 7` | none |
-| Turn the stream off | revert the `ws/notifications-infra` change, then `make deploy-BurnData` | none (in-place update); destroy the notifications stack first |
+| Turn the stream off | remove the `stream=` argument for `burn-events` in `infra/burn_infra/data.py` (#120), then `make deploy-BurnData` | none (in-place update); destroy the notifications stack first |
 
 ## Operational notes
 - **Order:** deploy the stream first, then the notifications stack; for teardown, the reverse.
