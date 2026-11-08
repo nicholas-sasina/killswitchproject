@@ -50,11 +50,11 @@ def test_category_and_agent_filters():
     assert set(statuses(proc, event)) == {"slack-sec"}
 
 
-def test_role_filter():
-    proc = make_processor(make_config(slack={"roles": ["reader"]}))
-    event = fixtures.canary_used()
-    proc.process_event(event)
-    assert "slack-sec" not in statuses(proc, event)
+def test_role_filter_is_refused():
+    """Real revoked/flagged/canary_used/blocked events carry no role: a role filter would drop them all."""
+    import pytest
+    with pytest.raises(ValueError, match="roles"):
+        make_config(slack={"roles": ["reader"]})
 
 
 def test_duplicate_stream_records_deliver_once():
@@ -299,7 +299,7 @@ def test_events_with_no_route_record_nothing():
 
 
 def test_ledger_is_never_written():
-    """The processor has no handle on BURN tables: its only writes go to its own store."""
+    """The processor has no handle on Burn tables: its only writes go to its own store."""
     import burn_notify.processor as processor_module
     source = open(processor_module.__file__).read()
     assert "burn-events" not in source and "put_item" not in source

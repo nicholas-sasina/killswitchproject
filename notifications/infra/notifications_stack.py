@@ -1,7 +1,7 @@
 """BurnNotifications: PROPOSED stack for the infra owner. Not wired into infra/app.py.
 
-    burn-events DynamoDB stream (NEW_IMAGE)          <- needs the one-line change in docs/infra-integration.md
-      -> EventBridge Pipe (filter: eventName = INSERT)
+    burn-events DynamoDB stream (NEW_IMAGE)          <- enabled by branch ws/notifications-infra (docs/DEPLOYMENT.md)
+      -> EventBridge Pipe (filter: eventName = INSERT; input template keeps only burn_notify.events.FORWARDED)
       -> SQS burn-notify (SSE, redrive to burn-notify-dlq after 5 receives)
       -> Lambda burn-notify (batch 1, ReportBatchItemFailures) -> Slack / Telegram / Discord / Teams / SES
     EventBridge schedule (1 min) -> Lambda burn-notify-flush (aggregate summaries, digests)
@@ -12,13 +12,14 @@ Context values (all optional except the stream ARN):
     burn:notify_config        path to the notifications config JSON (secret_refs only, no secrets)
     burn:notify_ses_identity  verified SES identity name (domain or address) the Lambda may send from
     burn:dashboard_origin     https origin of the hosted dashboard (links go to <origin>/#/alerts)
+    burn:alarm_email          optional address subscribed to the alarm topic (confirms by email)
     burn:ses_sandbox          "true" (default) also allows the configured recipient identities, as the
                               SES sandbox requires; "false" once the account has production access
 
 Least privilege: the Pipe role can read only the burn-events stream and send only to
 the queue; the Lambda role can read only secrets named burn-notify/*, use only its
 own state table, and send email only from the configured sender address. Nothing here can
-write to any BURN table.
+write to any Burn table.
 """
 from __future__ import annotations
 
@@ -34,10 +35,24 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as sources
 from aws_cdk import aws_pipes as pipes
+from aws_cdk import aws_cloudwatch_actions as cw_actions
+from aws_cdk import aws_sns as sns
+from aws_cdk import aws_sns_subscriptions as subs
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
 NOTIFICATIONS = pathlib.Path(__file__).resolve().parents[1]
+# Fields the Pipe forwards; kept equal to burn_notify.events.FORWARDED by tests/test_infra.py.
+FORWARDED = ("event_id", "ts", "agent_id", "source", "action", "session_id", "secret_ref", "secret_type", "owner",
+             "flag_level", "detail", "role", "parent_session", "replaces", "replaced_by")
+
+
+def input_template() -> str:
+    """Pipe target input: a stream-record shape holding only FORWARDED attributes (DynamoDB JSON)."""
+    image = ", ".join(f'"{name}": <$.dynamodb.NewImage.{name}>' for name in FORWARDED)
+    return '{"eventName": "<$.eventName>", "dynamodb": {"NewImage": {' + image + '}}}'
+
+
 MAX_RECEIVES = 5
 LAMBDA_TIMEOUT = 60          # one event x up to 5 destinations x (5 s timeout + one quick retry) fits
 LEASE_SECONDS = LAMBDA_TIMEOUT + 30  # a claim outlives the worker that holds it, so no two live senders
@@ -91,6 +106,7 @@ class BurnNotificationsStack(cdk.Stack):
         pipes.CfnPipe(
             self, "EventsToQueue", name="burn-events-to-notify", role_arn=pipe_role.role_arn,
             source=stream_arn, target=queue.queue_arn,
+            target_parameters=pipes.CfnPipe.PipeTargetParametersProperty(input_template=input_template()),
             source_parameters=pipes.CfnPipe.PipeSourceParametersProperty(
                 dynamo_db_stream_parameters=pipes.CfnPipe.PipeSourceDynamoDBStreamParametersProperty(
                     starting_position="LATEST", batch_size=10, maximum_batching_window_in_seconds=1,
@@ -117,6 +133,10 @@ class BurnNotificationsStack(cdk.Stack):
         if ses_resources and str(ctx("burn:ses_sandbox") or "true").lower() == "true":
             recipients = {r.strip() for d in emails for r in str(d.get("recipient", "")).split(",") if r.strip()}
             ses_resources += [ses_arn + r for r in sorted(recipients)]
+        config_sets = {d.get("options", {}).get("configuration_set") for d in emails} - {None}
+        if ses_resources:
+            ses_resources += [f"arn:{cdk.Aws.PARTITION}:ses:{cdk.Aws.REGION}:{cdk.Aws.ACCOUNT_ID}:configuration-set/{c}"
+                              for c in sorted(config_sets)]
 
         def fn(name: str, handler: str) -> lambda_.Function:
             f = lambda_.Function(
@@ -145,7 +165,17 @@ class BurnNotificationsStack(cdk.Stack):
         events.Rule(self, "FlushSchedule", schedule=events.Schedule.rate(cdk.Duration.minutes(1)),
                     targets=[targets.LambdaFunction(flush)])
 
-        # --- alarms -----------------------------------------------------------------------
+        # --- alarms (each notifies the topic; subscribe an address with -c burn:alarm_email) --
+        topic = sns.Topic(self, "AlarmTopic", topic_name="burn-notify-alarms")
+        if ctx("burn:alarm_email"):
+            topic.add_subscription(subs.EmailSubscription(ctx("burn:alarm_email")))
+        cw.Alarm(self, "PermanentFailures", alarm_name="burn-notify-permanent-failures",
+                 alarm_description="A destination was given up on (bad credential, unknown channel, ...). "
+                                   "These never reach the DLQ.",
+                 metric=cw.Metric(namespace="Burn/Notifications", metric_name="PermanentFailure",
+                                  statistic="Sum", period=cdk.Duration.minutes(5)),
+                 threshold=0, comparison_operator=cw.ComparisonOperator.GREATER_THAN_THRESHOLD,
+                 evaluation_periods=1, treat_missing_data=cw.TreatMissingData.NOT_BREACHING)
         cw.Alarm(self, "DlqNotEmpty", alarm_name="burn-notify-dlq-not-empty",
                  metric=dlq.metric_approximate_number_of_messages_visible(period=cdk.Duration.minutes(1)),
                  threshold=0, comparison_operator=cw.ComparisonOperator.GREATER_THAN_THRESHOLD,
@@ -158,3 +188,6 @@ class BurnNotificationsStack(cdk.Stack):
                  metric=queue.metric_approximate_age_of_oldest_message(period=cdk.Duration.minutes(1)),
                  threshold=300, comparison_operator=cw.ComparisonOperator.GREATER_THAN_THRESHOLD,
                  evaluation_periods=3, treat_missing_data=cw.TreatMissingData.NOT_BREACHING)
+        for alarm in self.node.find_all():
+            if isinstance(alarm, cw.Alarm):
+                alarm.add_alarm_action(cw_actions.SnsAction(topic))

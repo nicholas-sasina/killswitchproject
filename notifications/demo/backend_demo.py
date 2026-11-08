@@ -1,4 +1,4 @@
-"""Reproducible demo: BURN's own containment code produces the events, notifications deliver them.
+"""Reproducible demo: Burn's own containment code produces the events, notifications deliver them.
 
     cd notifications
     uv run python demo/backend_demo.py                       # dry run: nothing leaves the machine
@@ -7,7 +7,7 @@
 
 What is real and what is not:
   * REAL CODE: the mock provider, the Burn API canary containment and the minter run unmodified,
-    through burn_api/scripts/canary_harness.py (the same harness BURN's own tests use). Every event
+    through burn_api/scripts/canary_harness.py (the same harness Burn's own tests use). Every event
     below was written to burn-events by that code; nothing is hand-made.
   * EMULATED AWS: DynamoDB, Secrets Manager and IAM are moto, in this process. No AWS account is used.
     The "leak" and the attacker's presentation of the canary are simulated by the harness.
@@ -30,12 +30,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "notifications"))
 sys.path.insert(0, str(ROOT / "burn_api" / "scripts"))
 
-NOTICE = ("SYNTHETIC TEST - produced by BURN's containment code on emulated AWS (local demo); "
+NOTICE = ("SYNTHETIC TEST - produced by Burn's containment code on emulated AWS (local demo); "
           "not a real security event")
 
 
 def burn_events(scenario: str, workers: int) -> tuple[list[dict], dict]:
-    """Run BURN's real canary path on moto and return the ledger rows it wrote, oldest first."""
+    """Run Burn's real canary path on moto and return the ledger rows it wrote, oldest first."""
     import canary_harness as harness
     from moto import mock_aws
     os.environ.update(harness.ENV)
@@ -105,7 +105,7 @@ def main(argv=None) -> int:
 
     from burn_notify import fixtures
     events, facts = burn_events(args.scenario, args.workers)
-    print("== BURN (real code, emulated AWS):", json.dumps(facts))
+    print("== Burn (real code, emulated AWS):", json.dumps(facts))
     proc, clock = build_processor(args)
     print(f"== delivery mode: {'LIVE to configured test destinations' if args.live else 'dry run (no network)'}\n")
     record = []
@@ -136,7 +136,7 @@ def main(argv=None) -> int:
     if args.json:
         print(json.dumps({"burn": facts, "events": record, "deliveries": proc.store.list_deliveries()},
                          indent=2, default=str))
-    print("\nEvents were written by BURN's real code on emulated AWS; messages are labelled [TEST].")
+    print("\nEvents were written by Burn's real code on emulated AWS; messages are labelled [TEST].")
     return 0
 
 

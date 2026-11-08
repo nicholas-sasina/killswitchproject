@@ -44,10 +44,10 @@ class SlackProvider(Provider):
             blocks.append({"type": "section", "fields": fields[i:i + 10]})
         if incident.dashboard_url:
             blocks.append({"type": "actions", "elements": [{
-                "type": "button", "text": {"type": "plain_text", "text": "Investigate in BURN"},
+                "type": "button", "text": {"type": "plain_text", "text": "Investigate in Burn"},
                 "url": incident.dashboard_url, "action_id": "burn_open_alerts"}]})
         blocks.append({"type": "context", "elements": [{
-            "type": "mrkdwn", "text": esc("Generated from BURN ledger events; no credential values are included.")}]})
+            "type": "mrkdwn", "text": esc("Generated from Burn ledger events; no credential values are included.")}]})
         body = {"text": esc(f"{incident.header}: {incident.title} ({incident.agent_id})"), "blocks": blocks,
                 "unfurl_links": False, "unfurl_media": False}
         return PreparedRequest(url_ref=dest.secret_ref, body=body, preview={"provider": self.name, "body": body})

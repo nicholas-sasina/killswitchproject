@@ -99,5 +99,52 @@ def test_least_privilege_no_burn_table_access(template):
                                         "dynamodb:GetShardIterator"}, actions
 
 
-def test_alarms(template):
-    template.resource_count_is("AWS::CloudWatch::Alarm", 3)
+def test_alarms_notify_the_topic(template):
+    template.resource_count_is("AWS::CloudWatch::Alarm", 4)
+    template.has_resource_properties("AWS::SNS::Topic", {"TopicName": "burn-notify-alarms"})
+    for alarm in template.find_resources("AWS::CloudWatch::Alarm").values():
+        assert alarm["Properties"].get("AlarmActions"), alarm["Properties"]["AlarmName"]
+    template.has_resource_properties("AWS::CloudWatch::Alarm", {
+        "AlarmName": "burn-notify-permanent-failures", "MetricName": "PermanentFailure",
+        "Namespace": "Burn/Notifications"})
+
+
+def test_forwarded_fields_match_the_parser():
+    from burn_notify import events
+    import notifications_stack
+    assert notifications_stack.FORWARDED == events.FORWARDED
+
+
+def _render_pipe_template(template_text: str, record: dict) -> str:
+    """What EventBridge Pipes does with the input template: quoted <$.x> -> the string value,
+    unquoted <$.x> -> the JSON value at that path."""
+    import re
+
+    def resolve(path):
+        value = record
+        for part in path.split(".")[1:]:
+            value = value[part]
+        return value
+    text = re.sub(r'"<(\$[^>]+)>"', lambda m: json.dumps(resolve(m.group(1))), template_text)
+    return re.sub(r"<(\$[^>]+)>", lambda m: json.dumps(resolve(m.group(1))), text)
+
+
+@pytest.mark.parametrize("name", ["canary_used", "blocked", "rotation_failed", "flagged_reported", "dismissed",
+                                  "provider_reported", "resumed"])
+def test_pipe_projection_keeps_classification_and_drops_sensitive_fields(template, name):
+    from burn_notify import fixtures
+    from burn_notify.events import parse
+    from burn_notify.policy import classify
+    pipe = next(iter(template.find_resources("AWS::Pipes::Pipe").values()))
+    tmpl = pipe["Properties"]["TargetParameters"]["InputTemplate"]
+    event = fixtures.ALL[name]()
+    event["actor"] = "person@example.com"
+    record = fixtures.stream_record(event)
+    body = _render_pipe_template(tmpl, record)
+    forwarded = parse({"messageId": "m", "receiptHandle": "r", "body": body})
+    assert classify(forwarded).category == classify(parse(record)).category
+    for dropped in ("fingerprint", "destination", "encoding", "tool", "actor", "owner_agent_id", "target_agent_id"):
+        assert forwarded[dropped] is None
+        kept_values = {event[f] for f in ("agent_id", "session_id", "role") if event.get(f)}
+        if event.get(dropped) and event[dropped] not in kept_values:
+            assert event[dropped] not in body

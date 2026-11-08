@@ -131,7 +131,7 @@ def test_real_tls_round_trip(ca, slack_server):
     assert req["path"] == SLACK_URL.split("hooks.slack.com", 1)[1]
     assert req["headers"]["Host"] == "hooks.slack.com"
     assert req["headers"]["Content-Type"] == "application/json"
-    assert json.loads(req["body"])["blocks"][0]["text"]["text"].startswith("BURN SECURITY ALERT")
+    assert json.loads(req["body"])["blocks"][0]["text"]["text"].startswith("Burn security alert")
 
 
 def test_untrusted_certificate_is_refused(ca, slack_server):

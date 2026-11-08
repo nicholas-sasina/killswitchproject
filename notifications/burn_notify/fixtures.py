@@ -1,4 +1,7 @@
-"""Synthetic ledger events shaped exactly like BURN's writers produce them.
+"""Synthetic ledger events shaped exactly like Burn's writers produce them.
+
+Only instance events (replaced, resumed) carry a role: the provider's canary_used, the Burn
+API's revoked/flagged/rotated and the proxy's blocked events do not.
 
 Detail strings copy the templates in burn_api/lambdas/api/{burn,canary,flag_review}.py
 and minter/lambdas/provider/canary_trip.py. Fingerprints are hashes of a fixed
@@ -50,11 +53,11 @@ def canary_used(origin: str = "outside", **kw) -> dict:
     }[origin]
     return base("canary_used", "provider", session_id=SESSION, secret_ref=_canary_ref(AGENT, SESSION),
                 fingerprint=_fp("canary"), secret_type="other", owner="agent", owner_agent_id=AGENT,
-                detail=detail, role=ROLE, **kw)
+                detail=detail, **kw)
 
 
 def canary_revoked(**kw) -> dict:
-    return base("revoked", "burn", session_id=SESSION, secret_ref=_canary_ref(AGENT, SESSION), role=ROLE,
+    return base("revoked", "burn", session_id=SESSION, secret_ref=_canary_ref(AGENT, SESSION),
                 detail="canary incident evt_X: session revoked; canary first read via read_ticket at 2026-11-07", **kw)
 
 
@@ -103,7 +106,7 @@ def provider_reported(**kw) -> dict:
 def blocked(source: str = "egress", **kw) -> dict:
     return base("blocked", source, session_id=SESSION, secret_ref="burn/shared/synthetic_test_key",
                 fingerprint=_fp("billing"), secret_type="api_key", owner="shared", destination="exfil.example.net",
-                encoding="base64", detail="credential_in_body", role=ROLE, **kw)
+                encoding="base64", detail="credential_in_body", **kw)
 
 
 def refused(**kw) -> dict:

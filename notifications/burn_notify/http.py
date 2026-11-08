@@ -56,6 +56,8 @@ def check_url(url: str, *, exact: frozenset[str] = frozenset(), suffixes: tuple[
         port = parts.port
     except ValueError as exc:
         raise UnsafeURL("malformed URL") from exc
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        raise UnsafeURL("whitespace or control characters in URL")  # http.client would echo the path
     if parts.scheme != "https":
         raise UnsafeURL("only https URLs are allowed")
     if parts.username or parts.password or "@" in parts.netloc:
@@ -94,9 +96,25 @@ def is_public_address(addr: str) -> bool:
 Resolver = Callable[[str], list[str]]
 
 
+DNS_TIMEOUT = 3.0
+
+
+def _address_order(addr: str) -> tuple[int, str]:
+    return (0 if ipaddress.ip_address(addr).version == 4 else 1, addr)
+
+
 def system_resolver(host: str) -> list[str]:
-    infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    return sorted({info[4][0] for info in infos})
+    """Resolve with a timeout (getaddrinfo has none); IPv4 first, since a Lambda outside a VPC has no
+    IPv6 egress and string order would often put an IPv6 address first."""
+    import concurrent.futures
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        infos = pool.submit(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM).result(timeout=DNS_TIMEOUT)
+    except concurrent.futures.TimeoutError:
+        raise OSError("DNS resolution timed out") from None
+    finally:
+        pool.shutdown(wait=False)
+    return sorted({info[4][0] for info in infos}, key=_address_order)
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -132,26 +150,36 @@ class SafeTransport:
         self.context = context or ssl.create_default_context()
         self.port = port
 
-    def vet(self, url: str) -> tuple[str, str, str]:
+    def vet(self, url: str) -> tuple[str, str, list[str]]:
         host, path = check_url(url, exact=self.exact, suffixes=self.suffixes, path_prefixes=self.path_prefixes)
         try:
             addresses = self.resolver(host)
-        except OSError as exc:
-            raise ConnectionError("DNS resolution failed") from exc
+        except OSError:
+            raise ConnectionError("DNS resolution failed") from None
         if not addresses or not all(self.address_ok(a) for a in addresses):
             raise UnsafeURL("host resolves to a non-public address")
-        return host, path, addresses[0]
+        return host, path, addresses
 
     def post(self, url: str, body: bytes, headers: dict[str, str], *, timeout: float = DEFAULT_TIMEOUT) -> Response:
         if len(body) > MAX_REQUEST_BYTES:
             raise UnsafeURL("request body too large")
-        host, path, ip = self.vet(url)
-        conn = _PinnedHTTPSConnection(host, ip, timeout, self.context, self.port)
-        try:
-            conn.request("POST", path, body=body, headers={**headers, "Host": host,
-                                                          "User-Agent": "burn-notify/1.0"})
-            resp = conn.getresponse()
-            data = resp.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES]
-            return Response(resp.status, {k.lower(): v for k, v in resp.getheaders()}, data)
-        finally:
-            conn.close()
+        host, path, addresses = self.vet(url)
+        last_error: Exception | None = None
+        for ip in addresses[:2]:  # every address was vetted; try a second one if the first will not connect
+            conn = _PinnedHTTPSConnection(host, ip, timeout, self.context, self.port)
+            try:
+                try:
+                    conn.connect()
+                except ssl.SSLCertVerificationError:
+                    raise
+                except OSError as exc:
+                    last_error = exc
+                    continue
+                conn.request("POST", path, body=body, headers={**headers, "Host": host,
+                                                              "User-Agent": "burn-notify/1.0"})
+                resp = conn.getresponse()
+                data = resp.read(MAX_RESPONSE_BYTES + 1)[:MAX_RESPONSE_BYTES]
+                return Response(resp.status, {k.lower(): v for k, v in resp.getheaders()}, data)
+            finally:
+                conn.close()
+        raise ConnectionError("could not connect to any vetted address") from None

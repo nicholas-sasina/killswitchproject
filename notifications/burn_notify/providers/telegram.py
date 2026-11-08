@@ -52,7 +52,7 @@ class TelegramProvider(Provider):
             "protect_content": True,
         }
         if incident.dashboard_url:
-            body["reply_markup"] = {"inline_keyboard": [[{"text": "Investigate in BURN",
+            body["reply_markup"] = {"inline_keyboard": [[{"text": "Investigate in Burn",
                                                           "url": incident.dashboard_url}]]}
         return PreparedRequest(url_ref=dest.secret_ref, body=body, preview={"provider": self.name, "body": body})
 

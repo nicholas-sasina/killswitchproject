@@ -1,4 +1,4 @@
-"""Requirement 22: the parser stays compatible with BURN's real event contract."""
+"""Requirement 22: the parser stays compatible with Burn's real event contract."""
 import json
 from pathlib import Path
 

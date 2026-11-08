@@ -1,7 +1,7 @@
 """Process one ledger event: classify, route, claim, deliver, record.
 
 Each destination is handled independently: one provider's outage, bad credential or
-crash never stops delivery to the others, and never touches BURN itself (this
+crash never stops delivery to the others, and never touches Burn itself (this
 service only reads the event stream and writes its own state table).
 """
 from __future__ import annotations
@@ -212,7 +212,10 @@ class Processor:
         provider = self.providers[dest.provider]
         try:
             secret = self.secrets.get(dest.secret_ref) if provider.needs_secret else None
-        except SecretError:
+        except SecretError as err:
+            metrics.emit("DeliveryFailed", provider=dest.provider, outcome="secret_unavailable")
+            if getattr(err, "transient", False):
+                return self._retry_or_fail(event, inc, dest, "secret_unavailable_transient", None, last_chance)
             return self._finish(event, inc, dest, st.FAILED, "secret_unavailable")
         try:
             prepared = provider.build(inc, dest)
@@ -262,6 +265,8 @@ class Processor:
         return self._finish(event, inc, dest, st.RETRYING, category, retry_after=retry_after)
 
     def _finish(self, event, inc, dest, status, category, *, provider_ref=None, retry_after=None) -> Outcome:
+        if status == st.FAILED:
+            metrics.emit("PermanentFailure", provider=dest.provider, outcome=category or "unknown")
         self.store.finish(event["event_id"], dest.id, status, self.clock(), category=category,
                           provider_ref=provider_ref, retry_after=retry_after)
         return Outcome(dest.id, status, category, retry_after)
@@ -294,12 +299,27 @@ class Processor:
                     continue
                 inc = self._summary_incident(claimed, suppressed, is_digest)
             pseudo_event = {"event_id": inc.event_id}
-            claim = self.store.claim(inc.event_id, dest.id, dest.provider, now, self.config.delivery_ttl_days)
-            if not claim.won:
-                continue
-            outcome = self._send(pseudo_event, inc, dest, last_chance=claim.attempts >= self.max_receives)
+            try:
+                claim = self.store.claim(inc.event_id, dest.id, dest.provider, now, self.config.delivery_ttl_days)
+                if not claim.won:
+                    continue
+                last = claim.attempts >= self.max_receives
+                if inc.severity < Severity.CRITICAL and not self.store.rate_take(
+                        dest.id, int(now // 60), dest.rate_per_minute, now):
+                    outcome = self._retry_or_fail(pseudo_event, inc, dest, "local_rate_limit", 60.0, last)
+                else:
+                    outcome = self._send(pseudo_event, inc, dest, last_chance=last)
+            except Exception as exc:  # one window never stops the flush, and never stays "sending"
+                log.error("flush of a window for %s failed: %s", dest.id, type(exc).__name__)
+                try:
+                    outcome = self._finish(pseudo_event, inc, dest, st.RETRYING, "internal_error")
+                except Exception:
+                    outcome = Outcome(dest.id, st.RETRYING, "internal_error")
             if outcome.status == st.RETRYING:
-                self.store.reopen_window(window["pk"])  # the next flush tries again (bounded by attempts)
+                try:
+                    self.store.reopen_window(window["pk"])  # the next flush tries again (bounded by attempts)
+                except Exception as exc:
+                    log.error("could not reopen a window for %s: %s", dest.id, type(exc).__name__)
             outcomes.append(outcome)
             self.flushed.append((dest.id, inc))
         return outcomes

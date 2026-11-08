@@ -1,9 +1,9 @@
 # notifications
 
 ## What it does
-Sends BURN security incidents to private Slack, Telegram, Discord and Microsoft Teams channels and
-to email (Amazon SES). It reads the events BURN already writes to `burn-events`. It does not add
-event types, does not change how events are written, and never writes to a BURN table. A failed
+Sends Burn security incidents to private Slack, Telegram, Discord and Microsoft Teams channels and
+to email (Amazon SES). It reads the events Burn already writes to `burn-events`. It does not add
+event types, does not change how events are written, and never writes to a Burn table. A failed
 notification cannot block an agent, the Burn API or containment, and the event stays in the ledger
 whatever happens to its notifications.
 
@@ -63,9 +63,9 @@ below HIGH. The wording follows the evidence:
 - Failed or partial containment is never called successful.
 
 ### Canary alert, then containment update
-1. **`canary_used`**: *BURN SECURITY ALERT — HIGH*, with Signal: Canary use detected, Containment:
+1. **`canary_used`**: *Burn security alert — HIGH*, with Signal: Canary use detected, Containment:
    Awaiting verified outcome, and Credential action: Not yet confirmed.
-2. **`revoked`** (canary ref): *BURN CONTAINMENT UPDATE*, with Status: Session revoked and Other
+2. **`revoked`** (canary ref): *Burn containment update*, with Status: Session revoked and Other
    instances: No broad containment requested. Burn writes `revoked` before the rotation results, so
    at this point it shows what it knows so far, for example "Rotation not yet confirmed".
 3. **Containment summary**: about a minute later the flush sends what was recorded **since this
@@ -102,7 +102,7 @@ below HIGH. The wording follows the evidence:
   - Containment facts are kept as sets, so duplicates and reordering are harmless.
 - **Alert fatigue.**
   - Per destination, the first 3 similar events (same category and agent) in a 5-minute window are
-    sent one by one. The rest are summarized at the window's end, for example "BURN blocked 47 related
+    sent one by one. The rest are summarized at the window's end, for example "Burn blocked 47 related
     requests from agent-worker-07 … No successful disclosure has been established by these events."
   - Distinct incidents (containment failures, canary incidents, `reported` flags, containment updates)
     and anything CRITICAL are never aggregated.
@@ -124,7 +124,7 @@ See [`config.example.json`](config.example.json).
 | `enabled` | `false` stops all sends to this destination |
 | `min_severity` | `info`/`low`/`medium`/`high`/`critical` |
 | `categories` / `exclude_categories` | Category allow / deny lists (names from the table above) |
-| `roles` / `agents` | Only incidents for these roles / agent ids |
+| `agents` | Only incidents for these agent ids. There is no role filter: the security events Burn writes (`revoked`, `flagged`, `canary_used`, `blocked`) carry no role, so one would drop them all, and config refuses it |
 | `recipient` | Telegram chat id, or comma-separated email addresses (max 10) |
 | `secret_ref` | `env:NAME` (local only) or `aws-sm:<secret-id>[#json-key]` |
 | `digest_low`, `rate_per_minute` | LOW → hourly digest; local rate limit |
@@ -173,10 +173,10 @@ Public social networks are not supported, on purpose.
 ## Run it
 ```bash
 cd notifications && uv sync --all-groups
-uv run pytest -q                                   # unit, moto, real-socket TLS, BURN-code demo; no network
+uv run pytest -q                                   # unit, moto, real-socket TLS, Burn-code demo; no network
 uv run --group infra pytest -q tests/test_infra.py # synth the proposed stack
 uv run python -m burn_notify dry-run --demo        # fixtures: canary alert -> update -> summary
-uv run python demo/backend_demo.py                 # BURN's real containment code on emulated AWS -> notifications
+uv run python demo/backend_demo.py                 # Burn's real containment code on emulated AWS -> notifications
 uv run python demo/backend_demo.py --scenario rotation-failure
 uv run python -m burn_notify live-check --dry-run --inject-failure   # the live check, no network
 ```
@@ -201,8 +201,10 @@ In short:
    - EventBridge Pipe (INSERT filter, its own DLQ).
    - SQS queue and DLQ.
    - Two Lambdas: batch 1, 60 s, no reserved concurrency, at most 2 concurrent.
-   - The state table, plus 3 alarms.
-3. **IAM is least privilege.** Neither role can touch a BURN table or a BURN secret.
+   - The state table, plus 4 alarms that notify an SNS topic.
+   - The Pipe's input template forwards only the fields classification needs, so `fingerprint`,
+     `destination`, `actor`, `tool`, `encoding` and the other agent ids never sit in SQS or the DLQ.
+3. **IAM is least privilege.** Neither role can touch a Burn table or a Burn secret.
 
 ## Security
 - **Allowlisted fields only.** Messages are built from the `Incident` allowlist.

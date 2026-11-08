@@ -17,7 +17,20 @@ import time
 
 
 class SecretError(Exception):
-    """A secret could not be resolved. Permanent configuration error; message is value-free."""
+    """A secret could not be resolved; the message is value-free.
+
+    transient=True means retrying may succeed (throttling, network, service errors); otherwise it is
+    a configuration error (missing secret, wrong key, access denied) and retrying cannot fix it.
+    """
+
+    def __init__(self, message: str, *, transient: bool = False):
+        super().__init__(message)
+        self.transient = transient
+
+
+_PERMANENT_SM_CODES = {"ResourceNotFoundException", "AccessDeniedException", "AccessDenied",
+                       "InvalidParameterException", "InvalidRequestException", "DecryptionFailure",
+                       "UnrecognizedClientException"}
 
 
 class SecretResolver:
@@ -32,7 +45,9 @@ class SecretResolver:
     def _sm(self):
         if self._client is None:
             import boto3
-            self._client = boto3.client("secretsmanager")
+            from botocore.config import Config
+            self._client = boto3.client("secretsmanager", config=Config(
+                connect_timeout=3, read_timeout=5, retries={"max_attempts": 2, "mode": "standard"}))
         return self._client
 
     def get(self, ref: str) -> str:
@@ -41,7 +56,9 @@ class SecretResolver:
             hit = self._cache.get(ref)
             if hit and hit[0] > now:
                 return hit[1]
-        value = self._fetch(ref)
+        value = self._fetch(ref).strip()
+        if not value:
+            raise SecretError("secret is empty")
         with self._lock:
             self._cache[ref] = (now + self.ttl, value)
         return value
@@ -61,8 +78,11 @@ class SecretResolver:
             secret_id, _, key = name.partition("#")
             try:
                 raw = self._sm().get_secret_value(SecretId=secret_id)["SecretString"]
-            except Exception as exc:  # botocore errors: report the class only
-                raise SecretError(f"Secrets Manager lookup failed ({type(exc).__name__})") from None
+            except Exception as exc:  # botocore errors: report the class/code only, never the message
+                code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code")
+                transient = code not in _PERMANENT_SM_CODES  # throttling, 5xx, timeouts, connection errors
+                raise SecretError(f"Secrets Manager lookup failed ({code or type(exc).__name__})",
+                                  transient=transient) from None
             if not key:
                 return raw
             try:

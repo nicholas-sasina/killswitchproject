@@ -160,7 +160,7 @@ def test_teams_identifiers_render_without_backslashes():
     from burn_notify import escape
     assert escape.teams("evt_01M6X0QPK47RD91Z0P8FCJ3QTC") == "evt_01M6X0QPK47RD91Z0P8FCJ3QTC"
     assert escape.teams("sess_5b1e0c9a7d2f4e61") == "sess_5b1e0c9a7d2f4e61"
-    assert escape.teams("[TEST] BURN SECURITY ALERT") == "[TEST] BURN SECURITY ALERT"
+    assert escape.teams("[TEST] Burn security alert") == "[TEST] Burn security alert"
     assert "](" not in escape.teams("[click](https://evil.example)")
     assert escape.teams("_a_ *b*") == "\\_a\\_ \\*b\\*"
 
@@ -208,3 +208,132 @@ def test_flush_stops_at_deadline():
     proc.monotonic = lambda: 100.0
     assert proc.flush_windows(deadline=105.0) == []      # no time: nothing claimed
     assert [o.status for o in proc.flush_windows()] == ["delivered"]  # next flush sends it
+
+
+# ---- second review (PR #113 comments) ---------------------------------------------------------
+def test_transient_secret_error_is_retried_not_failed():
+    from burn_notify.secrets import SecretError
+
+    class Flaky:
+        def get(self, ref):
+            raise SecretError("Secrets Manager lookup failed (ThrottlingException)", transient=True)
+
+    proc = make_processor(make_config(telegram=None, discord=None), secrets=Flaky())
+    event = fixtures.canary_used()
+    result = proc.process_event(event)
+    assert result.needs_retry
+    assert proc.store.get(event["event_id"], "slack-sec")["failure_category"] == "secret_unavailable_transient"
+
+
+def test_secret_manager_error_codes():
+    from burn_notify.secrets import SecretError, SecretResolver
+
+    class Err(Exception):
+        def __init__(self, code):
+            self.response = {"Error": {"Code": code, "Message": "arn:aws:secretsmanager:...:secret:x"}}
+
+    for code, transient in (("ThrottlingException", True), ("InternalServiceError", True),
+                            ("ResourceNotFoundException", False), ("AccessDeniedException", False)):
+        class SM:
+            def get_secret_value(self, SecretId, _c=code):
+                raise Err(_c)
+        with pytest.raises(SecretError) as err:
+            SecretResolver(client=SM()).get("aws-sm:burn-notify/slack")
+        assert err.value.transient is transient and "arn:" not in str(err.value)
+
+
+def test_secret_whitespace_is_stripped():
+    from burn_notify.secrets import SecretResolver
+    assert SecretResolver(environ={"X": "  https://hooks.slack.com/services/a/b/c\n"}).get("env:X") == \
+        "https://hooks.slack.com/services/a/b/c"
+
+
+def test_url_with_inner_whitespace_never_reaches_http_client_or_logs(caplog):
+    import logging
+    from burn_notify.http import UnsafeURL
+    with pytest.raises(UnsafeURL) as err:
+        check_url("https://hooks.slack.com/services/T0/B0/sec ret", exact=SlackProvider.exact_hosts,
+                  path_prefixes=SlackProvider.path_prefixes)
+    assert "sec" not in str(err.value)
+    slack = FakeTransport()
+    proc = make_processor(make_config(telegram=None, discord=None),
+                          secrets=__import__("conftest").DictSecrets({"env:SLACK": "https://hooks.slack.com/services/T0/B0/x y"}))
+    with caplog.at_level(logging.INFO):
+        proc.process_event(fixtures.canary_used())
+    assert "x y" not in caplog.text and "services/T0" not in caplog.text
+
+
+def test_unexpected_transport_exception_message_is_dropped():
+    import http.client
+
+    class Bad:
+        def post(self, *a, **k):
+            raise http.client.InvalidURL("URL can't contain control characters. '/services/T0/B0/SECRET'")
+
+    proc = make_processor(make_config(telegram=None, discord=None), transports={"slack": Bad()})
+    event = fixtures.canary_used()
+    proc.process_event(event)
+    row = proc.store.get(event["event_id"], "slack-sec")
+    assert row["status"] == "permanently_failed" and row["failure_category"] == "transport_error:InvalidURL"
+    assert "SECRET" not in json.dumps(row)
+
+
+def test_flush_survives_an_exception_and_reopens_the_window():
+    clock = Clock()
+    proc = make_processor(make_config(telegram=None, discord=None), clock=clock)
+    proc.process_event(fixtures.canary_revoked())
+    clock.t += 120
+    real = proc.store.rate_take
+    calls = {"n": 0}
+
+    def flaky(*a, **k):  # e.g. a DynamoDB error inside the flush
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("store unavailable")
+        return real(*a, **k)
+
+    proc.store.rate_take = flaky
+    assert [o.status for o in proc.flush_windows()] == ["retrying"]
+    assert proc.store.list_deliveries()[-1]["status"] != "sending"
+    clock.t += 60
+    assert [o.status for o in proc.flush_windows()] == ["delivered"]
+
+
+def test_flush_respects_rate_limit():
+    clock = Clock()
+    cfg = make_config({"aggregation": {"individual_per_window": 100}}, slack={"rate_per_minute": 1},
+                      telegram=None, discord=None)
+    proc = make_processor(cfg, clock=clock)
+    proc.process_event(fixtures.canary_revoked())   # uses this minute's single slot
+    clock.t += 50                                   # summary due, same minute -> rate limited
+    proc.store.rate_take("slack-sec", int(clock.t // 60), 1, clock.t)
+    assert [o.category for o in proc.flush_windows()] in ([], ["local_rate_limit"])
+
+
+def test_ipv4_preferred_when_resolving():
+    from burn_notify.http import _address_order
+    assert sorted(["2606:4700::1", "52.1.2.3"], key=_address_order) == ["52.1.2.3", "2606:4700::1"]
+
+
+def test_second_vetted_address_is_tried():
+    from burn_notify.http import SafeTransport
+    t = SafeTransport(exact=SlackProvider.exact_hosts, path_prefixes=SlackProvider.path_prefixes,
+                      resolver=lambda h: ["52.1.2.3", "52.1.2.4"])
+    assert t.vet("https://hooks.slack.com/services/a/b/c")[2] == ["52.1.2.3", "52.1.2.4"]
+
+
+def test_detail_prefixes_match_burns_real_writers():
+    """policy.py matches fixed prefixes; check them against the writers' source, not just the fixtures."""
+    from pathlib import Path
+    from burn_notify import policy
+    api = Path(__file__).resolve().parents[2] / "burn_api" / "lambdas" / "api"
+    provider = Path(__file__).resolve().parents[2] / "minter" / "lambdas" / "provider"
+    canary_src = (api / "canary.py").read_text()
+    assert f'detail="{policy._ROTATION_FAILED}' in canary_src
+    assert f'detail=f"{policy._ROTATION_DEFERRED}' in canary_src
+    assert f'detail=f"{policy._CANARY_NOT_CONTAINED}' in canary_src
+    assert f'detail=f"{policy._REPLACEMENT_NOT_RECORDED}' in (api / "replace.py").read_text()
+    trip = (provider / "canary_trip.py").read_text()
+    for marker in ("used through its own session", "used through another Burn session", "from outside Burn"):
+        assert marker in trip
+    assert "is report-only" in canary_src

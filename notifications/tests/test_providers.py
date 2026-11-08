@@ -40,7 +40,7 @@ EMAIL = Destination("email", "email", recipient="secops@example.com, lead@exampl
 def test_slack_block_kit_payload():
     body = SlackProvider(FakeTransport()).build(incident(), SLACK).body
     assert body["blocks"][0] == {"type": "header", "text": {"type": "plain_text",
-                                                            "text": "BURN SECURITY ALERT — HIGH", "emoji": False}}
+                                                            "text": "Burn security alert — HIGH", "emoji": False}}
     fields = [f["text"] for b in body["blocks"] if b["type"] == "section" and "fields" in b for f in b["fields"]]
     assert all(len(b.get("fields", [])) <= 10 for b in body["blocks"])
     joined = "\n".join(fields)
@@ -96,7 +96,7 @@ def test_telegram_send_message_payload():
     body = prepared.body
     assert body["chat_id"] == CHAT and body["parse_mode"] == "HTML"
     assert body["link_preview_options"] == {"is_disabled": True}
-    assert body["text"].startswith("\U0001F6A8 <b>BURN SECURITY ALERT")  # high-priority style
+    assert body["text"].startswith("\U0001F6A8 <b>Burn security alert")  # high-priority style
     assert "<b>Affected instance:</b> <code>agent-synthetic-000000</code>" in body["text"]
     assert body["reply_markup"]["inline_keyboard"][0][0]["url"] == "https://burn.example.com/#/alerts"
     ack = p.send(prepared, TG, TELEGRAM_TOKEN)
@@ -200,7 +200,7 @@ def test_teams_adaptive_card_payload():
     assert {b["type"] for b in card["body"]} <= allowed
     facts = {f["title"]: f["value"] for f in card["body"][-1]["facts"]}
     assert "Affected instance" in facts and facts["Severity"] == "HIGH"
-    assert card["actions"] == [{"type": "Action.OpenUrl", "title": "Investigate in BURN",
+    assert card["actions"] == [{"type": "Action.OpenUrl", "title": "Investigate in Burn",
                                 "url": "https://burn.example.com/#/alerts"}]
     json.dumps(body)  # serializable
 
@@ -236,7 +236,7 @@ def test_ses_email_generation():
     prepared = p.build(incident(), EMAIL)
     body = prepared.body
     simple = body["Content"]["Simple"]
-    assert simple["Subject"]["Data"].startswith("[BURN][HIGH] Canary credential presented")
+    assert simple["Subject"]["Data"].startswith("[Burn][HIGH] Canary credential presented")
     assert "Affected instance: agent-synthetic-000000" in simple["Body"]["Text"]["Data"]
     assert "<table>" in simple["Body"]["Html"]["Data"]
     assert body["Destination"]["ToAddresses"] == ["secops@example.com", "lead@example.com"]
@@ -246,9 +246,9 @@ def test_ses_email_generation():
 
 def test_ses_subject_per_severity():
     assert EmailProvider(ses_client=FakeSES()).build(incident("rotation_failed"), EMAIL).body["Content"]["Simple"][
-        "Subject"]["Data"].startswith("[BURN][CRITICAL]")
+        "Subject"]["Data"].startswith("[Burn][CRITICAL]")
     assert EmailProvider(ses_client=FakeSES()).build(incident("canary_revoked"), EMAIL).body["Content"]["Simple"][
-        "Subject"]["Data"].startswith("[BURN][UPDATE]")
+        "Subject"]["Data"].startswith("[Burn][UPDATE]")
 
 
 def test_ses_html_is_escaped():

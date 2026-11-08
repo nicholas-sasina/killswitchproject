@@ -36,7 +36,7 @@ cannot read messages back, so look at the channel to confirm the message is visi
 ### Telegram (Bot API)
 1. In Telegram, message **@BotFather** and send `/newbot`. Pick a name and username, then copy the
    token into `BURN_NOTIFY_TELEGRAM_BOT_TOKEN`.
-2. Create a **private group**, for example "BURN alerts test", and add the bot. You can also message
+2. Create a **private group**, for example "Burn alerts test", and add the bot. You can also message
    the bot directly for a 1:1 test.
 3. Send any message in the group. Then get the chat id without printing the token:
    ```bash
@@ -64,7 +64,7 @@ What Discord confirms: the service calls with `?wait=true`, so Discord returns t
 id (`ref=`), which is proof the message exists.
 
 ### Microsoft Teams (Workflows)
-1. In Teams, create a **private** channel, for example "BURN alerts test", in a team you own.
+1. In Teams, create a **private** channel, for example "Burn alerts test", in a team you own.
 2. In the channel, open **… → Workflows** and pick the template **"Post to a channel when a webhook
    request is received"**. Name it, check the team and channel, then **Add workflow**.
 3. Copy the URL it shows (`https://…logic.azure.com/workflows/…` or
@@ -78,7 +78,7 @@ posted, look at the channel, or check the flow's **Run history** in Power Automa
 
 ### Amazon SES
 SES needs AWS access, so it is tested against an account you are allowed to use. It must not be the
-shared BURN account without approval.
+shared Burn account without approval.
 1. SES console (us-east-1) → **Identities → Create identity**. Verify a sender address, or better, a
    domain.
 2. In the **sandbox**, also verify every test recipient address. Each recipient clicks the link AWS
@@ -108,7 +108,7 @@ BURN_NOTIFY_LIVE=1 uv run python -m burn_notify send --config ~/burn-notify-test
 BURN_NOTIFY_LIVE=1 uv run python -m burn_notify live-check --config ~/burn-notify-test.json \
     --live --inject-failure --report ~/burn-notify-live-report.json
 
-# d. BURN's real containment code (on emulated AWS) driving real delivery
+# d. Burn's real containment code (on emulated AWS) driving real delivery
 BURN_NOTIFY_LIVE=1 uv run python demo/backend_demo.py --live --config ~/burn-notify-test.json
 
 # e. pytest form of (b), one alert per destination

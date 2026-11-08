@@ -1,7 +1,7 @@
 [project]
 name = "burn-notifications"
 version = "0.1.0"
-description = "BURN notifications: classify ledger events and deliver them to private Slack, Telegram, Discord, Teams and SES destinations."
+description = "Burn notifications: classify ledger events and deliver them to private Slack, Telegram, Discord, Teams and SES destinations."
 requires-python = ">=3.11"
 dependencies = ["boto3"]
 

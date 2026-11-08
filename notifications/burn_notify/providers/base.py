@@ -11,6 +11,7 @@ Errors are classified so the processor can decide what to do:
 """
 from __future__ import annotations
 
+import http.client
 import json
 import random
 import ssl
@@ -32,7 +33,6 @@ class Destination:
     min_severity: str = "high"
     categories: tuple[str, ...] = ()          # empty = all categories
     exclude_categories: tuple[str, ...] = ()
-    roles: tuple[str, ...] = ()               # empty = any role
     agents: tuple[str, ...] = ()              # empty = any agent
     recipient: str | None = None              # chat id / email list / channel label (no secrets)
     secret_ref: str | None = None
@@ -140,6 +140,13 @@ class Provider:
             raise DeliveryError("tls_verification_failed", retryable=True) from None
         except (TimeoutError, ConnectionError, OSError):
             raise DeliveryError("network_error", retryable=True) from None
+        except Exception as exc:
+            # e.g. http.client.InvalidURL, whose message contains the request path (a webhook token).
+            # Only the class name is kept; the exception is never chained, logged or stored.
+            # ValueError (InvalidURL and friends) is a bad stored URL: permanent. Anything else is retried,
+            # bounded by max receives and the DLQ.
+            permanent = isinstance(exc, (ValueError, http.client.InvalidURL))
+            raise DeliveryError(f"transport_error:{type(exc).__name__}"[:60], retryable=not permanent) from None
 
 
 def sleep_for(seconds: float) -> None:  # patched in tests

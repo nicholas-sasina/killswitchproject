@@ -1,4 +1,4 @@
-# Deploying BURN notifications
+# Deploying Burn notifications
 
 **Status: not deployed.** Deploying changes the shared AWS account, so it needs explicit approval from
 the workstream owner **and** the infrastructure owner. Nothing below has been run against AWS. It has
@@ -19,7 +19,7 @@ differs from `main` in two places only:
   replaced, and writes and reads continue.
 - **Writers unchanged.** No code that writes events changes.
 - **No back-pressure.** A stream never slows table writes, and reading it uses no table capacity. If
-  notifications break, BURN keeps working.
+  notifications break, Burn keeps working.
 - **One reader.** The Pipe is the stream's only consumer. AWS recommends at most 2 per shard.
 
 Everything else is a **new** stack, `BurnNotifications`, from `notifications/infra/app.py`. It
@@ -37,13 +37,13 @@ Verify current prices before relying on them.
 | DynamoDB `burn-notify-state` | on demand, TTL | < $0.10 |
 | DynamoDB Stream on `burn-events` | read by the Pipe | < $0.10 |
 | Secrets Manager `burn-notify/*` | one per webhook or token (up to 4) | $0.40 each → up to $1.60 |
-| CloudWatch alarms (3) + logs | DLQ not empty, worker errors, queue age | ~$0.30 + logs |
+| CloudWatch alarms (4) + SNS topic + logs | permanent failures, DLQ not empty, worker errors, queue age; all notify `burn-notify-alarms` | ~$0.40 + logs |
 | SES | $0.10 per 1,000 emails | ~$0 |
 | **Total** | | **about $2–3 per month**, mostly secrets and alarms |
 
 ## Required IAM
 **Deployer** (whoever runs `cdk deploy`): the account's existing CDK bootstrap roles
-(`cdk-hnb659fds-*`), the same ones BURN's stacks already use. Plus, for the commands below,
+(`cdk-hnb659fds-*`), the same ones Burn's stacks already use. Plus, for the commands below,
 `secretsmanager:CreateSecret`/`PutSecretValue` on `burn-notify/*`, `ses:CreateEmailIdentity`
 (once), `dynamodb:DescribeTable` on `burn-events`, and `sqs:SendMessage` on `burn-notify` (for the
 verification message).
@@ -61,7 +61,7 @@ verification message).
   - consume, including `ChangeMessageVisibility`, on `burn-notify`
   - CloudWatch Logs
 
-Neither role can read or write any BURN table or touch `burn/*` or `burn-system/*` secrets.
+Neither role can read or write any Burn table or touch `burn/*` or `burn-system/*` secrets.
 
 ## Required secrets (AWS Secrets Manager, us-east-1)
 | Secret | Value (JSON) | Config reference |
@@ -112,7 +112,8 @@ aws sesv2 create-email-identity --email-identity <yourdomain or sender address>
 # 5. Review, then deploy the notifications stack
 cd notifications
 CTX="-c burn:events_stream_arn=$STREAM_ARN -c burn:notify_config=$HOME/burn-notify-deployed.json \
-     -c burn:notify_ses_identity=<identity> -c burn:dashboard_origin=https://<dashboard host>"
+     -c burn:notify_ses_identity=<identity> -c burn:dashboard_origin=https://<dashboard host> \
+     -c burn:alarm_email=<on-call address>"
 uv run --group infra npx -y aws-cdk@2 diff   --app "python infra/app.py" BurnNotifications $CTX
 uv run --group infra npx -y aws-cdk@2 deploy --app "python infra/app.py" BurnNotifications $CTX
 ```
@@ -124,7 +125,7 @@ aws lambda get-event-source-mapping --uuid "$(aws lambda list-event-source-mappi
     --function-name burn-notify --query 'EventSourceMappings[0].UUID' --output text)" --query State
 aws dynamodb describe-time-to-live --table-name burn-notify-state
 
-# End to end WITHOUT writing to BURN's ledger: a [TEST]-labelled message straight onto the queue
+# End to end WITHOUT writing to Burn's ledger: a [TEST]-labelled message straight onto the queue
 QUEUE=$(aws sqs get-queue-url --queue-name burn-notify --query QueueUrl --output text)
 aws sqs send-message --queue-url "$QUEUE" --message-body "$(uv run python -m burn_notify test-message)"
 aws logs tail /aws/lambda/burn-notify --since 5m --format short      # Delivered metrics, no secrets
@@ -136,12 +137,19 @@ aws sqs get-queue-attributes --queue-url "$(aws sqs get-queue-url --queue-name b
     --query QueueUrl --output text)" --attribute-names ApproximateNumberOfMessages   # expect 0
 ```
 
+The test message goes straight onto the queue, so it checks the queue → Lambda → providers part only.
+**The stream → Pipe → input template part is checked only by a real ledger event**, for example the
+team's demo run (`make demo`) or a canary presentation through the deployed mock provider. That writes
+a genuine (test-agent) event to `burn-events` and needs its own approval. Check its delivery row in
+`burn-notify-state`, and confirm the Pipe shows no failures:
+`aws pipes describe-pipe --name burn-events-to-notify` and the `burn-notify-dlq` count.
+
 Then confirm in each channel that the `[TEST]` alert arrived. About a minute later, check for its
 follow-up summary too if the test fixture was a containment update (`--fixture canary_revoked`).
-Real BURN events flow automatically from then on.
+Real Burn events flow automatically from then on.
 
 ## Stop, roll back, tear down
-| Goal | Command | Effect on BURN |
+| Goal | Command | Effect on Burn |
 |---|---|---|
 | Pause all notifications | `aws pipes stop-pipe --name burn-events-to-notify` | none; resume with `start-pipe` (the stream keeps 24 h of records) |
 | Pause delivery only | `aws lambda update-event-source-mapping --uuid <uuid> --no-enabled` | none; messages wait in SQS for up to 4 days |
@@ -157,5 +165,11 @@ Real BURN events flow automatically from then on.
 - **Queue access:** any principal in the account allowed `sqs:SendMessage` on `burn-notify` could
   inject a message that looks like an event. The test envelope is always labelled `[TEST]`, but a raw
   stream-shaped record is not. Keep queue access to the Pipe role and the operators.
+- **Data in the queue:** the Pipe's input template forwards only `burn_notify.events.FORWARDED`.
+  `fingerprint`, `destination`, `actor` (a person's email), `tool`, `encoding`, `owner_agent_id` and
+  `target_agent_id` never reach SQS or the DLQ. `detail` is forwarded, because the containment-failure
+  categories are read from its fixed prefixes. It can hold a person's email for a dismissed flag.
+- **Alarms:** subscribe an address with `-c burn:alarm_email=…` and confirm the email AWS sends.
+  Without a subscription the alarms fire, but nobody is told.
 - **Concurrency:** no reserved concurrency is set, because reserving it can fail deploys on accounts
   with the default limit of 10. The SQS mapping caps the worker at 2 concurrent invocations.

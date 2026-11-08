@@ -1,6 +1,6 @@
-"""BURN's real containment code (via burn_api/scripts/canary_harness.py, on moto) -> notifications.
+"""Burn's real containment code (via burn_api/scripts/canary_harness.py, on moto) -> notifications.
 
-Guards the coupling between the notification policy and the exact events BURN's code writes:
+Guards the coupling between the notification policy and the exact events Burn's code writes:
 if a writer changes shape or wording, these fail.
 """
 import importlib.util

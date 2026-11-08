@@ -45,7 +45,7 @@ class TeamsProvider(Provider):
             ],
         }
         if incident.dashboard_url:
-            card["actions"] = [{"type": "Action.OpenUrl", "title": "Investigate in BURN",
+            card["actions"] = [{"type": "Action.OpenUrl", "title": "Investigate in Burn",
                                 "url": incident.dashboard_url}]
         body = {"type": "message", "attachments": [{
             "contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None, "content": card}]}

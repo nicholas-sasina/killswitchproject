@@ -58,14 +58,14 @@ class DiscordProvider(Provider):
             "color": UPDATE_COLOR if incident.is_update else COLORS[incident.severity],
             "fields": [{"name": _cap(esc(label, 250), 256), "value": _cap(esc(value, 1000), 1024) or "-",
                         "inline": len(value) < 40} for label, value in incident.fields()][:25],
-            "footer": {"text": "BURN ledger event; no credential values included"},
+            "footer": {"text": "Burn ledger event; no credential values included"},
         }
         timestamp = _iso(incident.ts)
         if timestamp:
             embed["timestamp"] = timestamp
         if incident.dashboard_url:
             embed["url"] = incident.dashboard_url
-        body = {"username": "BURN", "embeds": [embed], "allowed_mentions": {"parse": []}}
+        body = {"username": "Burn", "embeds": [embed], "allowed_mentions": {"parse": []}}
         return PreparedRequest(url_ref=dest.secret_ref, body=body, preview={"provider": self.name, "body": body})
 
     def send(self, prepared: PreparedRequest, dest: Destination, secret: str | None) -> Ack:

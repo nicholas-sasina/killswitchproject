@@ -1,4 +1,4 @@
-"""Turn whatever delivered a BURN ledger event into one validated event dict.
+"""Turn whatever delivered a Burn ledger event into one validated event dict.
 
 Accepted envelopes (all carry the same ledger row from the burn-events table):
   * a DynamoDB Streams record ({"eventName": "INSERT", "dynamodb": {"NewImage": {...}}})
@@ -29,6 +29,11 @@ FLAG_LEVELS = ("seen", "attempted", "reported")
 OWNERS = frozenset({"agent", "shared", "unknown"})
 
 REQUIRED = ("event_id", "ts", "agent_id", "source", "action")
+# What the EventBridge Pipe forwards to SQS (infra/notifications_stack.py input template): what
+# classification and routing need. fingerprint, destination, encoding, tool, actor, owner_agent_id and
+# target_agent_id never reach the queue or the DLQ.
+FORWARDED = REQUIRED + ("session_id", "secret_ref", "secret_type", "owner", "flag_level", "detail", "role",
+                        "parent_session", "replaces", "replaced_by")
 OPTIONAL = (
     "session_id", "tool", "secret_ref", "fingerprint", "secret_type", "owner",
     "owner_agent_id", "target_agent_id", "destination", "encoding", "detail",
@@ -57,6 +62,9 @@ def _deserialize(image: dict) -> dict:
     """DynamoDB-JSON NewImage -> plain dict. Ledger rows only hold strings and NULLs."""
     out: dict[str, Any] = {}
     for key, typed in image.items():
+        if typed is None:  # a field the Pipe's input template could not fill
+            out[key] = None
+            continue
         if not isinstance(typed, dict) or len(typed) != 1:
             raise InvalidEvent(f"unexpected attribute shape for {key!r}")
         (kind, value), = typed.items()

@@ -61,13 +61,17 @@ def _destination(raw: dict) -> Destination:
     unknown = (set(categories) | set(excluded)) - set(CATEGORIES)
     if unknown:
         raise ValueError(f"destination {dest_id}: unknown categories {sorted(unknown)}")
+    if raw.get("roles"):
+        # Burn's security events (revoked, flagged, canary_used, blocked) carry no role, so a role filter
+        # would silently drop every one of them. Filter by agents or categories instead.
+        raise ValueError(f"destination {dest_id}: 'roles' is not supported (security events carry no role)")
     rate = raw.get("rate_per_minute", 20)
     if not isinstance(rate, int) or not 1 <= rate <= 600:
         raise ValueError(f"destination {dest_id}: rate_per_minute must be 1-600")
     dest = Destination(
         id=dest_id, provider=provider, enabled=raw.get("enabled", True) is True,
         min_severity=str(raw.get("min_severity", "high")).lower(), categories=categories,
-        exclude_categories=excluded, roles=_tuple(raw.get("roles"), "roles"),
+        exclude_categories=excluded,
         agents=_tuple(raw.get("agents"), "agents"),
         recipient=None if raw.get("recipient") is None else str(raw["recipient"]),
         secret_ref=raw.get("secret_ref"), digest_low=raw.get("digest_low", False) is True,
@@ -122,8 +126,6 @@ def route(dest: Destination, incident: Incident) -> str | None:
     if dest.categories and incident.category not in dest.categories:
         return None
     if incident.category in dest.exclude_categories:
-        return None
-    if dest.roles and incident.role not in dest.roles:
         return None
     if dest.agents and incident.agent_id not in dest.agents:
         return None

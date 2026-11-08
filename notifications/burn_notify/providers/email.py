@@ -34,7 +34,10 @@ class EmailProvider(Provider):
     def _client(self):
         if self._ses is None:
             import boto3
-            self._ses = boto3.client("sesv2")
+            from botocore.config import Config
+            # boto3 defaults (60 s connect/read, several retries) would outlast the Lambda's budget.
+            self._ses = boto3.client("sesv2", config=Config(connect_timeout=5, read_timeout=10,
+                                                            retries={"max_attempts": 2, "mode": "standard"}))
         return self._ses
 
     @classmethod
@@ -50,18 +53,18 @@ class EmailProvider(Provider):
         text_lines += [f"{label}: {escape.clean(value)}" for label, value in incident.fields()]
         if incident.dashboard_url:
             text_lines += ["", f"Investigate: {incident.dashboard_url}"]
-        text_lines += ["", "Generated from BURN ledger events. No credential values are included."]
+        text_lines += ["", "Generated from Burn ledger events. No credential values are included."]
         esc = escape.email_html
         color = "#b42318" if incident.priority else "#1f2937"
         rows = "".join(f'<tr><th align="left" style="padding:2px 12px 2px 0">{esc(label)}</th>'
                        f'<td style="font-family:monospace">{esc(value)}</td></tr>' for label, value in incident.fields())
-        link = (f'<p><a href="{esc(incident.dashboard_url, 500)}">Investigate in BURN</a></p>'
+        link = (f'<p><a href="{esc(incident.dashboard_url, 500)}">Investigate in Burn</a></p>'
                 if incident.dashboard_url else "")
         html_body = (f'<div style="font-family:system-ui,sans-serif;font-size:14px">'
                      f'<p style="color:{color};font-weight:700">{esc(incident.header)}</p>'
                      f"<p><strong>{esc(incident.title)}</strong><br>{esc(incident.summary, 1500)}</p>"
                      f"<table>{rows}</table>{link}"
-                     f'<p style="color:#6b7280">Generated from BURN ledger events. '
+                     f'<p style="color:#6b7280">Generated from Burn ledger events. '
                      f"No credential values are included.</p></div>")
         body = {
             "FromEmailAddress": dest.options["from_address"],

@@ -58,11 +58,11 @@ class Incident:
     @property
     def header(self) -> str:
         if self.is_update:
-            text = "BURN CONTAINMENT UPDATE"
+            text = "Burn containment update"
         elif self.aggregated_count > 1:
-            text = f"BURN ALERT SUMMARY — {self.severity.label}"
+            text = f"Burn alert summary — {self.severity.label}"
         else:
-            text = f"BURN SECURITY ALERT — {self.severity.label}"
+            text = f"Burn security alert — {self.severity.label}"
         return f"[TEST] {text}" if self.notice else text
 
     def fields(self) -> list[tuple[str, str]]:
@@ -87,7 +87,7 @@ class Incident:
     def subject(self) -> str:
         tag = "UPDATE" if self.is_update else self.severity.label
         test = "[TEST]" if self.notice else ""
-        return f"{test}[BURN][{tag}] {self.title} — {self.agent_id}"[:200]
+        return f"{test}[Burn][{tag}] {self.title} — {self.agent_id}"[:200]
 
 
 def build(event: dict, result: Classification, *, dashboard_url: str | None,
@@ -106,13 +106,13 @@ def build(event: dict, result: Classification, *, dashboard_url: str | None,
 
 def aggregate(sample: Incident, count: int, window_label: str) -> Incident:
     """One summary standing for `count` similar incidents (same category and agent)."""
-    summary = (f"BURN recorded {count} related '{sample.category}' events for {sample.agent_id} "
+    summary = (f"Burn recorded {count} related '{sample.category}' events for {sample.agent_id} "
                f"in {window_label}. {sample.summary}")
     if sample.category == "digest":
-        summary = (f"{count} low-severity BURN events were held for this digest ({window_label}). "
+        summary = (f"{count} low-severity Burn events were held for this digest ({window_label}). "
                    "Open the dashboard for the full list.")
     elif sample.category == "disclosure_blocked":
-        summary = (f"BURN blocked {count} related requests from {sample.agent_id} in {window_label}. "
+        summary = (f"Burn blocked {count} related requests from {sample.agent_id} in {window_label}. "
                    "No successful disclosure has been established by these events.")
     return replace(sample, summary=summary, aggregated_count=count,
                    incident_id=incident_id(f"agg:{sample.category}:{sample.agent_id}:{window_label}"))

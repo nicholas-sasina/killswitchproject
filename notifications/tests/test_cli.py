@@ -19,7 +19,7 @@ def test_demo_dry_run_shows_canary_then_containment_update(monkeypatch):
     monkeypatch.delenv("BURN_NOTIFY_CONFIG", raising=False)
     code, out = run(["dry-run", "--demo"])
     assert code == 0
-    first, second = out.index("Canary credential presented"), out.index("BURN CONTAINMENT UPDATE")
+    first, second = out.index("Canary credential presented"), out.index("Burn containment update")
     assert first < second
     assert "Containment summary" in out and "Rotated where confirmed" in out
     assert "Dry run: no message left this machine." in out
