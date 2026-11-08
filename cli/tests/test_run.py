@@ -8,15 +8,13 @@ import time
 import urllib.error
 import urllib.request
 
-import boto3
 import pytest
-from moto import mock_aws
 
 import burn_cli.runner.run as runmod
 from burn_cli.api import Api
 from burn_cli.main import run as cli
 from burn_cli.runner.badge import BadgeToken, TokenRefused
-from burn_cli.runner.credentials import Badge, FakeSource, SecretsManagerSource
+from burn_cli.runner.credentials import Badge, MissingSecrets, from_secrets
 from burn_cli.runner.env import child_env, describe, proxy_url, scrub
 from burn_cli.runner.run import EXIT_STOPPED, Instance
 from fake_api import API_TOKEN
@@ -41,8 +39,7 @@ def stack(fake, monkeypatch, tmp_path):
     fake.token = fake.handle("POST", "/roles/worker/tokens", {}, {"uses": 10})[1]["token"]
     monkeypatch.setenv("BURN_JOIN_TOKEN", fake.token)
     monkeypatch.setenv("BURN_GATEWAY_URL", gw.url + "/mcp")
-    monkeypatch.setenv("BURN_CREDENTIAL_SOURCE", "fake")
-    monkeypatch.setenv("BURN_MOCK_BADGE_URL", badge.url)
+    fake.badge_url = badge.url + "/token"
     fake.gw, fake.badge, fake.tmp = gw, badge, tmp_path
     yield fake
     gw.close()
@@ -51,14 +48,14 @@ def stack(fake, monkeypatch, tmp_path):
 
 def host_env(stack, **extra):
     env = {"PATH": os.environ["PATH"], "HOME": "/home/me", "AWS_REGION": "us-east-1", **HOST_SECRETS, **extra}
-    env.update({"BURN_API_URL": stack.url, "BURN_GATEWAY_URL": stack.gw.url + "/mcp", "BURN_CREDENTIAL_SOURCE": "fake",
-                "BURN_MOCK_BADGE_URL": stack.badge.url, "PYTHONPATH": os.pathsep.join(sys.path)})
+    env.update({"BURN_API_URL": stack.url, "BURN_GATEWAY_URL": stack.gw.url + "/mcp",
+                "PYTHONPATH": os.pathsep.join(sys.path)})
     return env
 
 
 def instance(stack, command, **kw):
     kw.setdefault("heartbeat_every", 30.0)
-    return Instance(Api(stack.url, API_TOKEN), FakeSource(stack.badge.url), "worker", command,
+    return Instance(Api(stack.url, API_TOKEN), "worker", command,
                     gateway_url=stack.gw.url + "/mcp", host_env=host_env(stack), enroll_token=stack.token,
                     sleep=lambda _: None, **kw)
 
@@ -76,8 +73,8 @@ def test_child_gets_its_own_values_and_none_of_the_hosts(stack):
     for name, value in HOST_SECRETS.items():
         assert name not in env or env[name] != value, name
     assert not [k for k in env if k.startswith("AWS_") and k not in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION")]
-    assert env["AWS_ACCESS_KEY_ID"].startswith("AKIAFAKE") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
-    assert env["AWS_SECRET_ACCESS_KEY"] != "host-secret" and env["BURN_API_KEY"].startswith("mpk_fake_")
+    assert env["AWS_ACCESS_KEY_ID"].startswith("AKIA") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
+    assert env["AWS_SECRET_ACCESS_KEY"] != "host-secret" and env["BURN_API_KEY"].startswith("mpk_live_")
     session = stack.calls("POST", "/sessions")[0]
     agent_id = next(iter(stack.instances.values()))["agent_id"]
     assert env["BURN_AGENT_ID"] == agent_id and env["BURN_ROLE"] == "worker"
@@ -265,6 +262,7 @@ def test_mcp_endpoint_passes_gateway_refusals_through(stack):
 def test_mcp_endpoint_reports_a_refused_badge(stack):
     stack.badge.close()
     stack.badge = issuer(status=401)
+    stack.badge_url = stack.badge.url + "/token"
     out = stack.tmp / "status"
     code = """
         import os, sys, urllib.request, urllib.error
@@ -272,7 +270,7 @@ def test_mcp_endpoint_reports_a_refused_badge(stack):
             urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST", headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]}))
         except urllib.error.HTTPError as e:
             open(sys.argv[1], "w").write(f"{e.code} {e.read().decode()}")"""
-    inst = Instance(Api(stack.url, API_TOKEN), FakeSource(stack.badge.url), "worker", py(code, str(out)),
+    inst = Instance(Api(stack.url, API_TOKEN), "worker", py(code, str(out)),
                     gateway_url=stack.gw.url + "/mcp", host_env=host_env(stack), enroll_token=stack.token, sleep=lambda _: None)
     inst.run()
     assert out.read_text().startswith("401") and "badge" in out.read_text() and not stack.gw.seen
@@ -364,49 +362,37 @@ def test_spawn_rejects_a_malformed_request(stack):
 
 
 # -- credentials ---------------------------------------------------------------------------------
-@mock_aws
-def test_secrets_manager_source_reads_the_instances_own_secrets():
-    sm = boto3.client("secretsmanager", region_name="us-east-1")
-    sm.create_secret(Name="burn/agent-worker-aaaaaa/badge", SecretString=json.dumps(
-        {"client_id": "cid", "client_secret": "csecret", "token_url": "https://issuer/token", "scope": "gw/tools"}))
-    sm.create_secret(Name="burn/agent-worker-aaaaaa/api_key", SecretString="mpk_live_" + "a" * 32)
-    sm.create_secret(Name="burn/agent-worker-aaaaaa/aws_key", SecretString=json.dumps(
-        {"access_key_id": "AKIAEXAMPLE", "secret_access_key": "sak", "iam_user": "u"}))
-    session = {"badge_ref": "burn/agent-worker-aaaaaa/badge", "credentials": [
-        {"secret_ref": "burn/agent-worker-aaaaaa/api_key", "type": "api_key"},
-        {"secret_ref": "burn/agent-worker-aaaaaa/aws_key", "type": "aws_key"}]}
-    creds = SecretsManagerSource(sm).fetch(session)
+def test_credentials_come_from_the_join_replys_secrets():
+    creds = from_secrets({"badge": {"client_id": "cid", "client_secret": "csecret", "token_url": "https://issuer/token",
+                                    "scope": "gw/tools"},
+                          "api_key": "mpk_live_" + "a" * 32, "aws_key": {"access_key_id": "AKIAEXAMPLE", "secret_access_key": "sak"}})
     assert creds.badge == Badge("cid", "csecret", "https://issuer/token", "gw/tools")
     assert (creds.api_key, creds.aws_access_key_id, creds.aws_secret_access_key) == ("mpk_live_" + "a" * 32, "AKIAEXAMPLE", "sak")
     assert "csecret" not in repr(creds) and "sak" not in repr(creds)
+    assert from_secrets({"badge": {"client_id": "c", "client_secret": "s", "token_url": "u"}}).api_key is None
 
 
-@mock_aws
-def test_secrets_manager_source_retries_a_secret_that_is_not_there_yet():
-    sm = boto3.client("secretsmanager", region_name="us-east-1")
-    calls = []
-    real = sm.get_secret_value
-
-    def late(**kw):
-        calls.append(1)
-        if len(calls) < 3:
-            return real(SecretId="burn/missing")  # ResourceNotFoundException
-        sm.create_secret(Name="burn/agent-a/badge", SecretString=json.dumps(
-            {"client_id": "c", "client_secret": "s", "token_url": "u"}))
-        return real(**kw)
-
-    sm.get_secret_value = late
-    waits = []
-    creds = SecretsManagerSource(sm, sleep=waits.append).fetch({"badge_ref": "burn/agent-a/badge"})
-    assert creds.badge.client_id == "c" and len(calls) == 3 and len(waits) == 2
+@pytest.mark.parametrize("reply", [None, {}, {"api_key": "k"}])
+def test_a_reply_without_secrets_is_a_clear_error(reply):
+    with pytest.raises(MissingSecrets, match="API too old: no secrets in the join reply"):
+        from_secrets(reply)
 
 
-@mock_aws
-def test_secrets_manager_source_gives_up_on_a_permanent_error():
-    sm = boto3.client("secretsmanager", region_name="us-east-1")
-    from botocore.exceptions import ClientError
-    with pytest.raises(ClientError):
-        SecretsManagerSource(sm, sleep=lambda _: None, attempts=3).fetch({"badge_ref": "burn/nothing/badge"})
+def test_an_api_that_returns_no_secrets_fails_clearly_ends_the_session_and_never_asks_aws(stack, capsys, monkeypatch):
+    stack.omit_secrets = True
+    monkeypatch.setitem(sys.modules, "boto3", None)  # importing boto3 would now fail: there is no AWS fallback
+    code = cli(["run", "--role", "worker", "--", "true"])
+    assert code == 1 and "API too old: no secrets in the join reply" in capsys.readouterr().err
+    (row,) = stack.instances.values()
+    assert row["status"] == "exited"  # the session that was started is not left dangling
+
+
+def test_the_runner_does_not_depend_on_aws():
+    import importlib.util
+    import pathlib
+    root = pathlib.Path(runmod.__file__).parents[1]
+    assert not [p for p in root.rglob("*.py") if "boto" in p.read_text() and p.name != "env.py"]
+    assert importlib.util.find_spec("burn_cli.runner.credentials") is not None
 
 
 # -- the CLI command -------------------------------------------------------------------------------
@@ -606,7 +592,7 @@ def test_home_is_chowned_to_the_agent_user_and_removed_when_the_agent_is_stopped
 
 
 def test_child_env_without_a_home_has_none():
-    creds = FakeSource().fetch({"session_id": "s", "agent_id": "agent-a", "credentials": []})
+    creds = from_secrets({"badge": {"client_id": "c", "client_secret": "s", "token_url": "u"}})
     env = child_env({"HOME": "/h"}, session={"session_id": "s", "agent_id": "agent-a"}, credentials=creds,
                     mcp_url="u", spawn_url="v")
     assert "HOME" not in env  # the host's home is never passed on

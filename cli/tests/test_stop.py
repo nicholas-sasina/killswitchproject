@@ -116,14 +116,10 @@ def test_a_spawn_that_loses_the_race_with_shutdown_ends_its_session(stack):
 
 
 def test_a_failure_during_setup_still_ends_the_session(stack):
-    class Boom:
-        def fetch(self, session):
-            raise RuntimeError("secrets are unreachable")
-
-    inst = instance(stack, py("pass"))
-    inst.source = Boom()
-    with pytest.raises(RuntimeError):
-        inst.run()
+    from burn_cli.runner.credentials import MissingSecrets
+    stack.omit_secrets = True
+    with pytest.raises(MissingSecrets):
+        instance(stack, py("pass")).run()
     (row,) = stack.instances.values()
     assert row["status"] == "exited"
 
@@ -161,11 +157,12 @@ def test_spawn_never_puts_secrets_in_the_child_supervisors_argv(stack, monkeypat
         return status, out
 
     stack.handle = with_secrets
-    seen = []
+    seen, envs = [], []
 
     class Recorder:
         def __init__(self, argv, **kw):
             seen.append(list(argv))
+            envs.append(kw.get("env", {}))
 
         def poll(self):
             return 0
@@ -180,6 +177,8 @@ def test_spawn_never_puts_secrets_in_the_child_supervisors_argv(stack, monkeypat
     for value in ("client-secret-xyz", "mpk_live_secretvalue", "AKIASECRETXYZ", "aws-secret-xyz", "bst_secrettoken"):
         assert value not in joined
     assert json.loads(argv[argv.index("--adopt") + 1])["session_id"] == result["session_id"]  # the rest still goes
+    # the values go in the child supervisor's exec environment instead (readable by its uid and root only)
+    assert json.loads(envs[0]["BURN_ADOPT_SECRETS"]) == secrets_field
 
 
 def test_sigterm_during_setup_still_reports_the_exit(stack, monkeypatch):
@@ -198,3 +197,30 @@ def test_sigterm_during_setup_still_reports_the_exit(stack, monkeypatch):
 def test_the_agent_dying_nonzero_still_reports_the_exit(stack):
     assert instance(stack, py("import sys; sys.exit(1)")).run() == 1
     assert next(iter(stack.instances.values()))["status"] == "exited"
+
+
+def test_no_process_argv_ever_contains_a_secret_value_while_a_child_is_spawned(stack):
+    """Parent joins, spawns a child; while both run, every process's command line on the machine is scanned."""
+    seen = stack.tmp / "ps.txt"
+    child_code = "import time; time.sleep(2.5)"
+    scan = f"""
+import subprocess, time
+out = []
+for _ in range(12):
+    out.append(subprocess.run(["ps", "-axo", "args="], capture_output=True, text=True).stdout)
+    time.sleep(0.2)
+open({str(seen)!r}, "w").write("\\n".join(out))"""
+    parent = f"""
+import burn, subprocess, sys
+burn.spawn("worker", [sys.executable, "-c", {child_code!r}])
+subprocess.run([sys.executable, "-c", {scan!r}])"""
+    assert instance(stack, py(parent)).run() == 0
+    assert len(stack.issued) == 2, "both the parent and the child were given secrets"
+    commandlines = seen.read_text()
+    assert "burn_cli" in commandlines  # the child supervisor was running, so its argv was scanned
+    values = []
+    for issued in stack.issued:
+        values += [issued["badge"]["client_secret"], issued["api_key"], issued["aws_key"]["secret_access_key"],
+                   issued["aws_key"]["access_key_id"]]
+    for value in values:
+        assert value not in commandlines

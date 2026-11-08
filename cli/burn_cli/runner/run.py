@@ -14,7 +14,7 @@ from typing import Callable
 from .. import retry
 from ..api import Api, ApiError
 from .badge import BadgeToken
-from .credentials import CredentialSource
+from . import credentials as creds_mod
 from .env import child_env
 from .mcp_proxy import McpProxy
 from . import privs
@@ -22,6 +22,7 @@ from .privs import Drop
 from .spawn_endpoint import SpawnEndpoint
 
 EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
+ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # how a supervisor receives the secrets of a session someone else started
 STOP_GRACE = 5.0  # seconds between SIGTERM and SIGKILL when stopping the agent
 
 
@@ -30,12 +31,14 @@ def log(message: str) -> None:
 
 
 class Instance:
-    def __init__(self, api: Api, source: CredentialSource, role: str, command: list[str], *,
+    def __init__(self, api: Api, role: str, command: list[str], *,
                  gateway_url: str, host_env: dict | None = None, enroll_token: str = "", session: dict | None = None,
+                 secrets: dict | None = None,
                  proxy_url: str = "", heartbeat_every: float = 15.0, min_heartbeat_gap: float = 3.0,
                  stop_grace: float = STOP_GRACE, drop: Drop | None = None, user_arg: str | None = None, stdin_devnull: bool = False,
                  sleep: Callable[[float], None] = time.sleep):
-        self.api, self.source, self.role, self.command = api, source, role, command
+        self.api, self.role, self.command = api, role, command
+        self._secrets = secrets  # handed over by the parent supervisor or the launcher; never kept on self.session
         self.gateway_url, self.host_env = gateway_url, dict(os.environ if host_env is None else host_env)
         self.enroll_token, self.session, self.proxy_url = enroll_token, session, proxy_url
         self.heartbeat_every, self.min_gap, self.stop_grace, self._sleep = heartbeat_every, min_heartbeat_gap, stop_grace, sleep
@@ -60,16 +63,21 @@ class Instance:
             raise ApiError("this instance is stopping", 409)
         body = {"role": role, "parent_session": self.session["session_id"]}
         child = retry.call(lambda: self.api.request("POST", "/sessions", body), sleep=self._sleep)
-        # argv is readable by every uid in the container (/proc/<pid>/cmdline): pass only non-secret session fields
-        public = {k: v for k, v in child.items() if k != "secrets"}
-        argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(public),
+        secrets = child.pop("secrets", None)
+        if not secrets:
+            self._report_exit(child["session_id"])
+            raise ApiError(str(creds_mod.MissingSecrets()), 502)
+        # argv is readable by every uid in the container (/proc/<pid>/cmdline): only non-secret session fields go
+        # there. The child's own values go in its exec environment, which only its uid and root can read.
+        argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(child),
                 *(["--user", self.user_arg] if self.user_arg else []), "--", *command]
         with self._spawn_lock:  # _stop_children takes the same lock, so no child starts after it ran
             if self._stopping.is_set():
                 self._report_exit(child["session_id"])
                 raise ApiError("this instance is stopping", 409)
             # The child's supervisor gets this supervisor's host environment (API settings), never the agent's.
-            self._children.append(subprocess.Popen(argv, env=self.host_env))
+            env = {**self.host_env, ADOPT_SECRETS: json.dumps(secrets)}
+            self._children.append(subprocess.Popen(argv, env=env))
         return {"session_id": child["session_id"], "agent_id": child["agent_id"]}
 
     # -- lifecycle ----------------------------------------------------------------------------
@@ -106,7 +114,9 @@ class Instance:
                 cleanup()
 
     def _run(self, session: dict, cleanups: list) -> int:
-        creds = self.source.fetch(session)
+        # The values arrive once. Take them off the session so nothing keeps a copy beyond the credentials object.
+        creds = creds_mod.from_secrets(self._secrets or session.pop("secrets", None))
+        self._secrets = None
         badge = BadgeToken(creds.badge)
         local_token = secrets.token_urlsafe(32)  # per run: only this instance's agent is told it
         mcp = McpProxy(self.gateway_url, badge, self._activity.set, local_token).start()

@@ -3,13 +3,13 @@ name = "burn-cli"
 version = "1.0.0"
 description = "Command-line client for the Burn API."
 requires-python = ">=3.12"
-dependencies = ["pyyaml>=6", "jsonschema>=4", "boto3>=1.35", "burn-contracts"]
+dependencies = ["pyyaml>=6", "jsonschema>=4", "burn-contracts"]
 
 [project.scripts]
 burn = "burn_cli.main:run"
 
 [dependency-groups]
-dev = ["pytest>=8", "moto[secretsmanager]>=5", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.uv.sources]
 burn-contracts = { path = "../contracts", editable = true }

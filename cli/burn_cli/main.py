@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import config, render, spec
 from .api import Api, ApiError
+from .runner.credentials import MissingSecrets
 
 CLOUDTRAIL_NOTE = "CloudTrail event history can lag 5-15 minutes behind real activity."
 
@@ -237,8 +238,8 @@ def cmd_token_create(api, args):
 
 
 def cmd_run(api, args):
-    from .runner import credentials, privs
-    from .runner.run import Instance
+    from .runner import privs
+    from .runner.run import ADOPT_SECRETS, Instance
     command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not command:
         raise UsageError("give the command to run after --, e.g. burn run --role worker -- python agent.py")
@@ -251,15 +252,20 @@ def cmd_run(api, args):
     gateway = config.get("BURN_GATEWAY_URL", args.dotenv)
     if not gateway:
         raise UsageError("BURN_GATEWAY_URL not set (run `make env`, or export it)")
+    # Secrets of a session someone else started (a parent supervisor, or `make swarm`) arrive in the environment.
+    # Taken out of it here, so the agent can never see them and later children do not inherit them.
+    raw_secrets = os.environ.pop(ADOPT_SECRETS, "")
     try:
-        source = credentials.from_name(os.environ.get("BURN_CREDENTIAL_SOURCE", ""))
-    except ValueError as exc:
-        raise UsageError(str(exc)) from None
+        secrets = json.loads(raw_secrets) if raw_secrets else None
+    except ValueError:
+        raise UsageError(f"{ADOPT_SECRETS} is not valid JSON") from None
+    if session and not secrets:
+        raise UsageError(f"--adopt needs the session's secrets in {ADOPT_SECRETS}")
     try:
         drop = privs.resolve(args.user)
     except ValueError as exc:
         raise UsageError(str(exc)) from None
-    return Instance(api, source, args.role, command, gateway_url=gateway.rstrip("/"), enroll_token=token,
+    return Instance(api, args.role, command, secrets=secrets, gateway_url=gateway.rstrip("/"), enroll_token=token,
                     session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv), drop=drop, user_arg=args.user,
                     stdin_devnull=args.token_stdin).run()
 
@@ -310,6 +316,9 @@ def run(argv: list[str] | None = None, dotenv=None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except ApiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except MissingSecrets as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
