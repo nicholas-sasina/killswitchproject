@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import (
-    agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token, scenario_role_name,
+    SESSION_TOKEN_PREFIX, agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token,
+    scenario_role_name,
 )
 
 ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn")
@@ -192,7 +193,9 @@ class Swarm:
     def _fake_secrets(self, session_id, credentials):
         """Obviously fake values, so nothing here can be mistaken for a real credential."""
         secrets_ = {"badge": {"client_id": "mock-client-" + session_id[-6:], "client_secret": "mock-badge-secret",
-                              "token_url": "http://localhost:8700/mock-token", "scope": "burn/tools"}}
+                              "token_url": "http://localhost:8700/mock-token", "scope": "burn/tools"},
+                    # Well-formed like a real one (clients check the shape); made per join, so never in the source.
+                    "session_token": SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)}
         if "api_key" in credentials:
             secrets_["api_key"] = "mock-api-key-not-real"
         if "aws_key" in credentials:

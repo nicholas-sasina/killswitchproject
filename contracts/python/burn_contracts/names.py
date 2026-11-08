@@ -50,6 +50,11 @@ ROLE_SOURCES = ("code", "ui", "scenario")  # managed_by: burn.yaml, dashboard, s
 JOIN_TOKEN_PREFIX = "bjt_"
 JOIN_TOKEN_RE = re.compile(r"^bjt_(?P<token_id>[0-9a-f]{16})\.(?P<secret>[A-Za-z0-9_-]{43})$")
 
+# Session tokens: "bst_<secret>", issued once to a role instance's supervisor in its join reply. They authenticate
+# that instance's own calls (heartbeat, exit, spawning a child). Only sha256(token) is stored.
+SESSION_TOKEN_PREFIX = "bst_"
+SESSION_TOKEN_RE = re.compile(r"^bst_[A-Za-z0-9_-]{43}$")
+
 
 def is_agent_id(value: str) -> bool:
     return bool(AGENT_ID_RE.match(value or ""))
@@ -85,6 +90,11 @@ def parse_join_token(value: str) -> tuple[str, str] | None:
     """(token_id, secret) for a well-formed join token, else None."""
     match = JOIN_TOKEN_RE.match(value or "")
     return (match["token_id"], match["secret"]) if match else None
+
+
+def is_session_token(value) -> bool:
+    # fullmatch: "$" alone would also accept a trailing newline.
+    return isinstance(value, str) and bool(SESSION_TOKEN_RE.fullmatch(value))
 
 
 def agent_secret_ref(agent_id: str, name: str) -> str:

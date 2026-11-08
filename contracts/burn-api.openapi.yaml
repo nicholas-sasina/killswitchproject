@@ -6,7 +6,10 @@ info:
     Public API used by the dashboard, the scenario runner and the eval harness.
     Real implementation: API Gateway HTTP API + Lambda (/burn_api). Mock: /mocks/burn_api_mock.py.
 
-    Every request must send `x-burn-demo-token` (value from .env, BURN_DEMO_TOKEN).
+    Every request must send `x-burn-demo-token` (value from .env, BURN_DEMO_TOKEN), except:
+    a join (`POST /sessions` with exactly `{role, enroll_token}`), whose join token is its authority; and an
+    instance's own calls (its heartbeat and exit, and `POST /sessions` with exactly `{role, parent_session}` for
+    a child of it), which may send that instance's session token as `Authorization: Bearer bst_...` instead.
     The mock server accepts any token and adds the response header `x-burn-mock: true`
     so the dashboard can show a MOCK banner.
 
@@ -25,6 +28,10 @@ paths:
   /sessions:
     post:
       summary: Start an agent session (one instance). Issues a badge and the instance's credentials.
+      security:
+        - demoToken: []
+        - sessionToken: []   # {role, parent_session}: the parent's session token
+        - {}                 # {role, enroll_token}: the join token in the body is the authority
       description: |
         Three forms:
         - `{agent_id}`: a scenario agent (a role with one instance, fixed agent id). Unchanged.
@@ -78,7 +85,7 @@ paths:
                   egress: { type: array, items: { type: string }, nullable: true }
                   secrets:
                     type: object
-                    required: [badge]
+                    required: [badge, session_token]
                     description: |
                       The instance's own secret values, returned ONLY when a role instance starts
                       (`enroll_token` or `parent_session`); the scenario `agent_id` form never returns it.
@@ -93,6 +100,14 @@ paths:
                           client_secret: { type: string }
                           token_url: { type: string }
                           scope: { type: string }
+                      session_token:
+                        type: string
+                        pattern: '^bst_[A-Za-z0-9_-]{43}$'
+                        description: |
+                          Authenticates this instance's own calls as `Authorization: Bearer <session_token>`,
+                          in place of the admin token: its heartbeat and exit, and POST /sessions
+                          {role, parent_session} to spawn a child of it. Only its sha256 is stored. The
+                          supervisor keeps it and never hands it to the agent process.
                       api_key: { type: string, description: Present if the role mints an api_key. }
                       aws_key:
                         type: object
@@ -343,6 +358,7 @@ paths:
   /instances/{session_id}/heartbeat:
     post:
       summary: Mark an instance as alive (sent by `burn run` while the agent makes calls).
+      security: [{ demoToken: [] }, { sessionToken: [] }]   # the session token of this instance
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
       responses:
@@ -352,6 +368,7 @@ paths:
   /instances/{session_id}/exit:
     post:
       summary: Clean exit. Revokes the instance's badge and deletes its own credentials.
+      security: [{ demoToken: [] }, { sessionToken: [] }]   # the session token of this instance
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
       responses:
@@ -440,6 +457,10 @@ components:
       type: apiKey
       in: header
       name: x-burn-demo-token
+    sessionToken:
+      type: http
+      scheme: bearer
+      description: A role instance's own session token (bst_...), returned once in its join reply.
   schemas:
     Flag:
       type: object

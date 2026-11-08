@@ -121,7 +121,8 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 `burn-sessions` rows keep their existing fields (`session_id`, `agent_id`, `client_id`, `status`,
 `tools`, `send_to`, `created_at`). Instances add optional fields, never renaming or removing one:
 `role`, `parent_session`, `token_id`, `owner`, `egress`, `credentials` (the narrowed credential types
-minted for the instance), `last_seen`, `exited_at`.
+minted for the instance), `last_seen`, `exited_at`, `session_token_sha256` (the session token itself
+is returned once in the join reply and never stored; the supervisor never hands it to the agent).
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
 `burn-enroll-tokens` rows: `token_id`, `role`, `secret_sha256`, `uses`, `uses_left`, `expires_at`,
@@ -137,8 +138,11 @@ minted for the instance), `last_seen`, `exited_at`.
   intersected with the parent's (null on one side means take the other side's list).
 - The session row's `tools` comes from the role, so the Gateway enforces it as before.
 - A role instance's `POST /sessions` reply carries its own secret values once (`secrets`: badge, api_key,
-  aws_key), so the host needs only the token. A join token is therefore a credential (it yields
+  aws_key, session_token), so the host needs only the token. A join token is therefore a credential (it yields
   credentials once): keep it out of shell history, logs and files.
+- Auth: a join (`{role, enroll_token}` and nothing else) needs no admin token. An instance's own calls,
+  heartbeat, exit and `{role, parent_session}` spawning a child of it, accept its session token
+  (`bst_...`) as `Authorization: Bearer`. Every other route needs the admin token.
 - A role's `egress` list narrows every outbound destination except Burn's own Gateway, which it never
   blocks: the Gateway already checks tools per role. Model endpoints such as Bedrock are narrowed like any
   other host, so a role that calls a model lists it.
