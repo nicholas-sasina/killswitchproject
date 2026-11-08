@@ -8,6 +8,7 @@ from burn_contracts.fingerprint import fingerprint, shingle_fingerprint, shingle
 from .normalize import _URL, TOKENS, candidates, segments, variants
 from .window import SessionWindow
 
+_EDGE = ".,;:'\"()[]{}<>"  # trimmed from a token's ends when locating a fragment match
 _FORMATS = (
     (re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"), "aws_key"),
     (re.compile(r"(?<![A-Za-z0-9_])mpk_live_[A-Za-z0-9]{32}(?![A-Za-z0-9])"), "api_key"),
@@ -83,14 +84,48 @@ class Scanner:
                     add(match[0], span)
         return positions
 
+    def _piece_spans(self, text: str, findings: list[Finding], rows: dict) -> dict[tuple, list]:
+        """For fragment (shingle) findings: try the pieces of each token around '=' and edge
+        punctuation (KEY=<value>, '<value>.'), and keep those that are an exact row of the same
+        credential. Only locates; it never changes which findings the scan returns."""
+        wanted = {(rows[f.fingerprint].get("secret_ref"), rows[f.fingerprint].get("version"))
+                  for f in findings if f.kind == "shingle" and f.fingerprint in rows}
+        if not wanted:
+            return {}
+        pieces = {}
+        for match in TOKENS.finditer(text):
+            offset = match.start()
+            for part in re.finditer(r"[^=]+", match[0]):
+                start, end = part.start(), part.end()
+                while start < end and match[0][start] in _EDGE:
+                    start += 1
+                while end > start and match[0][end - 1] in _EDGE:
+                    end -= 1
+                piece = match[0][start:end]
+                if piece and piece != match[0]:
+                    pieces.setdefault(fingerprint(piece, self.key), []).append((offset + start, offset + end))
+        if not pieces:
+            return {}
+        found = {}  # a second lookup, only for fragment findings that have pieces to try
+        for fp, row in self.lookup(set(pieces)).items():
+            group = (row.get("secret_ref"), row.get("version"))
+            if row.get("kind") == "exact" and group in wanted:
+                found.setdefault(group, []).extend(pieces[fp])
+        return found
+
     def _locate(self, text: str, rows: dict, findings: list[Finding], known: dict | None = None) -> list[Finding]:
         """Attach spans and the canary flag. Costs nothing when nothing was found."""
         if not findings:
             return findings
         positions = self._positions(text, known) if any(f.kind in ("exact", "format") for f in findings) else {}
+        by_piece = self._piece_spans(text, findings, rows)
         located = []
         for f in findings:
-            spans = tuple(sorted(set(positions.get(f.fingerprint, ())))) if f.kind in ("exact", "format") else ()
+            if f.kind in ("exact", "format"):
+                spans = tuple(sorted(set(positions.get(f.fingerprint, ()))))
+            else:
+                row = rows.get(f.fingerprint, {})
+                spans = tuple(sorted(set(by_piece.get((row.get("secret_ref"), row.get("version")), ()))))
             start, end = spans[0] if spans else (None, None)
             canary = bool(rows.get(f.fingerprint, {}).get("canary"))
             located.append(replace(f, start=start, end=end, spans=spans, canary=canary))
