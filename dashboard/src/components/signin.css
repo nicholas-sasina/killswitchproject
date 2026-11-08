@@ -4,9 +4,8 @@
    The website's hero is a dark stage with a dot grid, and its Sign in fades
    the page to that night colour before it leaves. This screen starts on the
    same stage, so the two join without a flash: one white card in the middle.
-   The red comes from the dashboard's own ember token, so the sign-in screen
-   and the dashboard share one red. The stage takes the night theme's value
-   and the card the paper theme's, whatever the system theme is.
+   The red comes from the console's ember token, so the sign-in screen and
+   the console share one red.
    =========================================================================== */
 
 .signin {
@@ -28,7 +27,7 @@
   overflow: hidden;
   background: var(--si-night);
   color: var(--si-ink);
-  font-family: var(--f-sans);
+  font-family: var(--font-sans);
 }
 
 /* Night from the first paint when the sign-in screen is next
@@ -36,7 +35,7 @@
    the stage when the page overscrolls. The dashboard brings its own paper
    back. */
 :root:has(.signin),
-:root[data-stage="signin"]:not(:has(.app-frame)) {
+:root[data-stage="signin"]:not(:has(.console)) {
   background: #18181b;
 }
 
@@ -79,7 +78,7 @@
   display: block;
   width: 18px;
   height: 22px;
-  color: var(--c-ember);
+  color: var(--ember);
 }
 
 .signin-word {
@@ -90,7 +89,7 @@
 }
 
 .signin-dot {
-  color: var(--c-ember);
+  color: var(--ember);
 }
 
 .signin-title {
@@ -121,7 +120,7 @@
   border-radius: 9px;
   background: var(--si-ink);
   color: #fafafa;
-  font: 600 15px/1 var(--f-sans);
+  font: 600 15px/1 var(--font-sans);
   transition: background-color 160ms ease;
 }
 
@@ -199,7 +198,7 @@
 }
 
 .signin-back a:hover {
-  color: var(--c-ember-text);
+  color: var(--ember-ink);
 }
 
 @media (max-width: 480px) {
@@ -221,7 +220,7 @@
    transitions or motion is reduced, and the swap is then instant.
    ------------------------------------------------------------------------ */
 
-.signin-handoff .sidebar-brand {
+.signin-handoff .topbar-home {
   view-transition-name: signin-card;
 }
 

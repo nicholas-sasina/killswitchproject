@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { readConfig } from "./api";
 import { LocalSignIn } from "./components/SignIn";
-import "./styles.css";
+import "./styles/index.css";
 
 const config = readConfig();
 

@@ -1,8 +1,3 @@
-import { BurnMark } from "./Brand";
-
-/** The Burn mark, re-exported for the controls that carry it. */
-export { BurnMark };
-
 export function Status({ value }: { value: string }) {
   return (
     <span className={`status status-${value}`}>

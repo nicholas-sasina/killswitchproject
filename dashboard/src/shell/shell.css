@@ -1,0 +1,245 @@
+/* The console's frame: the inset white navigation bar and the night page. */
+
+.console {
+  min-height: 100dvh;
+  padding-bottom: 64px;
+  background: var(--night);
+}
+
+.console-main:focus {
+  outline: none;
+}
+
+.console-setup {
+  padding-block: 56px;
+}
+
+.console-setup .setup {
+  max-width: 640px;
+  padding: 24px 28px;
+  border-radius: var(--radius-console);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.console-setup .setup h2 {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.console-setup .setup p {
+  margin-top: 8px;
+  color: var(--body);
+}
+
+.page-notices {
+  padding-top: 24px;
+}
+
+/* ---------- Navigation ---------- */
+
+.topbar {
+  position: relative;
+  z-index: 10;
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: var(--nav-height);
+  padding: 0 18px 0 24px;
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 0 0 var(--radius-console) var(--radius-console);
+}
+
+.topbar-home {
+  display: flex;
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+.topbar-rule {
+  width: 1px;
+  height: 20px;
+  background: var(--hairline);
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.topbar-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topbar-nav a:hover,
+.topbar-nav a[aria-current="page"] {
+  background: var(--hairline-soft);
+  color: var(--ink);
+}
+
+.topbar-count {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--hairline-soft);
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.topbar-nav a:hover .topbar-count,
+.topbar-nav a[aria-current="page"] .topbar-count {
+  background: var(--paper);
+}
+
+.topbar-count.is-open,
+.topbar-nav a:hover .topbar-count.is-open,
+.topbar-nav a[aria-current="page"] .topbar-count.is-open {
+  background: var(--ember-tint);
+  color: var(--ember-ink);
+}
+
+.topbar-spacer {
+  flex: 1 1 0;
+}
+
+.topbar-region {
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+/* ---------- The signed-in person ---------- */
+
+.person {
+  position: relative;
+}
+
+.person-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.person-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-stage);
+}
+
+.person-menu[hidden] {
+  display: none;
+}
+
+.person-who {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.person-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.person-email {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.person-signout {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.person-signout:hover {
+  color: var(--ember-ink);
+}
+
+/* ---------- Narrower windows ---------- */
+
+@media (max-width: 1023px) {
+  .topbar-region {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .topbar-inner {
+    gap: 12px;
+    padding: 0 12px 0 18px;
+  }
+  .topbar-rule {
+    display: none;
+  }
+  .topbar-nav a {
+    padding: 8px 9px;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar-nav {
+    order: 10;
+    flex-basis: 100%;
+    overflow-x: auto;
+  }
+  .topbar-inner {
+    flex-wrap: wrap;
+    height: auto;
+    padding-block: 10px;
+    row-gap: 8px;
+  }
+}
+
+/* Mock data: a development API answered. Stays until reload. */
+.mock-banner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  padding: 6px 16px;
+  background: var(--night-raised);
+  color: var(--night-quiet);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.mock-banner strong {
+  color: var(--night-text);
+}

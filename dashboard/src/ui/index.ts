@@ -1,5 +1,6 @@
 // The console's shared pieces. Pages import from here and never fork them.
 export { Card, CardNote } from "./Card";
+export { Columns } from "./Columns";
 export { Crossfade } from "./Crossfade";
 export { Dialog } from "./Dialog";
 export { DigitRoll } from "./DigitRoll";
