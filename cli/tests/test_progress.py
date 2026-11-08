@@ -486,3 +486,14 @@ def test_a_429_keeps_the_progress_for_the_next_heartbeat_and_is_not_a_burn(stack
     assert "dropped" not in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
 
+
+def test_a_bad_task_ends_a_session_the_launcher_already_started(stack, capsys, monkeypatch):
+    status, reply = stack.handle("POST", "/instances", {}, {"role": "worker", "enroll_token": stack.token})
+    launcher_secrets = reply.pop("secrets")
+    monkeypatch.setenv("BURN_ADOPT_SECRETS", json.dumps(launcher_secrets))
+    monkeypatch.setenv("BURN_RESUME", '{"done": ["a"], "quarantined": [], "extra": 1}')
+    assert cli(["run", "--role", "worker", "--adopt", json.dumps(reply), "--", "true"]) == 2
+    assert "BURN_RESUME must be" in capsys.readouterr().err
+    (call,) = stack.calls("POST", f"/instances/{reply['session_id']}/exit")
+    assert call[3]["Authorization"] == f"Bearer {launcher_secrets['session_token']}"
+    assert stack.instances[reply["session_id"]]["status"] == "exited"  # ended now, not left to the idle sweep

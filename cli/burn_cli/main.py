@@ -285,6 +285,12 @@ def cmd_run(args):
                             enroll_token=token, session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv),
                             drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin)
     except BadTask as exc:
+        if session and isinstance(secrets, dict) and secrets.get("session_token"):
+            # A launcher already started this session: end it now rather than leave it to time out.
+            try:
+                InstanceApi(api_url).exit(session["session_id"], secrets["session_token"])
+            except ApiError:
+                pass
         raise UsageError(f"{exc}; refusing to start") from None
     return instance.run()
 
