@@ -100,6 +100,8 @@ export interface RoleFields {
   may_spawn?: string[];
   egress?: string[] | null;
   owner?: string | null;
+  canaries?: boolean;
+  auto_burn?: boolean;
 }
 
 export interface RoleSpec extends RoleFields {

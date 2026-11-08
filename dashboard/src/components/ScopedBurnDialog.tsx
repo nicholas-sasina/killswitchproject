@@ -10,7 +10,12 @@ export interface BurnTarget {
   label: string;
 }
 
-export function ScopedBurnDialog({ api, target, onClose, onBurned }: {
+export function ScopedBurnDialog({
+  api,
+  target,
+  onClose,
+  onBurned,
+}: {
   api: BurnApi;
   target: BurnTarget;
   onClose: () => void;
@@ -28,21 +33,64 @@ export function ScopedBurnDialog({ api, target, onClose, onBurned }: {
       if (reason.trim()) body.reason = reason.trim();
       onBurned(await api.burnScope(body));
     } catch (error) {
-      setError(`${error instanceof Error ? error.message : "Burn failed."} Outcome not confirmed. Check instance status before retrying.`);
+      setError(
+        `${error instanceof Error ? error.message : "Burn failed."} Outcome not confirmed. Check instance status before retrying.`,
+      );
     } finally {
       setBusy(false);
     }
   }
-  return <SwarmDialog title={`Burn ${target.scope} ${target.label}?`} busy={busy} onClose={onClose}>
-    <form onSubmit={(event) => { event.preventDefault(); void confirm(); }}>
-      <p>{target.scope === "role" ? "Revoke every active instance of this role." : "Revoke this instance's session."} Rotate its own credentials and flag other credentials it saw for review.</p>
-      <label>Reason (optional)<input value={reason} maxLength={200} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label>
-      <ErrorMessage message={error} />
-      {busy && <p role="status">Containing… Keep this window open for the result.</p>}
-      <div className="dialog-actions">
-        <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
-        <button type="submit" className="burn-button" disabled={busy}>{busy ? "Containing…" : "Confirm Burn"}</button>
-      </div>
-    </form>
-  </SwarmDialog>;
+  return (
+    <SwarmDialog
+      title={`Burn ${target.scope} ${target.label}?`}
+      busy={busy}
+      onClose={onClose}
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void confirm();
+        }}
+      >
+        {target.scope === "instance" && (
+          <p>
+            Session: <code>{target.id}</code>
+          </p>
+        )}
+        <p>
+          {target.scope === "role"
+            ? "Revoke every active instance of this role."
+            : "Revoke this instance's session."}{" "}
+          Rotate its own credentials and flag other credentials it saw for
+          review.
+        </p>
+        <label>
+          Reason (optional)
+          <input
+            value={reason}
+            maxLength={200}
+            disabled={busy}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </label>
+        <ErrorMessage message={error} />
+        {busy && (
+          <p role="status">Containing… Keep this window open for the result.</p>
+        )}
+        <div className="dialog-actions">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button type="submit" className="burn-button" disabled={busy}>
+            {busy ? "Containing…" : "Confirm Burn"}
+          </button>
+        </div>
+      </form>
+    </SwarmDialog>
+  );
 }

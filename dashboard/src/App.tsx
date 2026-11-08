@@ -144,7 +144,11 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 : ""
             }
           />
-          <SwarmPanel key={`${config.burnUrl}:${config.demoToken}`} api={api} enabled={configured} />
+          <SwarmPanel
+            key={`${config.burnUrl}:${config.demoToken}`}
+            api={api}
+            enabled={configured}
+          />
           <div className="workspace-grid">
             <div className="detail-column">
               <section
