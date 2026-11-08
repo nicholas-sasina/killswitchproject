@@ -1,13 +1,13 @@
-export function Flame() {
-  return (
-    <svg viewBox="0 0 24 28" fill="none" aria-hidden="true">
-      <path
-        d="M13 2c1 7-6 8-4 14 2-1 3-3 3-5 5 3 8 6 8 10a8 8 0 0 1-16 0C2 13 10 10 13 2Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
+import { BurnMark } from "./Brand";
+
+/** The Burn mark, re-exported for the controls that carry it. */
+export { BurnMark };
+
+/**
+ * Kept so existing call sites keep working after the mark was redrawn.
+ * @deprecated Use `BurnMark`.
+ */
+export const Flame = BurnMark;
 
 export function Status({ value }: { value: string }) {
   return (
