@@ -190,13 +190,13 @@ BURN_NOTIFY_LIVE=1 uv run python demo/backend_demo.py --live --config ~/burn-not
 BURN_NOTIFY_PROBE=1 uv run pytest -m live tests/test_live_probe.py   # negative probes: invalid creds, nothing delivered
 ```
 
-## Deploying (needs the infrastructure owner)
-Not deployed. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the exact commands, IAM, secrets,
-environment, resources and costs (about $2–3 a month), verification, and rollback and teardown.
+## Deploying
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the exact commands, IAM, secrets, environment, resources
+and costs (about $2–3 a month), verification, and rollback and teardown.
 
 In short:
-1. **Enable the stream on `burn-events`.** This is the only change to an existing resource: branch
-   `ws/notifications-infra`, an in-place update with no interruption.
+1. **Enable the stream on `burn-events`.** This is the only change to an existing resource
+   (`infra/burn_infra/data.py`, #120). It's an in-place update with no interruption.
 2. **Deploy the new `BurnNotifications` stack** from `infra/app.py`.
    - EventBridge Pipe (INSERT filter, its own DLQ).
    - SQS queue and DLQ.

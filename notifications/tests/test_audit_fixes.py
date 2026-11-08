@@ -337,3 +337,13 @@ def test_detail_prefixes_match_burns_real_writers():
     for marker in ("used through its own session", "used through another Burn session", "from outside Burn"):
         assert marker in trip
     assert "is report-only" in canary_src
+
+
+def test_deployment_notice_env_labels_messages(monkeypatch):
+    from burn_notify import handler
+    monkeypatch.setenv("BURN_NOTIFY_STATE_TABLE", "t")
+    monkeypatch.setenv("BURN_NOTIFY_CONFIG_JSON", '{"destinations": []}')
+    monkeypatch.setenv("BURN_NOTIFY_NOTICE", "SYNTHETIC TEST - deployment check")
+    monkeypatch.setattr(handler, "DynamoStore", lambda *a, **k: object())
+    monkeypatch.setattr(handler, "_processor", None)
+    assert handler.processor().notice == "SYNTHETIC TEST - deployment check"
