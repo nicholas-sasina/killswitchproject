@@ -12,10 +12,11 @@ the event stream. It is the terminal twin of the dashboard. `import burn` is a s
   a random state), receives the reply on `http://localhost:8976/callback` and keeps the session in
   `~/.config/burn/credentials.json` (directory 700, file 600, written atomically). `BURN_PEOPLE_DOMAIN` and
   `BURN_PEOPLE_CLIENT_ID` say where to sign in (environment, else `.env`).
-- Every person-side request carries `Authorization: Bearer <ID token>`, added in one function
-  (`Api.auth_headers`), refreshed when under a minute remains. No token is ever printed; the one secret the CLI
-  prints is a join token, once, from `burn token create`.
-- Local development against the mock servers: `BURN_LOCAL_DEV=1` sends `BURN_DEMO_TOKEN` instead of a sign-in.
+- Once the stack requires sign-in (`BURN_PEOPLE_ENABLED=on`, which `make env` writes to `.env`), every
+  person-side request carries `Authorization: Bearer <ID token>`, added in one function (`Api.auth_headers`) and
+  refreshed when under a minute remains. Until then, the API takes only `BURN_DEMO_TOKEN`, so that is what is sent.
+  No token is ever printed; the one secret the CLI prints is a join token, once, from `burn token create`.
+- Local development against the mock servers: `BURN_LOCAL_DEV=1` always sends `BURN_DEMO_TOKEN`.
 - Calls that can fail transiently (429, 5xx, network) retry with exponential backoff and jitter (`burn_cli/retry.py`).
 - `--json` prints the raw API response. Exit codes: 0 ok, 1 API or network error, 2 usage or missing config.
 
@@ -142,6 +143,9 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
   only its own key, which it received from the API when the instance joined. `burn run` needs no AWS access.
 - **Why does a command say "not signed in: run `burn login`"?** There is no sign-in on this machine, or it
   can no longer be refreshed. Run `burn login` again.
+- **Do I need to sign in?** Only once your stack requires it. Until then the commands work as before, with
+  `BURN_DEMO_TOKEN` from `.env`. When it is switched on, run `make env` again, then `burn login`. A command that
+  gets "HTTP 401" says which of the two to do.
 - **Where is my sign-in kept, and who can read it?** In `~/.config/burn/credentials.json`, readable only by you.
   `burn logout` revokes the session and deletes the file.
 - **Does `burn run` need me to sign in?** No. An instance authenticates as itself with the join token and then
