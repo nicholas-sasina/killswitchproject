@@ -28,7 +28,8 @@ def agent_states() -> list[dict]:
         states.append({
             "agent_id": agent_id,
             "role": agent.get("role"),
-            "status": latest["status"] if latest else "idle",
+            # AgentState is active, revoked or idle; an agent whose latest session ended cleanly has none active.
+            "status": latest["status"] if latest and latest["status"] in ("active", "revoked") else "idle",
             "session_id": latest["session_id"] if latest else None,
             "exposures": _exposure_count(agent_id),
         })

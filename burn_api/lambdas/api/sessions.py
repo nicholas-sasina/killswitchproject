@@ -68,6 +68,16 @@ def revoke_sessions(agent_id: str) -> list[str]:
             if s.get("status") == "active" and end_session(s, "revoked")]
 
 
+def exit_sessions(agent_id: str) -> list[str]:
+    """End every active session of the agent as exited (not revoked) and delete its Cognito client.
+
+    A restart is not a burn: "revoked" means Burn contained the agent, and the dashboard counts it as such.
+    The gateway accepts only "active", so an exited session's badge is refused exactly like a revoked one.
+    """
+    return [s["session_id"] for s in db.sessions_for_agent(agent_id)
+            if s.get("status") == "active" and end_session(s, "exited")]
+
+
 def _store_badge(agent_id: str, badge: dict) -> str:
     ref = names.agent_secret_ref(agent_id, "badge")
     client = boto3.client("secretsmanager", region_name=names.REGION)
@@ -85,8 +95,9 @@ def start_session(agent_id: str) -> dict:
     if agent is None:
         raise NotFound(agent_id)
 
-    # One active session per agent keeps the dashboard simple.
-    revoke_sessions(agent_id)
+    # One active session per agent keeps the dashboard simple. The previous one ends as exited: a restart
+    # is not a burn, so it must not show up as one (only POST /burn and scoped burns revoke).
+    exit_sessions(agent_id)
 
     credentials = []
     if agent.get("credentials"):

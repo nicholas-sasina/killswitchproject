@@ -30,12 +30,33 @@ def test_session_flow(env):
     assert "stream" not in feed["events"][-1]
 
 
-def test_new_session_revokes_old(env):
+def test_a_restart_ends_the_old_session_as_exited_not_revoked(env):
     first = call(env, "POST", "/sessions", {"agent_id": "agent-a"})[1]["session_id"]
+    first_client = env.ddb.Table("burn-sessions").get_item(Key={"session_id": first})["Item"]["client_id"]
     second = call(env, "POST", "/sessions", {"agent_id": "agent-a"})[1]["session_id"]
-    assert call(env, "GET", f"/badge/{first}")[1]["status"] == "revoked"
+    assert call(env, "GET", f"/badge/{first}")[1]["status"] == "exited"
     assert call(env, "GET", f"/badge/{second}")[1]["status"] == "active"
-    assert len(env.badges.deleted) == 1
+    assert env.badges.deleted == [first_client]  # its badge is gone, exactly as before
+    old = env.ddb.Table("burn-sessions").get_item(Key={"session_id": first})["Item"]
+    assert old["exited_at"] and "revoked_at" not in old
+    assert not [e for e in call(env, "GET", "/events")[1]["events"] if e["action"] == "revoked"]  # not a burn
+
+
+def test_a_burn_still_revokes(env):
+    sid = call(env, "POST", "/sessions", {"agent_id": "agent-a"})[1]["session_id"]
+    call(env, "POST", "/burn", {"agent_id": "agent-a"})
+    row = env.ddb.Table("burn-sessions").get_item(Key={"session_id": sid})["Item"]
+    assert row["status"] == "revoked" and row["revoked_at"]
+    assert call(env, "GET", f"/badge/{sid}")[1]["status"] == "revoked"
+
+
+def test_the_feed_shows_an_agent_with_only_exited_sessions_as_idle(env):
+    sid = call(env, "POST", "/sessions", {"agent_id": "agent-a"})[1]["session_id"]
+    call(env, "POST", f"/instances/{sid}/exit")
+    states = {a["agent_id"]: a for a in call(env, "GET", "/events")[1]["agents"]}
+    assert states["agent-a"]["status"] == "idle"  # the contract's AgentState has no "exited"
+    call(env, "POST", "/sessions", {"agent_id": "agent-a"})
+    assert {a["agent_id"]: a for a in call(env, "GET", "/events")[1]["agents"]}["agent-a"]["status"] == "active"
 
 
 def test_minter_failure_creates_no_session(env):
