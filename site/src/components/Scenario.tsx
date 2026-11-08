@@ -9,13 +9,19 @@ import {
   heroStepAt,
   type HeroStep,
 } from "../content/scenario";
-import { usePageVisible, useReducedMotion } from "../hooks/media";
+import {
+  PLANE_LAYOUT,
+  useMediaQuery,
+  usePageVisible,
+  useReducedMotion,
+} from "../hooks/media";
 import { useInView } from "../hooks/useInView";
 import { usePlaneScale } from "../hooks/usePlaneScale";
 import { useProgress } from "../hooks/useProgress";
 import { useTimeline, type Timeline } from "../hooks/useTimeline";
 import { Crossfade } from "./Crossfade";
 import { DigitRoll } from "./DigitRoll";
+import { DotField, type Mask } from "./DotField";
 import { Flame } from "./Mark";
 import { Inbox } from "./icons";
 import { Rich, plain } from "./Rich";
@@ -24,8 +30,12 @@ import { Rich, plain } from "./Rich";
 const ARRIVAL_MS = 1600;
 const FINAL_T = HERO_CYCLE_MS - 1;
 
+const PLANE_MASK: Mask = { cx: 0.58, cy: 0.48, rx: 0.62, ry: 0.75 };
+const STACK_MASK: Mask = { cx: 0.5, cy: 0.42, rx: 0.8, ry: 0.72 };
+
 export function Scenario() {
   const reduced = useReducedMotion();
+  const plane = useMediaQuery(PLANE_LAYOUT);
   const pageVisible = usePageVisible();
   const frameRef = useRef<HTMLDivElement>(null);
   const ledgerRef = useRef<HTMLDivElement>(null);
@@ -74,6 +84,13 @@ export function Scenario() {
       aria-labelledby="scenario-label"
     >
       <div className="scene">
+        <DotField
+          className="scene-dots"
+          mask={plane ? PLANE_MASK : STACK_MASK}
+          burst={k === 3 && !reduced}
+          burstKey={timeline.epoch}
+          originRef={ledgerRef}
+        />
         <h2 className="scene-label cap" id="scenario-label">
           <span className="ember-dot" aria-hidden="true" />
           Interactive scenario
