@@ -46,8 +46,10 @@ export function ReplacementInfo({
           {resume ? (
             <>
               {" "}
-              · resumed at {resume.done.length}/{previous?.items_started ?? "?"}{" "}
-              reported · {resume.quarantined.length} quarantined
+              · resumed at {resume.done.length}
+              {previous?.items_started != null &&
+                `/${previous.items_started}`}{" "}
+              · {resume.quarantined.length} quarantined
             </>
           ) : (
             " · resume progress not reported"

@@ -77,14 +77,36 @@ it("links the burned row to the actual replacement and the replacement back to i
       .getByRole("link", { name: old.agent_id })
       .getAttribute("href"),
   ).toBe(instanceHref(old.session_id));
-  expect(rows[1].textContent).toContain(
-    "resumed at 2/3 reported · 1 quarantined",
-  );
+  expect(rows[1].textContent).toContain("resumed at 2/3 · 1 quarantined");
   expect(
     within(rows[0])
       .getByRole("link", { name: `Inspect ${old.agent_id}` })
       .getAttribute("href"),
   ).toBe(instanceHref(old.session_id));
+});
+
+it("omits the resume denominator when the predecessor has no started count", () => {
+  render(
+    <ReplacementInfo
+      instance={replacement}
+      instances={[{ ...old, items_started: undefined }, replacement]}
+    />,
+  );
+  expect(screen.getByText(/resumed at 2 · 1 quarantined/)).toBeTruthy();
+  expect(screen.queryByText(/reported|2\/\?/)).toBeNull();
+});
+
+it("retains a reported zero started count", () => {
+  render(
+    <ReplacementInfo
+      instance={replacement}
+      instances={[
+        { ...old, items_started: 0, replacement: { ...snapshot, done: [] } },
+        replacement,
+      ]}
+    />,
+  );
+  expect(screen.getByText(/resumed at 0\/0 · 1 quarantined/)).toBeTruthy();
 });
 
 it("shows quarantined IDs in replacement details from the shared predecessor record", () => {
