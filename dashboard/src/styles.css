@@ -1,71 +1,70 @@
 /* ===========================================================================
    Burn — forensic instrument
    ---------------------------------------------------------------------------
-   Burn is an audit ledger with a kill switch, so the interface is built like a
-   piece of monitoring equipment and a printed incident sheet, not a consumer
-   dashboard. The rules below are deliberate and worth keeping:
+   Burn is an audit ledger with a kill switch, so the interface is built like
+   an incident sheet: archival paper, ruled columns, ink. The rules below are
+   deliberate and worth keeping.
 
-     1. Structure comes from hairline rules and whitespace. Not from boxes
+     1. Paper, not a dark console. Every security dashboard is near-black;
+        this one is warm off-white, which suits a document you read and
+        annotate, survives a bright room and a projector, and is the single
+        biggest reason it does not look like every other generated UI.
+     2. Structure comes from hairline rules and whitespace. Not from boxes
         inside boxes, drop shadows, or glows.
-     2. Square corners. Radius is 0 everywhere except the modal, which needs
-        to read as a sheet lifted off the page.
-     3. Warm ink palette. Cool blue-greys are the default of every generated
-        dashboard; this one is built on warm near-blacks so it looks lit by
-        the thing it is monitoring.
+     3. Square corners. Only the modal is lifted off the page.
      4. One signal colour. Ember means severity or destruction and nothing
-        else, so a filled ember element always deserves attention. Sage means
-        nominal, ochre means needs-review, slate means bookkeeping.
-     5. Monospace for every identifier, number, label and control; the
-        humanist sans is only for prose the operator reads as sentences.
-        Everything that could be compared or counted is tabular.
-     6. Severity is written, not coloured: [CRIT], [HIGH]. Colour is the
-        redundant channel, which keeps it legible to colour-blind operators
-        and in a washed-out projector.
+        else, so a filled ember element always deserves attention. Green is
+        nominal, ochre needs review, slate is bookkeeping.
+     5. Severity is written as well as coloured: [CRIT], [HIGH]. Colour is
+        the redundant channel, so the interface still works for colour-blind
+        operators and on a washed-out projector.
+     6. Monospace for every identifier, number, label and control; the
+        humanist sans is only for prose read as sentences. All figures are
+        tabular so columns of numbers line up.
      7. Log rows carry a line number in a ruled gutter, like a printout.
    =========================================================================== */
 
 :root {
-  /* Surfaces, warm near-black rather than blue slate. */
-  --c-void: #080706;
-  --c-base: #0d0b0a;
-  --c-module: #131110;
-  --c-raised: #1a1715;
-  --c-sunken: #0a0908;
+  /* Paper stock, warm rather than white. */
+  --c-page: #f1ede4;
+  --c-module: #faf8f3;
+  --c-sunken: #e8e3d8;
+  --c-raised: #fffdf9;
 
   /* Hairlines do the structural work. */
-  --c-rule: #272320;
-  --c-rule-bright: #39332c;
+  --c-rule: #d3cbbb;
+  --c-rule-bright: #b0a593;
 
-  /* Warm ink. */
-  --c-ink: #ece7de;
-  --c-ink-2: #a89f93;
-  --c-ink-3: #746b61;
+  /* Ink. */
+  --c-ink: #1f1c18;
+  --c-ink-2: #574f45;
+  --c-ink-3: #756d5f;
 
   /* Signal: ember is severity and destruction, only. */
-  --c-ember: #e2552f;
-  --c-ember-text: #ff9472;
-  --c-ember-edge: #7d2a16;
-  --c-ember-deep: #2e140c;
+  --c-ember: #bf3a12;
+  --c-ember-text: #9d2f0e;
+  --c-ember-edge: #d79e86;
+  --c-ember-deep: #f9e5dc;
 
   /* Supporting states. */
-  --c-nominal: #9ab48f;
-  --c-nominal-deep: #19210f;
-  --c-caution: #cb9a42;
-  --c-caution-deep: #292009;
-  --c-cool: #8698a9;
-  --c-cool-deep: #161c22;
+  --c-nominal: #3a6540;
+  --c-nominal-deep: #e4ecde;
+  --c-caution: #7f5a10;
+  --c-caution-deep: #f6edd4;
+  --c-cool: #3a5571;
+  --c-cool-deep: #e3eaf1;
 
   --f-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --f-sans: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
 
-  --gutter: 3.25rem;
+  --gutter: 3.6rem;
 
   font-family: var(--f-sans);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.55;
   color: var(--c-ink);
-  background: var(--c-base);
-  color-scheme: dark;
+  background: var(--c-page);
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -77,12 +76,7 @@
 }
 body {
   margin: 0;
-  background:
-    /* A faint ember wash at the top edge: the only gradient in the
-       interface, and it reads as instrument backlight. */
-    radial-gradient(120rem 22rem at 50% -14rem, #1d100b 0%, transparent 70%),
-    var(--c-base);
-  background-attachment: fixed;
+  background: var(--c-page);
 }
 h1,
 h2,
@@ -110,7 +104,7 @@ a {
 code,
 kbd {
   font-family: var(--f-mono);
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   overflow-wrap: anywhere;
   color: var(--c-ink-2);
 }
@@ -129,12 +123,12 @@ summary:focus-visible,
 /* --- Type primitives ----------------------------------------------------- */
 
 h2 {
-  font-size: 0.95rem;
+  font-size: 1.02rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 h3 {
-  font-size: 0.85rem;
+  font-size: 0.92rem;
   font-weight: 600;
 }
 .muted {
@@ -144,9 +138,9 @@ h3 {
 .eyebrow {
   font-family: var(--f-mono);
   text-transform: uppercase;
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-weight: 500;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   color: var(--c-ink-3);
 }
 
@@ -163,13 +157,13 @@ h3 {
   align-items: stretch;
   justify-content: space-between;
   gap: 28px;
-  border-bottom: 1px solid var(--c-rule);
-  min-height: 60px;
+  border-bottom: 1px solid var(--c-rule-bright);
+  min-height: 62px;
 }
 .header-identity {
   display: flex;
   align-items: center;
-  gap: 26px;
+  gap: 24px;
   min-width: 0;
 }
 .brand {
@@ -182,8 +176,9 @@ h3 {
 .brand > svg {
   color: var(--c-ember);
   display: block;
-  width: 21px;
-  height: 21px;
+  /* 25px: below about 24 the flame inside the brackets loses its shape. */
+  width: 25px;
+  height: 25px;
   flex-shrink: 0;
 }
 .brand-mark svg {
@@ -193,7 +188,7 @@ h3 {
 }
 .brand-word {
   font-family: var(--f-mono);
-  font-size: 1.02rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: 0.28em;
   /* Optical correction for the trailing tracking. */
@@ -201,13 +196,13 @@ h3 {
 }
 .tagline {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 400;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   border-left: 1px solid var(--c-rule);
-  padding-left: 26px;
+  padding-left: 24px;
   white-space: nowrap;
 }
 .tagline span {
@@ -218,18 +213,16 @@ h3 {
 .view-nav {
   display: flex;
   align-items: stretch;
-  gap: 0;
-  margin-left: 8px;
+  margin-left: 6px;
 }
 .view-tab {
-  position: relative;
   background: none;
   border: 0;
   border-bottom: 2px solid transparent;
   padding: 0 16px;
   font-family: var(--f-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   display: inline-flex;
@@ -244,15 +237,16 @@ h3 {
   color: var(--c-ink);
   border-bottom-color: var(--c-ember);
 }
-/* Unread/attention count rides the tab as a mono figure, not a round badge. */
+/* Attention count rides the tab as a mono figure, not a round badge. */
 .view-tab b {
-  font-weight: 600;
-  font-size: 0.66rem;
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0;
   color: var(--c-ember-text);
 }
 .view-tab[data-quiet="true"] b {
   color: var(--c-ink-3);
+  font-weight: 500;
 }
 
 .header-status {
@@ -272,8 +266,8 @@ h3 {
 }
 .summary dt {
   font-family: var(--f-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.18em;
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--c-ink-3);
 }
@@ -281,7 +275,7 @@ h3 {
   margin: 0;
   order: -1;
   font-family: var(--f-mono);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 600;
   line-height: 1.1;
 }
@@ -289,11 +283,11 @@ h3 {
   color: var(--c-nominal);
 }
 
-/* Connection state: a 6px square, never a pulsing dot. */
+/* Connection state: a 7px square, never a pulsing dot. */
 .connection {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   display: flex;
@@ -302,8 +296,8 @@ h3 {
   white-space: nowrap;
 }
 .connection > span {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   background: var(--c-ink-3);
   flex-shrink: 0;
 }
@@ -335,12 +329,11 @@ main {
   border-bottom: 1px solid var(--c-rule);
   background: var(--c-sunken);
 }
-/* One label per heading. Where a component supplies both an eyebrow and a
-   heading, the eyebrow is the category and the heading is the subject, so the
-   heading takes the mono treatment and the eyebrow stays quiet. */
+/* One label per heading: the eyebrow is the category, the heading the
+   subject, so the heading takes the mono treatment and the eyebrow is quiet. */
 .panel-heading h2 {
   font-family: var(--f-mono);
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   margin-top: 4px;
@@ -351,8 +344,8 @@ main {
 .panel-heading > .muted,
 .panel-heading .meta {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   white-space: nowrap;
@@ -360,20 +353,21 @@ main {
 .empty {
   padding: 22px 18px;
   color: var(--c-ink-2);
-  font-size: 0.85rem;
+  font-size: 0.92rem;
   line-height: 1.65;
-  max-width: 62ch;
+  max-width: 64ch;
 }
 .empty p + p {
   margin-top: 9px;
 }
 .panel-footnote {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.06em;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
   color: var(--c-ink-3);
-  padding: 10px 18px;
+  padding: 11px 18px;
   border-top: 1px solid var(--c-rule);
+  line-height: 1.5;
 }
 
 /* Section label sitting inside a rule, like a drawing callout. */
@@ -385,9 +379,9 @@ main {
 }
 .section-heading h2 {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
+  font-size: 0.76rem;
   font-weight: 600;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--c-ink-2);
   flex-shrink: 0;
@@ -400,8 +394,8 @@ main {
 }
 .section-heading > .muted {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   order: 3;
@@ -409,12 +403,12 @@ main {
   white-space: nowrap;
 }
 
-/* Collapsible module. Closed modules stop polling, so collapsing is a real
-   cost saving and not only a layout preference. */
+/* --- Collapsible module -------------------------------------------------- */
+
 .module-toggle {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   width: 100%;
   background: var(--c-sunken);
   border: 0;
@@ -427,26 +421,30 @@ main {
 }
 .module-toggle .chevron {
   font-family: var(--f-mono);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 600;
   color: var(--c-ink-3);
   width: 0.8em;
+  text-align: center;
   flex-shrink: 0;
 }
 .module-toggle h2 {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.2em;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--c-ink-2);
 }
-.module-toggle:hover h2 {
+.module-toggle:hover h2,
+.module-toggle:hover .chevron {
   color: var(--c-ink);
 }
 .module-toggle .toggle-meta {
   margin-left: auto;
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   white-space: nowrap;
@@ -459,15 +457,15 @@ main {
   align-items: center;
   gap: 6px;
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.12em;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--c-ink-2);
   white-space: nowrap;
 }
 .status > span {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   background: currentColor;
   flex-shrink: 0;
 }
@@ -496,7 +494,7 @@ main {
 }
 .agent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   /* Cards share hairlines instead of each drawing its own border. */
   gap: 1px;
   background: var(--c-rule);
@@ -518,7 +516,7 @@ main {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 2px;
+  width: 3px;
   background: var(--c-ember);
 }
 .agent-card.agent-card-recent {
@@ -543,7 +541,7 @@ main {
 }
 .agent-card h2 {
   font-family: var(--f-mono);
-  font-size: 0.86rem;
+  font-size: 0.96rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   margin: 10px 0 12px;
@@ -556,13 +554,13 @@ main {
 }
 .session > span {
   font-family: var(--f-mono);
-  font-size: 0.56rem;
-  letter-spacing: 0.18em;
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--c-ink-3);
 }
 .session code {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   color: var(--c-ink-2);
   text-overflow: ellipsis;
   overflow: hidden;
@@ -579,14 +577,14 @@ main {
 }
 .exposure > strong {
   font-family: var(--f-mono);
-  font-size: 1.3rem;
+  font-size: 1.45rem;
   font-weight: 600;
   line-height: 1;
 }
 .exposure > span {
   font-family: var(--f-mono);
-  font-size: 0.56rem;
-  letter-spacing: 0.14em;
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--c-ink-3);
 }
@@ -606,36 +604,35 @@ main {
   padding: 8px 10px;
   margin-bottom: 10px;
   background: var(--c-ember-deep);
-  border-left: 2px solid var(--c-ember);
+  border-left: 3px solid var(--c-ember);
   font-family: var(--f-mono);
-  font-size: 0.64rem;
+  font-size: 0.72rem;
   color: var(--c-ember-text);
 }
 .burn-summary strong {
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  font-size: 0.6rem;
+  font-size: 0.68rem;
 }
 
 /* --- Controls ------------------------------------------------------------ */
 
-/* The only filled ember control in the interface. It is destructive, so it
-   is the one thing allowed to look loud. */
+/* Destructive, so it is the one control allowed to look loud. */
 .burn-button {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
+  min-height: 34px;
   padding: 7px 14px;
   background: transparent;
   color: var(--c-ember-text);
   border: 1px solid var(--c-ember-edge);
   font-family: var(--f-mono);
-  font-size: 0.64rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   transition:
     background 0.12s linear,
@@ -646,7 +643,7 @@ main {
   border-color: var(--c-ember);
   color: #fff;
 }
-/* The mark does not survive at button scale and repeating it on every row is
+/* The mark does not survive button scale and repeating it on every row is
    noise, so controls are text only. The mark appears once in the header and
    once in the confirmation dialog, where it has room. */
 .burn-button svg {
@@ -654,8 +651,8 @@ main {
 }
 .dialog-actions .burn-button svg {
   display: block;
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 .burn-button:disabled {
@@ -663,8 +660,8 @@ main {
   border-color: var(--c-rule);
   background: transparent;
 }
-/* In a confirmation dialog the commit button is filled: at that point the
-   operator has already chosen, and the button should look like the act. */
+/* In the confirmation dialog the commit button is filled: by then the
+   operator has chosen, and the button should look like the act. */
 .dialog-actions .burn-button {
   width: auto;
   background: var(--c-ember);
@@ -681,17 +678,18 @@ main {
   background: transparent;
   color: var(--c-ink-2);
   border: 1px solid var(--c-rule-bright);
-  min-height: 32px;
+  min-height: 34px;
   padding: 7px 14px;
   font-family: var(--f-mono);
-  font-size: 0.64rem;
+  font-size: 0.72rem;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 .secondary-button:hover:enabled {
   color: var(--c-ink);
   border-color: var(--c-ink-3);
+  background: var(--c-raised);
 }
 .secondary-button:disabled {
   color: var(--c-ink-3);
@@ -701,26 +699,26 @@ main {
 label {
   display: block;
   font-family: var(--f-mono);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-weight: 500;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--c-ink-2);
 }
 label > .muted {
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 input,
 select,
 textarea {
   width: 100%;
-  background: var(--c-sunken);
+  background: var(--c-raised);
   color: var(--c-ink);
   border: 1px solid var(--c-rule-bright);
   padding: 8px 10px;
   margin-top: 6px;
   font-family: var(--f-mono);
-  font-size: 0.76rem;
+  font-size: 0.84rem;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -732,7 +730,7 @@ input::placeholder {
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(360px, 0.85fr);
+  grid-template-columns: minmax(0, 1.85fr) minmax(370px, 0.85fr);
   gap: 20px;
   align-items: start;
   margin-bottom: 22px;
@@ -752,27 +750,30 @@ input::placeholder {
 table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.76rem;
+  font-size: 0.84rem;
   text-align: left;
 }
 th {
   font-family: var(--f-mono);
-  font-size: 0.57rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   color: var(--c-ink-3);
   font-weight: 500;
   white-space: nowrap;
   padding: 9px 16px;
   background: var(--c-sunken);
   border-bottom: 1px solid var(--c-rule);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 td {
   padding: 11px 16px;
   vertical-align: top;
   border-top: 1px solid var(--c-rule);
   color: var(--c-ink);
-  max-width: 280px;
+  max-width: 300px;
   overflow-wrap: anywhere;
 }
 tbody tr:first-child td {
@@ -781,8 +782,8 @@ tbody tr:first-child td {
 .cell-note {
   display: block;
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.1em;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   margin-top: 4px;
@@ -811,7 +812,7 @@ tbody tr:first-child td {
   overflow: auto;
   overflow-anchor: none;
   scrollbar-color: var(--c-rule-bright) var(--c-module);
-  /* The gutter rule, drawn once for the whole column like ledger paper. */
+  /* The gutter rule, drawn once for the column like ledger paper. */
   background-image: linear-gradient(
     to right,
     transparent calc(var(--gutter) - 1px),
@@ -827,18 +828,16 @@ tbody tr:first-child td {
   grid-template-columns: var(--gutter) minmax(0, 1fr);
   align-items: start;
   border-bottom: 1px solid var(--c-rule);
-  position: relative;
 }
 .event:last-child {
   border-bottom: 0;
 }
 .event-icon {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
+  font-size: 0.7rem;
   color: var(--c-ink-3);
-  padding: 11px 10px 11px 0;
+  padding: 11px 11px 11px 0;
   text-align: right;
-  letter-spacing: 0.04em;
 }
 .event-body {
   min-width: 0;
@@ -852,40 +851,40 @@ tbody tr:first-child td {
   margin-bottom: 3px;
 }
 .event-title strong {
-  font-size: 0.78rem;
+  font-size: 0.88rem;
   font-weight: 500;
   color: var(--c-ink);
 }
 .event-title time {
   font-family: var(--f-mono);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   color: var(--c-ink-3);
   white-space: nowrap;
 }
 .event-body p {
   font-family: var(--f-mono);
-  font-size: 0.64rem;
+  font-size: 0.74rem;
   color: var(--c-ink-2);
   overflow-wrap: anywhere;
 }
 .event-body b {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--c-ink);
 }
 .event-body > code {
   display: block;
   margin: 5px 0 0;
-  font-size: 0.66rem;
+  font-size: 0.76rem;
   color: var(--c-cool);
 }
 .event-body .event-meta {
   color: var(--c-ink-3);
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   margin-top: 4px;
 }
 .event-body .event-detail {
   font-family: var(--f-sans);
-  font-size: 0.73rem;
+  font-size: 0.84rem;
   color: var(--c-ink-2);
   margin-top: 5px;
   line-height: 1.55;
@@ -909,7 +908,7 @@ tbody tr:first-child td {
 .event-canary_used .event-icon,
 .event-unregistered .event-icon {
   color: var(--c-ember-text);
-  box-shadow: inset 2px 0 0 var(--c-ember);
+  box-shadow: inset 3px 0 0 var(--c-ember);
 }
 .event-blocked .event-title strong,
 .event-canary_used .event-title strong,
@@ -940,7 +939,7 @@ tbody tr:first-child td {
 
 .alert-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.62fr);
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 0.66fr);
   gap: 20px;
   align-items: start;
   margin-bottom: 22px;
@@ -954,7 +953,7 @@ tbody tr:first-child td {
 /* Severity ribbon: counts by tier, reads like a control panel readout. */
 .alert-ribbon {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px;
   background: var(--c-rule);
   border: 1px solid var(--c-rule);
@@ -968,25 +967,32 @@ tbody tr:first-child td {
   gap: 5px;
   text-align: left;
   border: 0;
-  border-top: 2px solid transparent;
-  position: relative;
+  border-top: 3px solid transparent;
 }
 .alert-tally:hover {
   background: var(--c-raised);
 }
-.alert-tally[aria-pressed="true"] {
-  background: var(--c-raised);
+.alert-tally[aria-pressed="false"] {
+  background: var(--c-sunken);
+}
+/* A muted tier is struck through, so "filtered out" is legible without
+   relying on the background shade alone. */
+.alert-tally[aria-pressed="false"] .label {
+  text-decoration: line-through;
+}
+.alert-tally[aria-pressed="false"] .count {
+  opacity: 0.45;
 }
 .alert-tally .count {
   font-family: var(--f-mono);
-  font-size: 1.45rem;
+  font-size: 1.6rem;
   font-weight: 600;
   line-height: 1;
 }
 .alert-tally .label {
   font-family: var(--f-mono);
-  font-size: 0.57rem;
-  letter-spacing: 0.2em;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--c-ink-3);
 }
@@ -1022,42 +1028,36 @@ tbody tr:first-child td {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px 8px;
+  gap: 8px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--c-rule);
   background: var(--c-sunken);
 }
-.alert-filters .eyebrow {
-  margin-right: 2px;
-}
 .chip {
-  background: transparent;
+  background: var(--c-module);
   border: 1px solid var(--c-rule-bright);
-  color: var(--c-ink-3);
+  color: var(--c-ink-2);
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 4px 9px;
+  padding: 4px 10px;
 }
 .chip:hover {
   color: var(--c-ink);
 }
 .chip[aria-pressed="true"] {
-  color: var(--c-ink);
-  border-color: var(--c-ink-3);
-  background: var(--c-raised);
-}
-.alert-filters .spacer {
-  margin-left: auto;
+  color: var(--c-module);
+  border-color: var(--c-ink);
+  background: var(--c-ink);
 }
 
 .alert-list {
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: calc(100dvh - 330px);
-  min-height: 220px;
+  max-height: calc(100dvh - 340px);
+  min-height: 200px;
   overflow: auto;
   scrollbar-color: var(--c-rule-bright) var(--c-module);
   background-image: linear-gradient(
@@ -1078,7 +1078,7 @@ tbody tr:first-child td {
   text-align: left;
   align-items: start;
 }
-.alert-row:last-child {
+.alert-list > li:last-child .alert-row {
   border-bottom: 0;
 }
 .alert-row:hover {
@@ -1087,14 +1087,11 @@ tbody tr:first-child td {
 .alert-row[aria-pressed="true"] {
   background: var(--c-raised);
 }
-.alert-row[aria-pressed="true"] .alert-index {
-  box-shadow: inset 2px 0 0 var(--c-ink-2);
-}
 .alert-index {
   font-family: var(--f-mono);
-  font-size: 0.58rem;
+  font-size: 0.7rem;
   color: var(--c-ink-3);
-  padding: 12px 10px 12px 0;
+  padding: 12px 11px 12px 0;
   text-align: right;
 }
 .alert-main {
@@ -1106,17 +1103,15 @@ tbody tr:first-child td {
   align-items: baseline;
   gap: 10px;
 }
-/* Severity written as a bracketed token: the same brackets as the logo. */
+/* Severity written as a bracketed token: the same brackets as the mark. */
 .sev {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   flex-shrink: 0;
 }
-.sev-crit {
-  color: var(--c-ember-text);
-}
+.sev-crit,
 .sev-high {
   color: var(--c-ember-text);
 }
@@ -1127,17 +1122,20 @@ tbody tr:first-child td {
   color: var(--c-cool);
 }
 .alert-row[data-tier="crit"] .alert-index {
-  box-shadow: inset 2px 0 0 var(--c-ember);
+  box-shadow: inset 3px 0 0 var(--c-ember);
   color: var(--c-ember-text);
 }
 .alert-row[data-tier="high"] .alert-index {
-  box-shadow: inset 2px 0 0 var(--c-ember-edge);
+  box-shadow: inset 3px 0 0 var(--c-ember-edge);
 }
 .alert-row[data-tier="warn"] .alert-index {
-  box-shadow: inset 2px 0 0 var(--c-caution);
+  box-shadow: inset 3px 0 0 var(--c-caution);
+}
+.alert-row[aria-pressed="true"] .alert-main {
+  box-shadow: inset 0 0 0 0 transparent;
 }
 .alert-title {
-  font-size: 0.78rem;
+  font-size: 0.88rem;
   font-weight: 500;
   color: var(--c-ink);
   overflow-wrap: anywhere;
@@ -1149,14 +1147,15 @@ tbody tr:first-child td {
 .alert-when {
   margin-left: auto;
   font-family: var(--f-mono);
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   color: var(--c-ink-3);
   white-space: nowrap;
   flex-shrink: 0;
 }
 .alert-sub {
+  display: block;
   font-family: var(--f-mono);
-  font-size: 0.63rem;
+  font-size: 0.74rem;
   color: var(--c-ink-2);
   margin-top: 4px;
   overflow-wrap: anywhere;
@@ -1170,12 +1169,12 @@ tbody tr:first-child td {
 .alert-detail dl {
   margin: 0;
   display: grid;
-  grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(104px, auto) minmax(0, 1fr);
 }
 .alert-detail dt {
   font-family: var(--f-mono);
-  font-size: 0.57rem;
-  letter-spacing: 0.18em;
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--c-ink-3);
   padding: 9px 14px 9px 18px;
@@ -1184,42 +1183,45 @@ tbody tr:first-child td {
 .alert-detail dd {
   margin: 0;
   font-family: var(--f-mono);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--c-ink);
   padding: 9px 18px 9px 0;
   border-top: 1px solid var(--c-rule);
   overflow-wrap: anywhere;
 }
 .alert-detail dd code {
-  font-size: 0.72rem;
-  color: var(--c-cool);
-}
-.alert-detail .prose {
-  font-family: var(--f-sans);
   font-size: 0.8rem;
-  line-height: 1.6;
-  color: var(--c-ink-2);
-  padding: 14px 18px;
-  border-top: 1px solid var(--c-rule);
+  color: var(--c-ink);
 }
+/* The two explanations carry the weight of this view, so they are prose and
+   get the sans face and a comfortable measure. */
 .alert-detail .explain {
   font-family: var(--f-sans);
-  font-size: 0.78rem;
+  font-size: 0.9rem;
   line-height: 1.6;
   color: var(--c-ink-2);
   padding: 14px 18px;
-  background: var(--c-sunken);
   border-top: 1px solid var(--c-rule);
+  max-width: 68ch;
 }
 .alert-detail .explain strong {
   color: var(--c-ink);
   font-weight: 600;
 }
-.alert-actions {
-  display: flex;
-  gap: 8px;
-  padding: 14px 18px;
+/* Verbatim text from the component that raised the alert. */
+.alert-detail .reported {
+  padding: 12px 18px;
   border-top: 1px solid var(--c-rule);
+  background: var(--c-sunken);
+}
+.alert-detail .reported p {
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  color: var(--c-ink-2);
+  margin-top: 4px;
+}
+.alert-detail .reported code {
+  color: var(--c-ink);
 }
 
 /* --- Blast radius / CloudTrail ------------------------------------------- */
@@ -1237,16 +1239,21 @@ tbody tr:first-child td {
   margin-bottom: 8px;
 }
 .key-list code {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
 }
 .lag-note {
   color: var(--c-caution);
-  font-size: 0.8rem;
-  max-width: 60ch;
+  font-size: 0.88rem;
+  max-width: 62ch;
 }
 
-/* CloudTrail rows: a dense ruled table, not a decorated timeline with dots.
-   Grouped by key so repeated calls collapse into one line. */
+/* CloudTrail: a dense ruled table grouped by key, not a decorated timeline
+   with one dot per call. Repeated calls collapse into one group. */
+.trail-scroll {
+  max-height: 26rem;
+  overflow: auto;
+  scrollbar-color: var(--c-rule-bright) var(--c-module);
+}
 .trail-group {
   border-top: 1px solid var(--c-rule);
 }
@@ -1258,18 +1265,21 @@ tbody tr:first-child td {
   align-items: baseline;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 10px 18px;
+  padding: 9px 18px;
   background: var(--c-sunken);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .trail-group-head code {
-  font-size: 0.68rem;
-  color: var(--c-ink-2);
+  font-size: 0.78rem;
+  color: var(--c-ink);
 }
 .trail-group-head .count {
   margin-left: auto;
   font-family: var(--f-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.12em;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--c-ink-3);
 }
@@ -1280,17 +1290,17 @@ tbody tr:first-child td {
 }
 .trail-row {
   display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
   gap: 14px;
   align-items: baseline;
   padding: 7px 18px;
   border-top: 1px solid var(--c-rule);
   font-family: var(--f-mono);
-  font-size: 0.68rem;
+  font-size: 0.78rem;
 }
 .trail-row > time {
   color: var(--c-ink-3);
-  font-size: 0.62rem;
+  font-size: 0.72rem;
 }
 .trail-row .call {
   color: var(--c-ink);
@@ -1298,23 +1308,34 @@ tbody tr:first-child td {
 }
 .trail-row .src {
   color: var(--c-ink-3);
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   text-align: right;
   white-space: nowrap;
 }
 .trail-row .fail {
   color: var(--c-ember-text);
+  font-weight: 600;
 }
 .trail-more {
-  padding: 9px 18px;
+  padding: 10px 18px;
   border-top: 1px solid var(--c-rule);
 }
 
-/* --- Results, alerts, banners -------------------------------------------- */
+/* --- Ledger -------------------------------------------------------------- */
+
+/* Scrollable while collapsed by default: the header carries the summary so a
+   closed ledger still reports what it found. */
+.ledger-scroll {
+  max-height: 24rem;
+  overflow: auto;
+  scrollbar-color: var(--c-rule-bright) var(--c-module);
+}
+
+/* --- Results, errors, banners -------------------------------------------- */
 
 .burn-outcome {
   border: 1px solid var(--c-ember-edge);
-  border-left-width: 2px;
+  border-left-width: 3px;
   background: var(--c-module);
   padding: 16px 18px;
   display: grid;
@@ -1326,20 +1347,20 @@ tbody tr:first-child td {
 }
 .burn-outcome h2 {
   font-family: var(--f-mono);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   margin: 5px 0;
   overflow-wrap: anywhere;
 }
 .burn-outcome h3 {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--c-ink-2);
 }
 .burn-outcome p {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
+  font-size: 0.76rem;
   color: var(--c-ink-3);
 }
 .burn-outcome ul {
@@ -1351,7 +1372,7 @@ tbody tr:first-child td {
   margin-top: 3px;
 }
 .burn-outcome code {
-  font-size: 0.66rem;
+  font-size: 0.76rem;
   color: var(--c-ink-2);
 }
 
@@ -1359,10 +1380,10 @@ tbody tr:first-child td {
   color: var(--c-ember-text);
   background: var(--c-ember-deep);
   border: 1px solid var(--c-ember-edge);
-  border-left-width: 2px;
+  border-left-width: 3px;
   margin: 14px 18px;
   padding: 10px 14px;
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   line-height: 1.55;
 }
 .setup {
@@ -1372,9 +1393,9 @@ tbody tr:first-child td {
 .setup p {
   color: var(--c-ink-2);
   margin-top: 10px;
-  font-size: 0.85rem;
+  font-size: 0.92rem;
   line-height: 1.65;
-  max-width: 70ch;
+  max-width: 72ch;
 }
 
 .mock-banner {
@@ -1384,19 +1405,19 @@ tbody tr:first-child td {
   gap: 16px;
   background: var(--c-ember);
   color: #fff;
-  padding: 7px 18px;
+  padding: 8px 18px;
   position: sticky;
   top: 0;
   z-index: 20;
   font-family: var(--f-mono);
 }
 .mock-banner strong {
-  letter-spacing: 0.26em;
-  font-size: 0.68rem;
+  letter-spacing: 0.24em;
+  font-size: 0.78rem;
 }
 .mock-banner span {
-  font-size: 0.64rem;
-  letter-spacing: 0.04em;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
 }
 
 footer {
@@ -1406,8 +1427,8 @@ footer {
   gap: 20px;
   color: var(--c-ink-3);
   font-family: var(--f-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.12em;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 16px 0 22px;
 }
@@ -1415,40 +1436,40 @@ footer {
 /* --- Dialog -------------------------------------------------------------- */
 
 dialog {
-  max-width: 520px;
+  max-width: 540px;
   width: calc(100% - 32px);
   border: 1px solid var(--c-rule-bright);
-  border-top: 2px solid var(--c-ember);
+  border-top: 3px solid var(--c-ember);
   background: var(--c-module);
   color: var(--c-ink);
   padding: 26px 28px 24px;
-  box-shadow: 0 40px 120px #000c;
+  box-shadow: 0 30px 80px #2a201a33;
 }
 dialog::backdrop {
-  background: #06050499;
+  background: #2a211a66;
   backdrop-filter: blur(2px);
 }
 dialog h2 {
   font-family: var(--f-mono);
-  font-size: 1.1rem;
+  font-size: 1.18rem;
   font-weight: 600;
   margin: 8px 0 12px;
   overflow-wrap: anywhere;
 }
 dialog form > p:not(.eyebrow):not(.error) {
   color: var(--c-ink-2);
-  font-size: 0.83rem;
+  font-size: 0.92rem;
   line-height: 1.65;
   margin-bottom: 18px;
-  max-width: 56ch;
+  max-width: 58ch;
 }
 dialog label {
   margin-top: 18px;
 }
 .dialog-icon {
   color: var(--c-ember);
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   margin-bottom: 14px;
 }
 .dialog-icon svg {
@@ -1470,7 +1491,7 @@ dialog .error {
 
 @media (min-width: 1500px) {
   :root {
-    font-size: 16px;
+    font-size: 17px;
   }
 }
 @media (max-width: 1280px) {
@@ -1519,9 +1540,6 @@ dialog .error {
   .summary {
     gap: 14px;
   }
-  .connection span:not([aria-hidden]) {
-    display: none;
-  }
   .agent-grid {
     grid-template-columns: 1fr;
   }
@@ -1529,10 +1547,21 @@ dialog .error {
     grid-template-columns: 1fr;
   }
   .trail-row {
-    grid-template-columns: 4.6rem minmax(0, 1fr);
+    grid-template-columns: 5rem minmax(0, 1fr);
   }
   .trail-row .src {
     display: none;
+  }
+  .alert-detail dl {
+    grid-template-columns: 1fr;
+  }
+  .alert-detail dt {
+    padding-bottom: 0;
+    border-top: 1px solid var(--c-rule);
+  }
+  .alert-detail dd {
+    padding: 2px 18px 10px;
+    border-top: 0;
   }
   .mock-banner {
     flex-direction: column;
@@ -1544,7 +1573,7 @@ dialog .error {
     gap: 6px;
   }
   :root {
-    --gutter: 2.6rem;
+    --gutter: 3rem;
   }
 }
 

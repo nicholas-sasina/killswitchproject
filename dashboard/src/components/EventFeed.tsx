@@ -1,21 +1,21 @@
 import type { EventAction, LedgerEvent } from "../contracts";
 import { Timestamp } from "./common";
 
-const actions: Record<EventAction, { icon: string; text: string }> = {
-  recorded: { icon: "+", text: "Credential recorded" },
-  inherited: { icon: "↳", text: "Exposure inherited" },
-  blocked: { icon: "⊘", text: "Outbound leak blocked" },
-  refused: { icon: "×", text: "Agent call refused" },
-  revoked: { icon: "■", text: "Agent badge revoked" },
-  rotated: { icon: "↻", text: "Credential rotated" },
-  flagged: { icon: "⚑", text: "Credential flagged for review" },
-  rejected: { icon: "!", text: "Provider request rejected" },
-  issued: { icon: "✓", text: "Session or credential issued" },
-  started: { icon: "▶", text: "Agent instance started" },
-  exited: { icon: "◼", text: "Agent instance exited" },
-  unregistered: { icon: "?", text: "Unregistered agent refused" },
-  canary_used: { icon: "⚠", text: "Canary credential used" },
-  dismissed: { icon: "✓", text: "Flag dismissed by owner" },
+const actions: Record<EventAction, { text: string }> = {
+  recorded: { text: "Credential recorded" },
+  inherited: { text: "Exposure inherited" },
+  blocked: { text: "Outbound leak blocked" },
+  refused: { text: "Agent call refused" },
+  revoked: { text: "Agent badge revoked" },
+  rotated: { text: "Credential rotated" },
+  flagged: { text: "Credential flagged for review" },
+  rejected: { text: "Provider request rejected" },
+  issued: { text: "Session or credential issued" },
+  started: { text: "Agent instance started" },
+  exited: { text: "Agent instance exited" },
+  unregistered: { text: "Unregistered agent refused" },
+  canary_used: { text: "Canary credential used" },
+  dismissed: { text: "Flag dismissed by owner" },
 };
 
 export function EventFeed({ events }: { events: LedgerEvent[] }) {
@@ -35,15 +35,18 @@ export function EventFeed({ events }: { events: LedgerEvent[] }) {
         </p>
       ) : (
         <ol className="event-list">
-          {events.slice(0, 200).map((event) => {
+          {events.slice(0, 200).map((event, index) => {
             const action = actions[event.action];
             return (
               <li
                 key={event.event_id}
                 className={`event event-${event.action}`}
               >
+                {/* A line number, like a printout. Severity is carried by the
+                    ember spine and the title, so a glyph here would be a
+                    third encoding of the same fact. */}
                 <span className="event-icon" aria-hidden="true">
-                  {action.icon}
+                  {String(index + 1).padStart(3, "0")}
                 </span>
                 <div className="event-body">
                   <div className="event-title">

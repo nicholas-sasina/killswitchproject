@@ -1,7 +1,77 @@
-import { useCallback } from "react";
+/**
+ * CloudTrail history for a burned agent's AWS keys.
+ *
+ * Collapsible and cheap. The previous version polled every ten seconds for as
+ * long as the page was open, re-sorted the whole list on every render, and
+ * drew one decorated timeline node per call, which is unreadable once a key
+ * has been used a few dozen times.
+ *
+ * Now: closed means no requests at all, the grouping is memoised, calls are
+ * grouped by key so repetition collapses, and each group renders a bounded
+ * number of rows behind a "show all" control.
+ */
+import { useCallback, useMemo, useState } from "react";
 import type { BurnApi } from "../api";
+import type { BlastEvent } from "../contracts";
 import { usePolling } from "../polling";
+import { Collapsible } from "./Collapsible";
 import { ErrorMessage, Status, Timestamp } from "./common";
+
+/** Rows drawn per key before the group is truncated. */
+const ROW_CAP = 8;
+
+function TrailGroup({
+  keyRef,
+  events,
+}: {
+  keyRef: string;
+  events: BlastEvent[];
+}) {
+  const [all, setAll] = useState(false);
+  const shown = all ? events : events.slice(0, ROW_CAP);
+  const failures = events.filter((event) => event.error_code).length;
+  return (
+    <div className="trail-group">
+      <div className="trail-group-head">
+        <code>{keyRef || "AWS key reference unavailable"}</code>
+        <span className="count">
+          {events.length} {events.length === 1 ? "call" : "calls"}
+          {failures ? ` · ${failures} refused` : ""}
+        </span>
+      </div>
+      <ol className="trail-rows">
+        {shown.map((event, index) => (
+          <li
+            className="trail-row"
+            key={`${event.ts}-${event.event_name}-${index}`}
+          >
+            <Timestamp value={event.ts} />
+            <span className="call">
+              {event.event_name}
+              {event.error_code && (
+                <span className="fail"> · {event.error_code}</span>
+              )}
+            </span>
+            <span className="src">
+              {event.event_source || "Source unavailable"}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {events.length > ROW_CAP && (
+        <div className="trail-more">
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => setAll((current) => !current)}
+          >
+            {all ? `Show first ${ROW_CAP}` : `Show all ${events.length} calls`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function BlastTimeline({
   api,
@@ -10,24 +80,45 @@ export function BlastTimeline({
   api: BurnApi;
   agentId?: string;
 }) {
+  // Mirrors the module's open state so a closed timeline issues no requests.
+  const [open, setOpen] = useState(false);
   const load = useCallback(
     (signal: AbortSignal) => api.blastRadius(agentId!, signal),
     [api, agentId],
   );
-  const { data, error } = usePolling(agentId ? load : null, 10_000);
+  const { data, error } = usePolling(agentId && open ? load : null, 10_000);
   const blast = data && data.agent_id === agentId ? data : undefined;
-  const events = [...(blast?.events ?? [])].sort((a, b) =>
-    a.ts.localeCompare(b.ts),
-  );
+
+  // Group by key, newest first inside each group. Memoised so scrolling and
+  // unrelated re-renders do not re-sort the history.
+  const groups = useMemo(() => {
+    const byKey = new Map<string, BlastEvent[]>();
+    for (const event of blast?.events ?? []) {
+      const list = byKey.get(event.key_ref);
+      if (list) list.push(event);
+      else byKey.set(event.key_ref, [event]);
+    }
+    for (const list of byKey.values())
+      list.sort((a, b) => b.ts.localeCompare(a.ts));
+    return [...byKey.entries()];
+  }, [blast]);
+
+  const total = blast?.events.length ?? 0;
+  const summary = !agentId
+    ? "No burned agent"
+    : !blast
+      ? open
+        ? "Querying CloudTrail"
+        : "Closed · not querying"
+      : `${agentId} · ${total} ${total === 1 ? "call" : "calls"}`;
+
   return (
-    <section className="panel" aria-labelledby="blast-title">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Blast radius · CloudTrail</p>
-          <h2 id="blast-title">{agentId || "AWS activity timeline"}</h2>
-        </div>
-        <span className="muted">Refreshes every 10s</span>
-      </div>
+    <Collapsible
+      label="Blast radius · CloudTrail"
+      summary={summary}
+      openWhen={Boolean(agentId)}
+      onOpenChange={setOpen}
+    >
       <ErrorMessage message={error} />
       {!agentId ? (
         <p className="empty">
@@ -46,7 +137,7 @@ export function BlastTimeline({
               ))}
             </ul>
           ) : null}
-          {!events.length ? (
+          {!groups.length ? (
             <div className="empty">
               <p>
                 {blast
@@ -59,27 +150,20 @@ export function BlastTimeline({
               </p>
             </div>
           ) : (
-            <ol className="timeline">
-              {events.map((event, index) => (
-                <li key={`${event.key_ref}-${event.ts}-${index}`}>
-                  <Timestamp value={event.ts} />
-                  <div>
-                    <h3>{event.event_name}</h3>
-                    <code>{event.key_ref}</code>
-                    <p>{event.event_source || "Source unavailable"}</p>
-                    {event.error_code && (
-                      <p className="error">{event.error_code}</p>
-                    )}
-                  </div>
-                </li>
+            <div className="trail-scroll">
+              {groups.map(([keyRef, events]) => (
+                <TrailGroup key={keyRef} keyRef={keyRef} events={events} />
               ))}
-            </ol>
+            </div>
           )}
-          {events.length > 0 && blast?.note && (
+          {groups.length > 0 && blast?.note && (
             <p className="panel-footnote">{blast.note}</p>
           )}
+          <p className="panel-footnote">
+            Refreshes every ten seconds while open. Collapsing stops the query.
+          </p>
         </>
       )}
-    </section>
+    </Collapsible>
   );
 }

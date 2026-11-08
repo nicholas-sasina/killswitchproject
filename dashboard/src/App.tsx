@@ -1,17 +1,23 @@
 import { useCallback, useMemo, useState } from "react";
 import { createApi, readConfig, type ApiConfig } from "./api";
+import { attentionCount, toAlerts } from "./alerts";
 import type { AgentState, BurnResult } from "./contracts";
 import { newestEvents } from "./events";
 import { MockBanner, mockDataReducer } from "./MockBanner";
 import { useEventFeed } from "./polling";
-import { ErrorMessage, Flame } from "./components/common";
+import { hrefFor, useView, VIEWS } from "./router";
+import { ErrorMessage } from "./components/common";
+import { Brand } from "./components/Brand";
 import { AgentCard } from "./components/AgentCard";
+import { AlertsView } from "./components/AlertsView";
 import { BurnDialog } from "./components/BurnDialog";
 import { BurnOutcome } from "./components/BurnOutcome";
 import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
 import { SwarmPanel } from "./components/SwarmPanel";
+
+const VIEW_LABEL = { overview: "Overview", alerts: "Alerts" } as const;
 
 export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const [mock, setMock] = useState(false);
@@ -27,6 +33,10 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const configured = Boolean(config.burnUrl && config.demoToken);
   const { state, error, updatedAt } = useEventFeed(api, configured);
   const events = useMemo(() => newestEvents(state), [state]);
+  const view = useView();
+  // The navigation marker counts anything above "noted", so the operator can
+  // stay on the overview and still know the queue is filling.
+  const pending = useMemo(() => attentionCount(toAlerts(events)), [events]);
   const [selectedId, setSelectedId] = useState("");
   const [confirmAgent, setConfirmAgent] = useState<AgentState>();
   const [busy, setBusy] = useState(false);
@@ -80,13 +90,24 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
       <div className="app-shell">
         <header className="site-header">
           <div className="header-identity">
-            <a href="/" className="brand" aria-label="Burn home">
-              <Flame />
-              <span>BURN</span>
-            </a>
+            <Brand />
             <h1 className="tagline">
               Revoke the agent. <span>Contain what it saw.</span>
             </h1>
+            <nav className="view-nav" aria-label="Views">
+              {VIEWS.map((name) => (
+                <a
+                  key={name}
+                  href={hrefFor(name)}
+                  className="view-tab"
+                  aria-current={view === name ? "page" : undefined}
+                  data-quiet={name === "alerts" && pending === 0}
+                >
+                  {VIEW_LABEL[name]}
+                  {name === "alerts" && updatedAt && <b>{pending}</b>}
+                </a>
+              ))}
+            </nav>
           </div>
           <div className="header-status">
             <dl className="summary">
@@ -144,60 +165,68 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 : ""
             }
           />
-          <SwarmPanel
-            key={`${config.burnUrl}:${config.demoToken}`}
-            api={api}
-            enabled={configured}
-          />
-          <div className="workspace-grid">
-            <div className="detail-column">
-              <section
-                aria-labelledby="agents-title"
-                className="agents-section"
-              >
-                <div className="section-heading">
-                  <h2 id="agents-title">Agents</h2>
-                  <span className="muted">
-                    {updatedAt
-                      ? `Last received ${updatedAt.toLocaleTimeString([], { hour12: false })}`
-                      : "Awaiting API data"}
-                  </span>
-                </div>
-                {state.agents.length ? (
-                  <div className="agent-grid">
-                    {state.agents.map((agent) => (
-                      <AgentCard
-                        key={agent.agent_id}
-                        agent={agent}
-                        selected={selectedAgent?.agent_id === agent.agent_id}
-                        busy={busy || Boolean(error)}
-                        result={resultFor(agent)}
-                        onSelect={() => setSelectedId(agent.agent_id)}
-                        onBurn={() => {
-                          setBurnError("");
-                          setConfirmAgent(agent);
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="empty panel">
-                    {updatedAt
-                      ? "No agents in the current scenario. Start a scenario to see its agents here."
-                      : "Agent cards will appear when the API connects."}
-                  </div>
-                )}
-              </section>
-              <Ledger
+          {view === "alerts" ? (
+            <AlertsView events={events} />
+          ) : (
+            <>
+              <SwarmPanel
+                key={`${config.burnUrl}:${config.demoToken}`}
                 api={api}
-                agentId={selectedAgent?.agent_id}
-                refresh={refresh}
+                enabled={configured}
               />
-              {selectedResult && <BurnOutcome result={selectedResult} />}
-              <BlastTimeline api={api} agentId={burnedId} />
-            </div>
-            <EventFeed events={events} />
-          </div>
+              <div className="workspace-grid">
+                <div className="detail-column">
+                  <section
+                    aria-labelledby="agents-title"
+                    className="agents-section"
+                  >
+                    <div className="section-heading">
+                      <h2 id="agents-title">Agents</h2>
+                      <span className="muted">
+                        {updatedAt
+                          ? `Last received ${updatedAt.toLocaleTimeString([], { hour12: false })}`
+                          : "Awaiting API data"}
+                      </span>
+                    </div>
+                    {state.agents.length ? (
+                      <div className="agent-grid">
+                        {state.agents.map((agent) => (
+                          <AgentCard
+                            key={agent.agent_id}
+                            agent={agent}
+                            selected={
+                              selectedAgent?.agent_id === agent.agent_id
+                            }
+                            busy={busy || Boolean(error)}
+                            result={resultFor(agent)}
+                            onSelect={() => setSelectedId(agent.agent_id)}
+                            onBurn={() => {
+                              setBurnError("");
+                              setConfirmAgent(agent);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty panel">
+                        {updatedAt
+                          ? "No agents in the current scenario. Start a scenario to see its agents here."
+                          : "Agent cards will appear when the API connects."}
+                      </div>
+                    )}
+                  </section>
+                  <Ledger
+                    api={api}
+                    agentId={selectedAgent?.agent_id}
+                    refresh={refresh}
+                  />
+                  {selectedResult && <BurnOutcome result={selectedResult} />}
+                  <BlastTimeline api={api} agentId={burnedId} />
+                </div>
+                <EventFeed events={events} />
+              </div>
+            </>
+          )}
         </main>
         <footer>
           <span>Burn · Agent containment</span>

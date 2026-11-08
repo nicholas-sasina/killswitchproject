@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { BurnApi } from "../api";
 import { usePolling } from "../polling";
+import { Collapsible } from "./Collapsible";
 import { ErrorMessage, Status } from "./common";
 
 export function Ledger({
@@ -16,18 +17,28 @@ export function Ledger({
     (signal: AbortSignal) => api.ledger(agentId!, signal),
     [api, agentId, refresh],
   );
+  // Polls whether open or closed: the collapsed heading reports how many
+  // credentials this agent has seen, and that number has to stay true.
   const { data, error } = usePolling(agentId ? load : null, 5_000);
-  // A selection change must not show the previous agent's ledger while the new request starts.
+  // A selection change must not show the previous agent's ledger while the
+  // new request starts.
   const entries = data && data.agent_id === agentId ? data.entries : undefined;
+  const flagged = entries?.filter((entry) => entry.status === "flagged").length;
+
+  const summary = !agentId
+    ? "No agent selected"
+    : !entries
+      ? "Loading"
+      : entries.length
+        ? `${agentId} · ${entries.length} seen${flagged ? ` · ${flagged} flagged` : ""}`
+        : `${agentId} · none seen`;
+
   return (
-    <section className="panel ledger-panel" aria-labelledby="ledger-title">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Exposure ledger</p>
-          <h2 id="ledger-title">{agentId || "Select an agent"}</h2>
-        </div>
-        <span className="muted">Refreshes every 5s</span>
-      </div>
+    <Collapsible
+      className="ledger-panel"
+      label="Exposure ledger"
+      summary={summary}
+    >
       <ErrorMessage message={error} />
       {!agentId ? (
         <p className="empty">
@@ -38,7 +49,7 @@ export function Ledger({
       ) : !entries.length ? (
         <p className="empty">No credentials recorded for this agent yet.</p>
       ) : (
-        <div className="table-scroll">
+        <div className="table-scroll ledger-scroll">
           <table>
             <thead>
               <tr>
@@ -76,7 +87,8 @@ export function Ledger({
       )}
       <p className="panel-footnote">
         Credential references only. Raw credential values are never returned.
+        Refreshes every five seconds.
       </p>
-    </section>
+    </Collapsible>
   );
 }

@@ -19,14 +19,14 @@
 }
 .swarm-panel > .swarm-heading h2 {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--c-ink-2);
 }
 .swarm-heading .muted {
   font-family: var(--f-mono);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--c-ink-3);
@@ -62,7 +62,7 @@
 }
 .swarm-panel > [role="status"] {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   color: var(--c-nominal);
   padding: 10px 18px;
   border-bottom: 1px solid var(--c-rule);
@@ -80,7 +80,7 @@
 }
 .swarm-role h3 {
   font-family: var(--f-mono);
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -92,7 +92,7 @@
   border: 1px solid var(--c-rule-bright);
   padding: 2px 6px;
   color: var(--c-caution);
-  font-size: 0.55rem;
+  font-size: 0.64rem;
 }
 .swarm-role h3 .status > span {
   display: none;
@@ -102,7 +102,7 @@
   width: 100%;
   min-width: 680px;
   border-collapse: collapse;
-  font-size: 0.74rem;
+  font-size: 0.82rem;
 }
 .swarm-table th,
 .swarm-table td {
@@ -121,7 +121,7 @@
   white-space: nowrap;
   min-height: 26px;
   padding: 4px 10px;
-  font-size: 0.58rem;
+  font-size: 0.68rem;
 }
 .swarm-table td:first-child {
   overflow-wrap: anywhere;
@@ -129,13 +129,13 @@
 }
 .swarm-table td:first-child code {
   display: block;
-  font-size: 0.74rem;
+  font-size: 0.82rem;
   color: var(--c-ink);
 }
 .swarm-table td:first-child span {
   display: block;
   font-family: var(--f-mono);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   color: var(--c-ink-3);
 }
 /* Lineage context rows: present for orientation, visually recessive. */
@@ -144,7 +144,7 @@
 }
 .swarm-empty {
   font-family: var(--f-mono);
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   color: var(--c-ink-3);
   padding: 12px 18px;
 }
@@ -185,7 +185,7 @@
   margin: 0;
   text-transform: none;
   letter-spacing: 0;
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   color: var(--c-ink-2);
 }
 .swarm-choices input {
@@ -202,6 +202,6 @@
   border-left: 2px solid var(--c-rule-bright);
   padding: 12px 14px;
   user-select: all;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--c-ink);
 }
