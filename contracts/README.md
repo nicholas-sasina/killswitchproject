@@ -135,6 +135,9 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
   credentials are the role's intersected with the parent's; its egress is the role's list
   intersected with the parent's (null on one side means take the other side's list).
 - The session row's `tools` comes from the role, so the Gateway enforces it as before.
+- A role's `egress` list narrows every outbound destination except Burn's own Gateway, which it never
+  blocks: the Gateway already checks tools per role. Model endpoints such as Bedrock are narrowed like any
+  other host, so a role that calls a model lists it.
 - Burn scopes (`POST /burns`): `instance`, `role`, `lineage` (an instance and every descendant),
   `token` (every instance that joined with it; the token is revoked too).
 

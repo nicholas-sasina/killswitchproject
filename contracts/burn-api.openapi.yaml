@@ -514,7 +514,7 @@ components:
           type: array
           items: { type: string }
           nullable: true
-          description: Allowed outbound hosts for this role's instances. Null = the default allowlist.
+          description: "Allowed outbound hosts for this role's instances. Null = the default allowlist. Burn's own Gateway is never blocked by it, since the Gateway already checks tools per role; every other destination, model endpoints included, must be listed."
         owner: { type: string, nullable: true, description: team or person responsible }
         canaries: { type: boolean, default: true, description: "Give each instance its own canary (a decoy key that never authenticates)." }
         auto_burn:
