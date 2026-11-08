@@ -1,4 +1,5 @@
 import type { BurnResult } from "../contracts";
+import { plural } from "../plural";
 
 export function BurnOutcome({
   result,
@@ -31,11 +32,7 @@ export function BurnOutcome({
           {result.agent_id} ·{" "}
           {result.revoked ? "revoked" : "revocation not confirmed"}
         </h2>
-        <p>
-          {result.sessions_revoked.length}{" "}
-          {result.sessions_revoked.length === 1 ? "session" : "sessions"}{" "}
-          revoked
-        </p>
+        <p>{plural(result.sessions_revoked.length, "session")} revoked</p>
       </div>
       <div>
         <h3>Rotated · {result.rotated.length}</h3>

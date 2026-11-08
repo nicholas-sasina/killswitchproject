@@ -427,6 +427,33 @@ describe("agent enrollment", () => {
 });
 
 describe("role instances", () => {
+  it.each([
+    [0, "0 roles · 0 instances"],
+    [1, "1 role · 1 instance"],
+    [2, "2 roles · 2 instances"],
+  ] as const)(
+    "pluralizes panel counts for %s roles and instances",
+    async (count, expected) => {
+      const roles = Array.from({ length: count }, (_, index) =>
+        role(`worker-${index}`),
+      );
+      const instances = roles.map((role, index) =>
+        instance(String(index), role.name),
+      );
+      await show(setup(roles, instances));
+      expect(
+        screen.getByText(`${expected} · refreshes every five seconds`),
+      ).toBeTruthy();
+      for (const role of roles) {
+        expect(
+          within(
+            screen.getByRole("region", { name: `Role ${role.name}` }),
+          ).getByText(/1 active \/ 1 instance$/),
+        ).toBeTruthy();
+      }
+    },
+  );
+
   it("labels only roles with report-only or no-canary settings", async () => {
     const fixture = setup([
       role("defaults"),

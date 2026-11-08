@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { BurnApi } from "../api";
 import type { Instance, Role, ScopedBurnResult } from "../contracts";
 import { usePolling } from "../polling";
+import { plural } from "../plural";
 import { AddAgent } from "./AddAgent";
 import { ErrorMessage } from "./common";
 import { InstanceLineage } from "./InstanceLineage";
@@ -78,7 +79,7 @@ export function SwarmPanel({
     const sessions = result.burned.flatMap((entry) => entry.sessions_revoked);
     setRevoked((current) => [...new Set([...current, ...sessions])]);
     setOutcome(
-      `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"} revoked.${result.failed?.length ? ` ${result.failed.length} ${result.failed.length === 1 ? "burn" : "burns"} failed; check instance status before retrying.` : ""}`,
+      `${plural(sessions.length, "session")} revoked.${result.failed?.length ? ` ${plural(result.failed.length, "burn")} failed; check instance status before retrying.` : ""}`,
     );
     setTarget(undefined);
   }
@@ -89,7 +90,7 @@ export function SwarmPanel({
           <h2 id="swarm-title">Instances by role</h2>
           <p className="muted">
             {loaded
-              ? `${roles.length} roles · ${instances.length} instances · refreshes every five seconds`
+              ? `${plural(roles.length, "role")} · ${plural(instances.length, "instance")} · refreshes every five seconds`
               : "Waiting for role and instance data"}
           </p>
         </div>
@@ -199,7 +200,7 @@ export function SwarmPanel({
                         all.filter((instance) => instance.status === "active")
                           .length
                       }{" "}
-                      active / {all.length} instances
+                      active / {plural(all.length, "instance")}
                     </p>
                   </div>
                   <div className="swarm-actions">
