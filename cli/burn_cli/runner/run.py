@@ -15,6 +15,7 @@ from .. import retry
 from ..api import ApiError
 from .badge import BadgeToken
 from . import credentials as creds_mod
+from . import harness
 from .env import TASK_NAMES, child_env, task_values
 from .instance_api import InstanceApi, ProxyRefused
 from .mcp_proxy import McpProxy
@@ -42,7 +43,7 @@ class Instance:
                  secrets: dict | None = None,
                  proxy_url: str = "", heartbeat_every: float = 15.0, min_heartbeat_gap: float = 3.0,
                  stop_grace: float = STOP_GRACE, drop: Drop | None = None, user_arg: str | None = None, stdin_devnull: bool = False,
-                 progress_wait: float = 15.0, held_secrets: tuple = (),
+                 progress_wait: float = 15.0, held_secrets: tuple = (), allow_env: tuple = (),
                  sleep: Callable[[float], None] = time.sleep):
         self.api, self.role, self.command = api, role, command
         self._secrets = secrets  # handed over by the parent supervisor or the launcher; never kept on self.session
@@ -72,6 +73,8 @@ class Instance:
         self._wait = self._activity.wait  # how the loop waits for activity; tests drive it on a fake clock
         self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
         self._proxy_refusing = False  # within a streak of proxy refusals, logged once at its start
+        self.allow_env = tuple(dict.fromkeys(allow_env))  # --allow-env names, checked by the parser; this run only
+        self.preset = harness.preset(command)  # settings and HOME files for a well-known harness, or None
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -153,7 +156,10 @@ class Instance:
         cleanups.append(lambda: shutil.rmtree(home, ignore_errors=True))  # last, so nothing recreates it behind us
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
                         spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token,
-                        progress_url=spawn.progress_url, task=self._task)
+                        progress_url=spawn.progress_url, task=self._task,
+                        preset_env=self.preset.environment(bool(creds.aws_access_key_id)) if self.preset else None,
+                        allow=self.allow_env)
+        self._announce(creds, session)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,
@@ -182,11 +188,35 @@ class Instance:
         return code if code >= 0 else 128 - code
 
     def _make_home(self) -> str:
-        """A new private HOME for the agent, owned by the agent's user and removed when the instance ends."""
+        """A new private HOME for the agent, owned by the agent's user and removed when the instance ends.
+        A harness preset's files are written into it first, before the agent's user owns it."""
         home = tempfile.mkdtemp(prefix="burn-home-")  # mode 0700
-        if self.drop:
-            os.chown(home, self.drop.uid, self.drop.gid)
+        try:
+            made = harness.write_files(self.preset, home, os.getcwd()) if self.preset else []
+            if self.drop:
+                # HOME last: until it is the agent's, only root can enter it, so no agent sharing the uid (--user)
+                # can swap a file for a link between two chowns. And never through a link.
+                for path in reversed(made):
+                    os.chown(path, self.drop.uid, self.drop.gid, follow_symlinks=False)
+                os.chown(home, self.drop.uid, self.drop.gid)
+        except BaseException:
+            shutil.rmtree(home, ignore_errors=True)
+            raise
         return home
+
+    def _announce(self, creds, session: dict) -> None:
+        """Say on stderr what the agent gets beyond its own values: a preset, and anything passed through."""
+        if preset := self.preset:
+            if creds.aws_access_key_id:
+                log(f"{preset.name} preset: Burn's tools, and {preset.model} with the instance's own AWS key")
+            else:
+                log(f"{preset.name} preset: Burn's tools only. Role {session.get('role', self.role)} has no aws_key, "
+                    f"so {preset.name} gets no model settings; add aws_key to the role, or pass a key with --allow-env")
+        for name in self.allow_env:
+            if name in self.host_env:
+                log(f"{name} passes through to the agent; a burn cannot revoke it")
+            else:
+                log(f"{name} is not set, so nothing passes through")
 
     def _exit(self) -> None:
         if not self._token:

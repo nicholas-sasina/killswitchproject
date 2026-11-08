@@ -18,6 +18,25 @@ ALLOWED_PREFIXES = ("LC_",)
 PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 LOOPBACK = "127.0.0.1,localhost"
 
+# What --allow-env may not pass through: the names burn run sets itself. A host copy would replace the instance's
+# own key, identity or endpoints, point its tools back at your real HOME, or route around the egress proxy and its
+# attribution. Compared in upper case: clients read the proxy variables in any case.
+RESERVED_PREFIXES = ("BURN_", "AWS_", "XDG_")
+RESERVED_SUFFIXES = ("_PROXY",)  # HTTPS_PROXY, NO_PROXY, ALL_PROXY, ...
+RESERVED_NAMES = {"HOME", "PATH"}
+VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def pass_through_name(name: str) -> str:
+    """NAME for --allow-env, checked; ValueError if it is not a variable name or burn run sets it itself."""
+    if not VARIABLE_NAME.match(name):
+        raise ValueError(f"{name!r} is not an environment variable name")
+    upper = name.upper()
+    if upper in RESERVED_NAMES or upper.startswith(RESERVED_PREFIXES) or upper.endswith(RESERVED_SUFFIXES):
+        raise ValueError(f"burn run sets {name} itself, so it cannot be passed through (reserved, in any case: "
+                         f"{', '.join(p + '*' for p in RESERVED_PREFIXES)}, *_PROXY, HOME and PATH)")
+    return name
+
 
 # A session token (bst_...) authenticates the supervisor's own calls. It must never be in the agent's environment,
 # whatever variable it is in, so this is checked by pattern on top of the allow-list.
@@ -118,9 +137,16 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
               proxy_base: str = "", home: str = "", local_token: str = "", progress_url: str = "",
-              task: dict | None = None) -> dict:
-    """Everything the agent process runs with: the allow-listed host environment plus its own values."""
+              task: dict | None = None, preset_env: dict | None = None, allow: tuple = ()) -> dict:
+    """Everything the agent process runs with: the allow-listed host environment plus its own values.
+
+    `preset_env` is a harness preset's non-secret defaults. `allow` names host variables the user passed through
+    with --allow-env (checked by pass_through_name); they win over the preset's. Both come before the instance's
+    own values, which nothing replaces.
+    """
     env = scrub(host_env)
+    env.update(preset_env or {})
+    env.update({k: host_env[k] for k in allow if k in host_env and not SESSION_TOKEN.search(str(host_env[k]))})
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
         env.update({"HOME": home, "XDG_CONFIG_HOME": f"{home}/.config", "XDG_CACHE_HOME": f"{home}/.cache",
                     "XDG_DATA_HOME": f"{home}/.local/share", "XDG_STATE_HOME": f"{home}/.local/state"})
@@ -132,6 +158,9 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
     if progress_url:
         env[PROGRESS_URL_ENV] = progress_url
     env.update(task or {})  # only what task_values checked; scrub() already removed the host's own copies
+    # No AWS SDK may fall back to the host's instance role through the metadata service: the instance's own key, or
+    # none. AWS_* cannot be passed through, so nothing undoes this.
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
     if credentials.aws_access_key_id:
         env["AWS_ACCESS_KEY_ID"] = credentials.aws_access_key_id
         env["AWS_SECRET_ACCESS_KEY"] = credentials.aws_secret_access_key
@@ -166,6 +195,7 @@ def describe(host_env: dict, proxy_base: str = "", show: bool = False) -> list[s
               f"  {TASK_ENV} / {RESUME_ENV}=<passed on from the host when set, if they hold item ids only>",
               "  BURN_LOCAL_TOKEN=<random per run; the bearer both local endpoints require>",
               "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY=<its own AWS key>",
+              "  AWS_EC2_METADATA_DISABLED=true  (no fallback to the host's instance role)",
               "  BURN_API_KEY=<its own provider key>"]
     if proxy_base:
         parts = urlsplit(proxy_base)
