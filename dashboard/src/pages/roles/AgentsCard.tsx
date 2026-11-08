@@ -84,7 +84,7 @@ const Row = memo(function Row({
           <span className="role-quiet">Not reported</span>
         )}
       </td>
-      <td className={`num${called.quiet ? " role-quiet" : ""}`}>
+      <td className={`role-last num${called.quiet ? " role-quiet" : ""}`}>
         {last ? (
           <time dateTime={isoTime(last)}>{called.text}</time>
         ) : (
@@ -209,7 +209,9 @@ export function AgentsCard({
               <th scope="col" className="role-started">
                 Started
               </th>
-              <th scope="col">Last call</th>
+              <th scope="col" className="role-last">
+                Last call
+              </th>
               <th scope="col">Keys it saw</th>
               <th scope="col">
                 <span className="visually-hidden">Action</span>
