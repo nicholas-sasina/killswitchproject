@@ -1,0 +1,24 @@
+.swarm-panel { margin-bottom: 28px; padding: 20px; min-width: 0; }
+.swarm-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.swarm-heading .muted { font-size: .78rem; }
+.swarm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.swarm-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin: 18px 0; }
+.swarm-filters label, .swarm-fields > label { display: flex; flex-direction: column; gap: 6px; }
+.swarm-filters input, .swarm-filters select { background: #0b1016; color: inherit; border: 1px solid #43546a; border-radius: 5px; padding: 8px; font: inherit; }
+.swarm-filters select:focus-visible { outline: 3px solid #b6d8ff; outline-offset: 5px; }
+.swarm-viewport { max-height: 38rem; overflow: auto; }
+.swarm-role { border-top: 1px solid #2b3848; padding: 18px 0; }
+.swarm-table { width: 100%; min-width: 710px; border-collapse: collapse; font-size: .8rem; margin-top: 14px; }
+.swarm-table th, .swarm-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #2b3848; }
+.swarm-table th { color: #a7b5c5; }
+.swarm-table td:first-child { overflow-wrap: anywhere; max-width: 360px; }
+.swarm-table td:first-child code, .swarm-table td:first-child span { display: block; font-size: .7rem; }
+.swarm-context { opacity: .72; }
+.swarm-empty { color: #a7b5c5; padding: 18px 0; }
+.swarm-dialog { width: min(660px, calc(100% - 32px)); max-height: 90vh; overflow: auto; }
+.swarm-dialog .swarm-heading { margin-bottom: 20px; }
+.swarm-fields { display: flex; flex-direction: column; gap: 12px; border: 0; padding: 0; margin: 16px 0; min-width: 0; }
+.swarm-choices { border: 1px solid #43546a; border-radius: 5px; display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 12px; min-width: 0; }
+.swarm-choices label { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.swarm-choices input { width: auto; margin: 0; }
+.swarm-command { white-space: pre-wrap; overflow-wrap: anywhere; background: #0b1016; padding: 16px; border-radius: 5px; user-select: all; }

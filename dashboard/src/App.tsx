@@ -11,6 +11,7 @@ import { BurnOutcome } from "./components/BurnOutcome";
 import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
+import { SwarmPanel } from "./components/SwarmPanel";
 
 export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const [mock, setMock] = useState(false);
@@ -143,6 +144,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 : ""
             }
           />
+          <SwarmPanel key={`${config.burnUrl}:${config.demoToken}`} api={api} enabled={configured} />
           <div className="workspace-grid">
             <div className="detail-column">
               <section
