@@ -19,10 +19,11 @@ PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 LOOPBACK = "127.0.0.1,localhost"
 
 # What --allow-env may not pass through: the names burn run sets itself. A host copy would replace the instance's
-# own key, identity or endpoints, point its tools back at your real HOME, or route around the egress proxy's
-# attribution.
+# own key, identity or endpoints, point its tools back at your real HOME, or route around the egress proxy and its
+# attribution. Compared in upper case: clients read the proxy variables in any case.
 RESERVED_PREFIXES = ("BURN_", "AWS_", "XDG_")
-RESERVED_NAMES = {"HOME", "PATH", "NO_PROXY", "no_proxy", *PROXY_NAMES}
+RESERVED_SUFFIXES = ("_PROXY",)  # HTTPS_PROXY, NO_PROXY, ALL_PROXY, ...
+RESERVED_NAMES = {"HOME", "PATH"}
 VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -30,9 +31,10 @@ def pass_through_name(name: str) -> str:
     """NAME for --allow-env, checked; ValueError if it is not a variable name or burn run sets it itself."""
     if not VARIABLE_NAME.match(name):
         raise ValueError(f"{name!r} is not an environment variable name")
-    if name in RESERVED_NAMES or name.startswith(RESERVED_PREFIXES):
-        raise ValueError(f"burn run sets {name} itself, so it cannot be passed through "
-                         f"(reserved: {', '.join(p + '*' for p in RESERVED_PREFIXES)}, HOME, PATH and the proxy variables)")
+    upper = name.upper()
+    if upper in RESERVED_NAMES or upper.startswith(RESERVED_PREFIXES) or upper.endswith(RESERVED_SUFFIXES):
+        raise ValueError(f"burn run sets {name} itself, so it cannot be passed through (reserved, in any case: "
+                         f"{', '.join(p + '*' for p in RESERVED_PREFIXES)}, *_PROXY, HOME and PATH)")
     return name
 
 

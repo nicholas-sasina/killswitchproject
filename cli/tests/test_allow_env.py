@@ -31,7 +31,10 @@ def test_allow_env_of_an_unset_variable_says_so(stack, capfd):
 
 
 @pytest.mark.parametrize("name", ["BURN_JOIN_TOKEN", "BURN_LOCAL_TOKEN", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE",
-                                  "HOME", "PATH", "XDG_CONFIG_HOME", "HTTPS_PROXY", "no_proxy"])
+                                  "AWS_EC2_METADATA_DISABLED", "HOME", "PATH", "XDG_CONFIG_HOME", "HTTPS_PROXY",
+                                  "no_proxy", "ALL_PROXY", "all_proxy", "ftp_proxy",
+                                  # any case: clients read the proxy variables in any case
+                                  "No_proxy", "Https_Proxy", "home", "Path", "aws_profile", "Burn_Join_Token"])
 def test_allow_env_refuses_names_burn_run_sets_itself(stack, capsys, name):
     with pytest.raises(SystemExit) as exited:
         cli(["run", "--role", "worker", "--allow-env", name, "--", "true"])

@@ -207,7 +207,7 @@ burn run --role coder --allow-env OPENAI_API_KEY -- python agent.py
 ```
 That is the trade-off: a burn revokes the instance's own keys, not yours, so an agent that copied your key keeps
 it after the burn. Rotate it yourself after an incident. A pass-through wins over a preset's setting of the same
-name. Names `burn run` sets itself (`BURN_*`, `AWS_*`, `XDG_*`, `HOME`, `PATH` and the proxy variables) are
+name. Names `burn run` sets itself (`BURN_*`, `AWS_*`, `XDG_*`, `*_PROXY`, `HOME` and `PATH`, in any case) are
 refused, and a child started with `burn.spawn` gets none of them. Codex connects to Burn's tools as above, but a
 model for it is not covered here.
 
