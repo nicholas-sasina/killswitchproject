@@ -102,6 +102,18 @@ export interface EvidenceCounts {
   canaryUses: number;
 }
 
+/**
+ * Whether an event's time is at or after `since`. Event times are UTC with a
+ * Z (contracts/ledger-event.schema.json), so the seconds compare as text and
+ * only a tie in the same second is parsed: this runs over a day of events
+ * on every poll.
+ */
+function atOrAfter(ts: string, since: number, sinceText: string): boolean {
+  const head = ts.slice(0, 19);
+  if (head !== sinceText) return head > sinceText;
+  return Date.parse(ts) >= since;
+}
+
 /** Counts over the events at or after `since` (a time in ms). */
 export function evidenceSince(
   events: LedgerEvent[],
@@ -112,9 +124,9 @@ export function evidenceSince(
     blockedAtExit: 0,
     canaryUses: 0,
   };
+  const sinceText = new Date(since).toISOString().slice(0, 19);
   for (const event of events) {
-    const at = Date.parse(event.ts);
-    if (!(at >= since)) continue;
+    if (!atOrAfter(event.ts, since, sinceText)) continue;
     if (event.action === "recorded" || event.action === "inherited")
       counts.keysSeen += 1;
     else if (event.action === "canary_used") counts.canaryUses += 1;

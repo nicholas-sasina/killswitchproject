@@ -196,6 +196,24 @@ describe("evidence in the stream", () => {
     expect(counts).toEqual({ keysSeen: 2, blockedAtExit: 1, canaryUses: 1 });
   });
 
+  it("cuts the window at the millisecond, with or without milliseconds in the time", () => {
+    const edge = Date.parse("2026-11-08T03:00:00.500Z");
+    const canary = (ts: string) =>
+      event({ action: "canary_used", source: "provider", ts });
+    expect(
+      evidenceSince(
+        [
+          canary("2026-11-08T03:00:00.499Z"),
+          canary("2026-11-08T03:00:00.500Z"),
+          canary("2026-11-08T03:00:01Z"),
+          canary("2026-11-08T03:00:00Z"),
+          canary("2026-11-08T02:59:59.999Z"),
+        ],
+        edge,
+      ).canaryUses,
+    ).toBe(2);
+  });
+
   it("leaves out events older than the window", () => {
     const old = new Date(since - 1).toISOString();
     expect(
