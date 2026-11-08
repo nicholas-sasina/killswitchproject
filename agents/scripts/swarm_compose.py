@@ -56,7 +56,8 @@ def swarm_env(*, api_url: str, token: str, join_token: str, gateway_url: str, mo
     env = {"BURN_API_URL": api_url, "BURN_DEMO_TOKEN": token, "BURN_JOIN_TOKEN": join_token,
            "BURN_GATEWAY_URL": gateway_url}
     if mock:
-        env["BURN_MOCK_BADGE_URL"] = f"http://{HOST}:8702"
+        # The mock Burn API is the badge issuer too (POST /mock-token), so only it needs to be running.
+        env["BURN_MOCK_BADGE_URL"] = api_url.rstrip("/") + "/mock-token"
         env = {k: v.replace("localhost", HOST).replace("127.0.0.1", HOST) if k.endswith("_URL") else v
                for k, v in env.items()}
     return env

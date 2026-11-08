@@ -189,11 +189,13 @@ class Swarm:
         return {"session_id": session_id, "agent_id": agent_id, "badge_ref": agent_secret_ref(agent_id, "badge"),
                 "credentials": issued, "role": role_name, "parent_session": parent_session,
                 "token_id": token_id, "tools": tools, "egress": egress,
-                "secrets": self._fake_secrets(session_id, credentials)}
+                "secrets": self._fake_secrets(agent_id, credentials)}
 
-    def _fake_secrets(self, session_id, credentials):
+    def _fake_secrets(self, agent_id, credentials):
         """Obviously fake values, so nothing here can be mistaken for a real credential."""
-        secrets_ = {"badge": {"client_id": "mock-client-" + session_id[-6:], "client_secret": "mock-badge-secret",
+        # The client id is the agent id: POST /mock-token answers with the bearer `mock-<client id>` that the mock MCP
+        # server accepts for a live instance of that agent.
+        secrets_ = {"badge": {"client_id": agent_id, "client_secret": "mock-badge-secret",
                               "token_url": "http://localhost:8700/mock-token", "scope": "burn/tools"},
                     # Well-formed like a real one (clients check the shape); made per join, so never in the source.
                     "session_token": SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)}

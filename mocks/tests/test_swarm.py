@@ -150,3 +150,17 @@ def test_eval_role_names_are_reserved(client):
         assert response.status_code == 400 and "reserved" in response.json()["detail"]
         assert client.put(f"/roles/{name}", json={"name": name, "tools": []}).status_code == 400
     assert client.post("/roles", json={"name": "evaluator", "tools": []}).status_code == 201
+
+
+def test_the_badge_in_a_join_reply_gets_a_token_the_mock_mcp_server_accepts(client):
+    import base64
+    make_role(client, WORKER)
+    token = token_for(client, "worker")["token"]
+    reply = join(client, "worker", token)
+    badge = reply["secrets"]["badge"]
+    assert badge["client_id"] == reply["agent_id"] and badge["token_url"].endswith("/mock-token")
+    basic = base64.b64encode(f"{badge['client_id']}:{badge['client_secret']}".encode()).decode()
+    issued = client.post("/mock-token", headers={"Authorization": f"Basic {basic}"},
+                         data={"grant_type": "client_credentials"})
+    assert issued.status_code == 200 and issued.json()["access_token"] == "mock-" + reply["agent_id"]
+    assert client.post("/mock-token").status_code == 401
