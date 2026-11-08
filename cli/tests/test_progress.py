@@ -215,6 +215,16 @@ def test_after_a_refused_batch_the_next_heartbeat_is_bare_even_with_more_queued(
     assert api.bodies[1:] == [[], [ev(f"item-{i:02d}") for i in range(50, 60)]]
 
 
+def test_a_refused_bare_heartbeat_is_not_retried_in_a_loop():
+    api = RecordingApi(400, 400)
+    inst = supervisor(api)
+    inst._progress.add(ev("a"))
+    assert inst._beat() == 400 and inst._bare_next
+    assert inst._beat() == 400 and not inst._bare_next  # the bare one was refused too: back to normal beats
+    inst._progress.add(ev("b"))
+    assert inst._beat() == 200 and api.bodies == [[ev("a")], [], [ev("b")]]
+
+
 @pytest.mark.parametrize("status", [0, 429, 503])
 def test_a_transient_failure_keeps_the_batch_for_the_next_heartbeat(status):
     api = RecordingApi(status)
@@ -475,3 +485,4 @@ def test_a_429_keeps_the_progress_for_the_next_heartbeat_and_is_not_a_burn(stack
     assert [batch for _, batch in progress_beats(seen)] == [[ev("item-01")], [ev("item-01")]]
     assert "dropped" not in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
+

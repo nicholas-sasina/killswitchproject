@@ -202,7 +202,7 @@ class Instance:
                 self._stopped_by_api = True
                 self._stop_agent()
                 return
-            if status == 400 or (status == 200 and self._progress.pending()):
+            if self._bare_next or (status == 200 and self._progress.pending()):
                 self._activity.set()  # the next beat goes after the minimum gap: a bare one, or the next 50
             # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
 
@@ -212,7 +212,8 @@ class Instance:
         Returns 200, or the failed call's status (0 when the API was unreachable).
         """
         with self._beat_lock:
-            batch = [] if self._bare_next else self._progress.batch()
+            bare, self._bare_next = self._bare_next, False  # one bare try per refused batch, whatever its outcome
+            batch = [] if bare else self._progress.batch()
             try:
                 self.api.heartbeat(self.session["session_id"], self._token, batch)
             except ApiError as exc:
@@ -221,7 +222,6 @@ class Instance:
                     self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
                     log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
                 return exc.status or 0
-            self._bare_next = False
             self._progress.sent(len(batch))
             return 200
 
