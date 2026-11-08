@@ -3,6 +3,7 @@
 One Lambda with a tiny router keeps the whole API readable in one place.
 """
 import json
+import os
 import re
 
 from burn_contracts import names
@@ -122,7 +123,8 @@ def _swarm_route(method: str, path: str, query: dict, body: dict):
     return None
 
 
-# Must match the CORS settings of the HTTP API in infra/burn_infra/burn_api.py.
+# Must match the CORS settings of the HTTP API in infra/burn_infra/burn_api.py. Once the dashboard is
+# hosted, BurnApi also sets names.DASHBOARD_ORIGIN_ENV to the hosted origin, which is then allowed too.
 ALLOWED_ORIGIN = "http://localhost:5173"
 ALLOWED_HEADERS = f"content-type,authorization,{names.DEMO_TOKEN_HEADER}"
 
@@ -136,8 +138,9 @@ def _preflight(headers: dict):
     so it cannot carry the demo token; it reveals nothing, and the real request is still checked."""
     cors = {"access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": ALLOWED_HEADERS,
             "access-control-max-age": "600"}
-    if headers.get("origin") == ALLOWED_ORIGIN:
-        cors["access-control-allow-origin"] = ALLOWED_ORIGIN
+    origin = headers.get("origin")
+    if origin and origin in (ALLOWED_ORIGIN, os.environ.get(names.DASHBOARD_ORIGIN_ENV)):
+        cors["access-control-allow-origin"] = origin
     return {"statusCode": 204, "headers": cors, "body": ""}
 
 
