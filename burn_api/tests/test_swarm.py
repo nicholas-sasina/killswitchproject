@@ -457,7 +457,8 @@ def test_failure_after_the_badge_exists_deletes_the_badge_too(env, monkeypatch):
     with pytest.raises(RuntimeError):
         call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
     assert len(env.badges.created) == 1 and len(env.badges.deleted) == 1
-    assert [c[0] for c in env.minter.calls] == ["POST", "POST", "DELETE"]  # credentials, canary, cleanup
+    assert [(c[0], c[1].rsplit("/", 1)[-1]) for c in env.minter.calls] == [
+        ("POST", "credentials"), ("POST", "canary"), ("DELETE", "canaries"), ("DELETE", "credentials")]
     monkeypatch.setattr(sessions, "_store_badge", real_store)
     assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201
 
@@ -856,3 +857,94 @@ def test_secret_values_never_reach_stdout_or_logs(env, monkeypatch, capsys, capl
     out = capsys.readouterr()
     for value in values:
         assert value not in out.out and value not in out.err and value not in caplog.text
+
+
+# --- a failed join leaves nothing behind, even without a session row ----------------------------
+
+def badge_secret_exists(agent_id):
+    import boto3
+    client = boto3.client("secretsmanager", region_name="us-east-1")
+    try:
+        client.get_secret_value(SecretId=f"burn/{agent_id}/badge")
+        return True
+    except client.exceptions.ResourceNotFoundException:
+        return False
+
+
+def failing_join(env):
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 1})[1]["token"]
+    with pytest.raises(RuntimeError, match="injected"):
+        call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
+    issued = [c for c in env.minter.calls if c[1].endswith("/canary")]
+    return issued[0][2]["agent_id"] if issued else None
+
+
+def deletes(env, suffix):
+    return [c[1] for c in env.minter.calls if c[0] == "DELETE" and c[1].endswith(suffix)]
+
+
+def boom(*args, **kwargs):
+    raise RuntimeError("injected")
+
+
+def test_a_failure_at_badge_creation_deletes_the_canary_and_credentials(env, monkeypatch):
+    import badges
+    monkeypatch.setattr(badges, "create_badge", boom)
+    agent = failing_join(env)
+    assert deletes(env, "/canaries") == [f"/agents/{agent}/canaries"]
+    assert deletes(env, "/credentials") == [f"/agents/{agent}/credentials"]
+    assert not badge_secret_exists(agent) and env.badges.created == []
+
+
+def test_a_failure_at_the_session_row_deletes_badge_secret_client_canary_and_credentials(env, monkeypatch):
+    import db
+    original = db.table
+
+    class NoPut:
+        def __init__(self, table):
+            self.table = table
+
+        def put_item(self, **kwargs):
+            raise RuntimeError("injected")
+
+        def __getattr__(self, name):
+            return getattr(self.table, name)
+
+    monkeypatch.setattr(db, "table", lambda name: NoPut(original(name)) if name == "burn-sessions" else original(name))
+    agent = failing_join(env)
+    assert len(env.badges.created) == 1 and len(env.badges.deleted) == 1  # the client was removed
+    assert not badge_secret_exists(agent)  # _store_badge wrote it; the discard removed it
+    assert deletes(env, "/canaries") == [f"/agents/{agent}/canaries"]
+    assert deletes(env, "/credentials") == [f"/agents/{agent}/credentials"]
+
+
+def test_a_failure_before_the_canary_asks_for_no_canary_delete(env, monkeypatch):
+    real = env.minter.__call__
+
+    def credentials_fail(method, path, body=None, query=None):
+        if method == "POST" and path.endswith("/credentials"):
+            raise RuntimeError("injected")
+        return real(method, path, body, query)
+
+    monkeypatch.setattr(minter_client, "call", credentials_fail)
+    assert failing_join(env) is None  # no canary was ever issued
+    assert deletes(env, "/canaries") == [] and env.badges.created == []
+    assert len(deletes(env, "/credentials")) == 1  # the half-made credentials are still removed
+
+
+def test_cleanup_failures_do_not_hide_the_original_error_or_stop_the_rest(env, monkeypatch):
+    import badges
+    import sessions
+    monkeypatch.setattr(sessions, "_store_badge", boom)
+    monkeypatch.setattr(badges, "delete_badge", lambda client_id: (_ for _ in ()).throw(OSError("cognito down")))
+    real = env.minter.__call__
+
+    def canary_delete_fails(method, path, body=None, query=None):
+        if method == "DELETE" and path.endswith("/canaries"):
+            raise minter_client.MinterError("down")
+        return real(method, path, body, query)
+
+    monkeypatch.setattr(minter_client, "call", canary_delete_fails)
+    failing_join(env)  # still raises the original RuntimeError("injected")
+    assert len(deletes(env, "/credentials")) == 1  # the last step ran even though two before it failed
