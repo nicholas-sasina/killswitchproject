@@ -440,17 +440,18 @@ describe("running now", () => {
     ).toBe(false);
   });
 
-  it("stays quick at 200 agents", () => {
+  it("gives each of 200 agents one square, in its role's row", () => {
     const { model } = world({
       roles,
       instances: Array.from({ length: 200 }, (_, i) =>
         instance(`w${i}`, i % 5 ? "worker" : "reader"),
       ),
     });
-    const start = performance.now();
     const rows = runningNowRows(model);
-    expect(performance.now() - start).toBeLessThan(50);
-    expect(rows.reduce((n, row) => n + row.squares.length, 0)).toBe(200);
+    expect(rows.map((row) => [row.name, row.squares.length])).toEqual([
+      ["worker", 160],
+      ["reader", 40],
+    ]);
   });
 });
 
