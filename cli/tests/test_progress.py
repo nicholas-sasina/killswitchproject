@@ -879,3 +879,35 @@ def test_a_hanging_heartbeat_in_flight_cannot_hold_the_flush_past_its_deadline(m
     api.release.set()
     in_flight.join(5)
     assert took < 3.0  # one second's deadline; without the bound it waited for the stuck beat
+
+
+ADMIN = "AdminSecretValue-0123456789"
+
+
+@pytest.mark.parametrize("item", [
+    "adminsecretvalue-0123456789",  # the same token in another case
+    "pre-" + ADMIN,  # the token inside a longer item
+    "x-" + "b" * 43,  # a join token's secret part (after the dot), without its prefix
+])
+def test_an_item_holding_a_held_token_in_any_case_or_inside_it_is_refused(item):
+    host = {"BURN_TASK": json.dumps(["item-01", item]), "BURN_DEMO_TOKEN": ADMIN}
+    with pytest.raises(BadTask, match="holds a credential") as caught:
+        Instance(RecordingApi(), "worker", ["true"], gateway_url="http://gateway", host_env=host, enroll_token=A_JOIN_TOKEN)
+    assert item not in str(caught.value) and ADMIN not in str(caught.value)
+
+
+def test_a_short_held_secret_is_refused_only_as_a_whole_item():
+    assert task_values({"BURN_TASK": json.dumps(["shorter", "unshortened"])}, secrets=("short",))
+    with pytest.raises(BadTask, match="holds a credential"):
+        task_values({"BURN_TASK": json.dumps(["SHORT"])}, secrets=("short",))
+
+
+def test_the_admin_token_from_dotenv_is_refused_as_an_item_too(stack, capsys, monkeypatch):
+    monkeypatch.delenv("BURN_DEMO_TOKEN")
+    dotenv = stack.tmp / ".env"
+    dotenv.write_text(f"BURN_DEMO_TOKEN={ADMIN}\n")
+    monkeypatch.setenv("BURN_TASK", json.dumps(["item-01", ADMIN]))
+    assert cli(["run", "--role", "worker", "--", "true"], dotenv=dotenv) == 2
+    err = capsys.readouterr().err
+    assert "holds a credential" in err and ADMIN not in err
+    assert not stack.calls("POST", "/instances")

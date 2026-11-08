@@ -29,6 +29,12 @@ SESSION_TOKEN = re.compile(r"bst_[A-Za-z0-9_-]{43}")
 TASK_NAMES = (TASK_ENV, RESUME_ENV)
 
 
+# A held secret this long is refused anywhere inside an item; a shorter one only as the whole item, so that a
+# short value cannot refuse ordinary item ids.
+MIN_CONTAINED = 12
+JOIN_TOKEN_SHAPE = re.compile(JOIN_TOKEN_RE.pattern, re.IGNORECASE)
+
+
 class BadTask(ValueError):
     """BURN_TASK or BURN_RESUME holds something other than item ids, so burn run refuses to start."""
 
@@ -40,6 +46,21 @@ def _json(raw: str, name: str):
         raise BadTask(f"{name} is not valid JSON") from None
 
 
+def _secret_parts(secrets) -> set[str]:
+    """Each held secret, and a join token's secret part (after the dot), lowercased."""
+    parts = set()
+    for value in filter(None, secrets):
+        parts.add(value.lower())
+        if match := JOIN_TOKEN_RE.match(value):
+            parts.add(match["secret"].lower())
+    return parts
+
+
+def _holds_secret(item: str, parts: set[str]) -> bool:
+    item = item.lower()
+    return any(item == part or (len(part) >= MIN_CONTAINED and part in item) for part in parts)
+
+
 def _item_ids(value, name: str, secrets: set[str]) -> list[str]:
     if not isinstance(value, list) or not all(is_item_id(item) for item in value):
         raise BadTask(f"{name} must be a list of item ids (each matching ^[A-Za-z0-9_.:-]{{1,64}}$)")
@@ -48,9 +69,9 @@ def _item_ids(value, name: str, secrets: set[str]) -> list[str]:
     # Credentials can fit the item id rule (a join token is exactly 64 characters). The messages never echo them.
     if any(SESSION_TOKEN.search(item) for item in value):
         raise BadTask(f"{name} holds something that looks like a session token")
-    if any(JOIN_TOKEN_RE.match(item) for item in value):
+    if any(JOIN_TOKEN_SHAPE.match(item) for item in value):
         raise BadTask(f"{name} holds something that looks like a join token")
-    if secrets.intersection(value):
+    if any(_holds_secret(item, secrets) for item in value):
         raise BadTask(f"{name} holds a credential this burn run was given (the admin or the join token)")
     return value
 
@@ -59,9 +80,10 @@ def task_values(host_env: dict, secrets=()) -> dict:
     """BURN_TASK and BURN_RESUME for the agent, re-encoded from what was checked. Empty or unset: not passed on.
 
     BURN_TASK is a JSON list of item ids; BURN_RESUME is {"done": [ids], "quarantined": [ids]}. `secrets` are
-    credential values this burn run holds, which no item may equal.
+    credential values this burn run holds: no item may be one, in any case, or hold one (or a join token's secret
+    part) inside it.
     """
-    out, secrets = {}, {value for value in secrets if value}
+    out, secrets = {}, _secret_parts(secrets)
     if raw := host_env.get(TASK_ENV):
         out[TASK_ENV] = json.dumps(_item_ids(_json(raw, TASK_ENV), TASK_ENV, secrets))
     if raw := host_env.get(RESUME_ENV):
