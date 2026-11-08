@@ -1,0 +1,175 @@
+/* The burn dialog and the containment checklist. Tokens only.
+
+   Ember is the badge revoked (a burn); an unfinished step is an error, so it
+   is ink on grey, never ember. Text on white is --muted-2 at its quietest. */
+
+/* ---------- Checklist ---------- */
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline-soft);
+  background: var(--surface);
+}
+
+.checklist-mark {
+  flex: none;
+  margin-top: 3px;
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.checklist-text {
+  min-width: 0;
+}
+
+.checklist-title {
+  display: block;
+  font-size: 13.5px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--muted-2);
+}
+
+.checklist-sub,
+.checklist-error {
+  display: block;
+  margin-top: 1px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-2);
+}
+
+.checklist-item.is-done {
+  border-color: var(--hairline);
+  background: var(--paper);
+}
+
+.checklist-item.is-done .checklist-title {
+  color: var(--ink);
+}
+
+.checklist-item.is-done .checklist-mark {
+  stroke: var(--ink);
+}
+
+.checklist-item.is-done.is-hot {
+  border-color: var(--ember-edge);
+  background: var(--ember-wash);
+}
+
+.checklist-item.is-done.is-hot .checklist-mark {
+  stroke: var(--ember);
+}
+
+.checklist-item.is-error {
+  border-color: var(--border);
+  background: var(--hairline-soft);
+}
+
+.checklist-item.is-error .checklist-title {
+  color: var(--ink);
+}
+
+.checklist-item.is-error .checklist-mark {
+  stroke: var(--ink);
+}
+
+.checklist-item.is-error .checklist-error {
+  color: var(--ink-soft);
+}
+
+/* Only a step that ticks while you watch animates its mark. */
+@media (prefers-reduced-motion: no-preference) {
+  .checklist.is-ticking
+    .checklist-item:is(.is-done, .is-error)
+    .checklist-mark {
+    animation: checklist-tick 220ms var(--ease-out) both;
+  }
+}
+
+@keyframes checklist-tick {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ---------- Dialog ---------- */
+
+.burn-plan {
+  margin: 14px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.burn-plan .id {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.burn-reason {
+  margin-top: 18px;
+}
+
+.burn-reason label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.burn-reason-hint {
+  font-weight: 400;
+  color: var(--muted-2);
+}
+
+.burn-reason input {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 14px/1.4 var(--font-sans);
+}
+
+.burn-reason input:hover:not(:disabled) {
+  border-color: var(--connector);
+}
+
+.burn-reason input:disabled {
+  background: var(--surface);
+  color: var(--muted-2);
+}
+
+.burn-dialog .notice-error {
+  margin-top: 16px;
+}
+
+.burn-dialog .checklist {
+  padding-top: 6px;
+}
