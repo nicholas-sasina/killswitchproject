@@ -1,7 +1,7 @@
 /* The roles pages. Tokens from styles/tokens.css only; shared pieces from
    src/ui/. Every selector sits under the page's own class. */
 
-/* ---------- Role hero: stats and buttons on the right, as on the board ---- */
+/* ---------- Role hero: the lede on the left, stats and buttons on the right */
 
 .role-hero.hero {
   display: grid;
@@ -75,8 +75,8 @@
   table-layout: fixed;
 }
 
-/* The board's grid: agent 1.2fr, started 150, last call 130, keys 1fr,
-   action 96, with 12px gaps (here, each cell's right padding). */
+/* Fixed widths for the times and the action; the agent's name takes the
+   rest. Each cell's right padding is the gap between columns. */
 .role-table .role-col-started {
   width: 162px;
 }

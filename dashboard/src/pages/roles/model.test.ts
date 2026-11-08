@@ -77,7 +77,7 @@ describe("roleRows", () => {
     expect(rows("running")).toEqual(["reader-02", "worker-03", "  worker-04"]);
   });
 
-  it("keeps another role's child under its burned parent, as the board does", () => {
+  it("keeps another role's child under its burned parent", () => {
     expect(rows("burned")).toEqual(["worker-02", "  reader-02"]);
     expect(rows("finished")).toEqual(["worker-01"]);
     expect(rows("all")).toEqual([

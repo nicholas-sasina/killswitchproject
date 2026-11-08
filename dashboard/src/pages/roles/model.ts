@@ -16,7 +16,7 @@ import { ago, dayTime, keyName, personLabel } from "../../model";
 import { plural } from "../../plural";
 
 /**
- * A role's agents, as the boards say it: "Add workers", "every worker".
+ * A role's agents, as the page names them: "Add workers", "every worker".
  * Role names are lowercase words and hyphens, so English's common rules
  * are enough: "analysis" to "analyses", "registry" to "registries", "-es"
  * after s, x, z, ch or sh, and "-s" otherwise.
@@ -49,7 +49,7 @@ export const FILTERS: readonly Filter[] = [
   "all",
 ];
 
-/** The filter in the address, or Running, the board's default. */
+/** The filter in the address, or Running, the default. */
 export function filterOf(value: string | null | undefined): Filter {
   return (FILTERS as readonly string[]).includes(value ?? "")
     ? (value as Filter)
@@ -82,8 +82,8 @@ function byStart(a: ConsoleAgent, b: ConsoleAgent): number {
  * The rows of a role's agents table under a filter.
  *
  * The role's own agents show when their state matches. Agents of other
- * roles that the role's agents started (the board's reader under its
- * worker) are listed with them: under their parent while it is shown, and
+ * roles that the role's agents started (a reader under the worker that
+ * started it) are listed with them: under their parent while it is shown, and
  * otherwise on their own when their state matches. A child sits indented
  * under its parent only while the parent is a row; otherwise it starts a
  * row of its own, and its second line names the parent and its state.
