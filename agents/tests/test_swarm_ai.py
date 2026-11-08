@@ -351,3 +351,16 @@ def test_scripted_is_a_flag_and_the_default_is_the_ai_worker_with_a_capped_budge
     assert swarm_worker.parse_args(["--max-model-calls", "12"]).max_model_calls == 12
     with pytest.raises(SystemExit):
         swarm_worker.parse_args(["--max-model-calls", "-1"])
+
+
+def test_a_key_aws_does_not_accept_at_start_is_a_startup_error_not_a_burn(monkeypatch, caplog):
+    def refused(session):
+        raise ClientError({"Error": {"Code": "SignatureDoesNotMatch", "Message": "signature mismatch"}},
+                          "GetCallerIdentity")
+
+    monkeypatch.setattr(swarm_worker, "own_aws_session", lambda env: object())
+    monkeypatch.setattr(swarm_worker, "wait_for_key", refused)
+    env = {"BURN_MCP_URL": "http://127.0.0.1:1/mcp", "BURN_TASK": '["w01-item-01"]',
+           "BURN_PROGRESS_URL": "http://127.0.0.1:1/progress"}
+    assert asyncio.run(swarm_worker.main_async(env)) == 1  # Burn, not this worker, says whether it was burned
+    assert "AWS did not accept this instance's own key" in caplog.text and "SignatureDoesNotMatch" in caplog.text

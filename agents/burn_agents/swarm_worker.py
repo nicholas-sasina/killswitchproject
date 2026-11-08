@@ -385,8 +385,12 @@ async def run_ai(env: dict, *, assigned: tuple[list[str], dict] | None, interval
         print("this instance has no AWS key of its own, so it has no model: give its role credentials [\"aws_key\"]",
               file=sys.stderr)
         return 2
-    log.info("model %s with this instance's own AWS key (identity %s)", MODEL_ID,
-             await asyncio.to_thread(wait_for_key, session))
+    try:
+        identity = await asyncio.to_thread(wait_for_key, session)
+    except Exception as exc:  # noqa: BLE001 - not a burn by itself: nothing has run yet, and Burn says if it was
+        log.error("AWS did not accept this instance's own key, so it has no model: %s", root_cause(exc))
+        return 1
+    log.info("model %s with this instance's own AWS key (identity %s)", MODEL_ID, identity)
     model, local_token, budget = bedrock_model(session), env.get("BURN_LOCAL_TOKEN", ""), CallBudget(max_calls)
     try:
         with mcp_client(env["BURN_MCP_URL"], local_token) as client:
@@ -495,7 +499,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except Exception as exc:  # noqa: BLE001
         if looks_revoked(exc):  # a dead badge or key: the normal end without a task, a burn mid-task with one
-            log.info("badge revoked/credentials rotated, stopping")
+            log.info("badge revoked/credentials rotated, stopping (%s)", root_cause(exc))
             return EXIT_BURNED if os.environ.get(TASK_ENV) else 0
         log.error("stopping: %s", root_cause(exc))
         return 1
