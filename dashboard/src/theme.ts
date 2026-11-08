@@ -7,9 +7,9 @@
  * out of sync, and it spends header space on a decision nobody needs to
  * revisit.
  *
- * The attribute lives on <html> and is also set by a small inline script in
- * index.html, so the first paint is already correct. Without that the page
- * flashes light before React mounts.
+ * The attribute lives on <html> and is also set by public/first-paint.js,
+ * which index.html runs before the first paint, so that paint is already
+ * correct. Without that the page flashes light before React mounts.
  */
 import { useEffect, useState } from "react";
 
