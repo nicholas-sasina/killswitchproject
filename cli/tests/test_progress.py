@@ -116,6 +116,14 @@ def endpoint():
     server.stop()
 
 
+def until(condition, timeout=10.0):
+    """Poll for a condition instead of sleeping a fixed time, which flakes on a loaded machine."""
+    deadline = time.monotonic() + timeout
+    while not condition():
+        assert time.monotonic() < deadline, "timed out waiting"
+        time.sleep(0.01)
+
+
 def in_background(call):
     """Run a blocking call on a thread; its result lands in the returned dict."""
     out = {}
@@ -150,7 +158,7 @@ def test_done_is_answered_at_once_and_sent_later(endpoint):
 
 def test_started_is_answered_only_once_burn_has_recorded_it(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.4)
+    until(endpoint.queue.waiting)
     assert thread.is_alive() and endpoint.queue.batch() == [ev("item-01")]  # queued, not yet recorded
     endpoint.queue.sent(1)  # a heartbeat carrying it got a 200
     thread.join(2)
@@ -160,7 +168,7 @@ def test_started_is_answered_only_once_burn_has_recorded_it(endpoint):
 
 def test_started_on_a_burned_instance_is_a_409_so_the_agent_stops_before_acting(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.2)
+    until(endpoint.queue.waiting)
     endpoint.queue.gone()  # the heartbeat got a 409
     thread.join(2)
     assert out["reply"][0] == 409 and "burned" in out["reply"][1]["error"]
@@ -169,7 +177,7 @@ def test_started_on_a_burned_instance_is_a_409_so_the_agent_stops_before_acting(
 
 def test_a_start_burn_refused_is_a_400_with_its_reason(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.2)
+    until(endpoint.queue.waiting)
     endpoint.queue.dropped(1, "HTTP 400: at most 500 items per instance")
     thread.join(2)
     assert out["reply"][0] == 400 and "at most 500 items per instance" in out["reply"][1]["error"]
@@ -188,7 +196,7 @@ def test_a_start_burn_has_not_recorded_in_time_is_a_503_and_stays_queued():
 
 def test_a_waiting_start_blocks_neither_spawn_nor_other_reports(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
-    thread.join(0.1)
+    until(endpoint.queue.waiting)
     started = time.monotonic()
     assert post(endpoint.url, {"role": "worker", "command": ["true"]})[0] == 200
     assert post(endpoint.progress_url, ev("item-02", "done"))[0] == 200
