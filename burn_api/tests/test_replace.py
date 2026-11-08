@@ -58,3 +58,22 @@ def test_roles_store_replace_on_burn_and_it_is_off_by_default(env):
     assert call(env, "GET", "/roles/old")[1]["replace_on_burn"] is False  # rows from before the setting
     roles = {r["name"]: r for r in call(env, "GET", "/roles")[1]["roles"]}
     assert roles["a"]["replace_on_burn"] is False  # scenario roles never replace
+
+
+# --- reads ---------------------------------------------------------------------------------------
+
+def test_instance_reads_show_links_and_progress_counts_never_the_map(env):
+    make_role(env, ROLE)
+    sid = fresh(env)["session_id"]
+    status, one = call(env, "GET", f"/instances/{sid}")
+    assert status == 200 and one["session_id"] == sid
+    assert (one["generation"], one["replaces"], one["replaced_by"], one["replacement"]) == (0, None, None, None)
+    assert (one["items_started"], one["items_done"]) == (0, 0)
+    env.ddb.Table("burn-sessions").update_item(
+        Key={"session_id": sid}, UpdateExpression="SET progress = :p",
+        ExpressionAttributeValues={":p": {"a": {"started_at": "t1", "done_at": "t2"},
+                                          "b": {"started_at": "t1", "done_at": None}}})
+    listed = next(i for i in call(env, "GET", "/instances")[1]["instances"] if i["session_id"] == sid)
+    assert (listed["items_started"], listed["items_done"]) == (2, 1) and "progress" not in listed
+    assert call(env, "GET", "/instances/sess_nope")[0] == 404
+    assert call(env, "GET", f"/instances/{sid}", token="")[0] == 401  # behind the admin header (a person, later)

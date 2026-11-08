@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 from burn_contracts import names
+from burn_contracts import progress as task_progress
 from burn_contracts.events import utc_now_iso
 
 import db
@@ -31,6 +32,8 @@ SWEEP_LIMIT = 10
 SWEEP_BUDGET_SECONDS = 2.0
 MAX_LISTED = 500
 COUNT_WORKERS = 16
+# Replace on burn: links between a burned instance and its replacement, as stored on the session row.
+REPLACEMENT_FIELDS = ("replaces", "replaced_by", "replacement")
 
 
 def idle_seconds() -> int:
@@ -77,6 +80,9 @@ def view(session: dict, exposures: int | None = None) -> dict:
                                        "exited_at")},
         "created_at": session.get("created_at"),
         "exposures": _exposures(session["agent_id"]) if exposures is None else exposures,
+        "generation": int(session.get("generation", 0)),
+        **{k: session.get(k) for k in REPLACEMENT_FIELDS},
+        **task_progress.counts(session.get("progress")),  # counts only: the per-item map stays on the row
     }
 
 
@@ -90,6 +96,14 @@ def get_session(session_id: str, consistent: bool = False) -> dict:
     if row is None:
         raise errors.ApiError(404, "Unknown session")
     return row
+
+
+def get_instance(session_id: str) -> dict:
+    """GET /instances/{session_id}: one instance, as the list shows it."""
+    session = get_session(session_id)
+    if not role_of(session):
+        raise errors.ApiError(404, "Unknown session")
+    return view(session)
 
 
 def list_instances(role: str | None, status: str | None) -> list[dict]:
