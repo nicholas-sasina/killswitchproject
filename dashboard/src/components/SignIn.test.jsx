@@ -182,7 +182,9 @@ describe("people sign-in screen", () => {
     await act(async () => {
       render(<App config={dashboardConfig} />);
     });
-    expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Overview", current: "page" }),
+    ).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
     });
@@ -191,7 +193,9 @@ describe("people sign-in screen", () => {
       window.location.hash = "#/burned";
       window.dispatchEvent(new Event("hashchange"));
     });
-    expect(screen.getByRole("heading", { name: "Incidents" })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: /^Incidents/, current: "page" }),
+    ).toBeTruthy();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
