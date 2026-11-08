@@ -2,7 +2,8 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "./api";
-import { useEventFeed } from "./polling";
+import { HISTORY_PAGE, useEventFeed } from "./polling";
+import { eventIdAt } from "./events";
 import type { EventsResponse } from "./contracts";
 
 afterEach(() => {
@@ -85,6 +86,78 @@ describe("event polling", () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
     expect(api.events).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it("pages history forward from a moment until it meets the live events", async () => {
+    vi.useFakeTimers();
+    const id = (n: number) => `evt_Z${String(n).padStart(25, "0")}`;
+    const page = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        event_id: id(from + i),
+        ts: new Date(1_000 + from + i).toISOString(),
+        agent_id: "agent-reader",
+        source: "tool_response" as const,
+        action: "recorded" as const,
+      }));
+    const api = createApi(
+      { burnUrl: "", localDev: true, demoToken: "" },
+      () => {},
+    );
+    // The live poll's first page is a full 200, newest last.
+    const live = page(5_000, 200);
+    api.events = vi.fn(async (since?: string, _signal?: AbortSignal) => {
+      if (!since) return { events: live, agents: [] };
+      if (since === eventIdAt(42))
+        return { events: page(0, HISTORY_PAGE), agents: [] };
+      if (since === id(HISTORY_PAGE - 1))
+        return { events: page(HISTORY_PAGE, 10), agents: [] };
+      return { events: [], agents: [] };
+    });
+    const { result, unmount } = renderHook(() =>
+      useEventFeed(api, true, { historySince: 42 }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const calls = vi.mocked(api.events).mock.calls;
+    expect(calls.slice(0, 3).map(([since, , limit]) => [since, limit])).toEqual(
+      [
+        [undefined, undefined],
+        [eventIdAt(42), HISTORY_PAGE],
+        [id(HISTORY_PAGE - 1), HISTORY_PAGE],
+      ],
+    );
+    expect(Object.keys(result.current.state.byId)).toHaveLength(
+      200 + HISTORY_PAGE + 10,
+    );
+    expect(result.current.history).toEqual({
+      from: new Date(42).toISOString(),
+      complete: true,
+    });
+    // The live cursor is the newest live event, not the history's.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(calls.at(-1)?.[0]).toBe(live.at(-1)?.event_id);
+    unmount();
+  });
+
+  it("calls a short first page the whole history", async () => {
+    vi.useFakeTimers();
+    const api = createApi(
+      { burnUrl: "", localDev: true, demoToken: "" },
+      () => {},
+    );
+    api.events = vi.fn(async () => ({ events: [], agents: [] }));
+    const { result, unmount } = renderHook(() =>
+      useEventFeed(api, true, { historySince: 42 }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(api.events).toHaveBeenCalledTimes(1);
+    expect(result.current.history.complete).toBe(true);
     unmount();
   });
 });
