@@ -15,7 +15,7 @@ import toolContract from "../../../../contracts/mcp-tools.json";
 import { createApi, type ApiConfig } from "../../api";
 import type { Instance, Role } from "../../contracts";
 import { ConsoleDataProvider, useConsole } from "../../data/ConsoleData";
-import { AddAgentsDialog } from "./AddAgentsDialog";
+import { TokenDialog } from "./TokenDialog";
 import { forgetTokens, knownTokens } from "./tokens";
 
 const API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com";
@@ -125,7 +125,7 @@ function Harness({ config }: { config: ApiConfig }) {
     >
       <Openers onOpen={(name) => setAdding({ role: name })} />
       {adding && (
-        <AddAgentsDialog role={adding.role} onClose={() => setAdding(null)} />
+        <TokenDialog role={adding.role} onClose={() => setAdding(null)} />
       )}
     </ConsoleDataProvider>
   );

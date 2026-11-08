@@ -24,11 +24,15 @@ containers, give a join token instead (--token, --token-stdin or BURN_JOIN_TOKEN
 
 burn run joins with the join token, fetches the instance's own credentials, and
 starts COMMAND with only those, and with only an allow-list of your environment (PATH, LANG, LC_*, TZ, TERM,
-the AWS region and CA-bundle variables): every other variable, credentials included, is removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
+the AWS region and CA-bundle variables): every other variable, credentials included, is removed unless you pass
+it with --allow-env NAME, before the command (a burn cannot revoke what you pass). The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
 (POST {role, command} to start a child instance), BURN_PROGRESS_URL (POST {item, state} to report task
 progress; a start is answered once Burn has recorded it), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE. BURN_TASK and BURN_RESUME
 are passed on from your environment only if they hold item ids; otherwise burn run refuses to start.
 It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
+
+For `claude`, burn run also sets up Claude Code in the instance's new HOME: Burn's tools, no first-run prompts,
+the current directory trusted, and Bedrock with the instance's own AWS key when the role has aws_key.
 
 HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved clients route through the
 egress proxy. They are not containment: a process can ignore them. Containment is the network rule in the
@@ -45,6 +49,14 @@ agent then needs a container or a separate user.
 
 class UsageError(Exception):
     pass
+
+
+def _pass_through(name: str) -> str:
+    from .runner.env import pass_through_name
+    try:
+        return pass_through_name(name)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--user", help="when burn run is root, run the agent as this existing user "
                                       "(default: a uid of its own for each instance)")
     run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
+    run_p.add_argument("--allow-env", action="append", default=[], metavar="NAME", type=_pass_through,
+                       help="pass this variable from your environment to the agent (repeatable), such as a provider "
+                            "key. A burn cannot revoke it. Names burn run sets itself are refused")
     run_p.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
     env_p = sub.add_parser("env", help="show the environment `burn run` gives an instance")
     env_p.add_argument("--show", action="store_true", help="show the values of the kept variables")
@@ -327,7 +342,7 @@ def cmd_run(args):
     try:
         instance = Instance(InstanceApi(api_url), role, command, secrets=secrets, gateway_url=gateway.rstrip("/"),
                             enroll_token=token, session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv),
-                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin,
+                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin, allow_env=args.allow_env,
                             # read only so no task item can carry it; the agent never gets it
                             held_secrets=(config.get("BURN_DEMO_TOKEN", args.dotenv),))
     except BadTask as exc:

@@ -27,9 +27,12 @@ function pasteable(url: string | undefined): string {
   return PASTEABLE_URL.test(value) ? value : "";
 }
 
-export function joinCommands(role: string, urls: JoinUrls = {}) {
-  // A missing URL leaves its line out rather than show a broken one.
-  const exports = (
+/**
+ * The lines that set the API and gateway URLs for burn, each ending in a
+ * newline. A missing URL leaves its line out rather than show a broken one.
+ */
+export function joinExports(urls: JoinUrls = {}): string {
+  return (
     [
       ["BURN_API_URL", pasteable(urls.api)],
       ["BURN_GATEWAY_URL", pasteable(urls.gateway)],
@@ -38,6 +41,10 @@ export function joinCommands(role: string, urls: JoinUrls = {}) {
     .filter(([, url]) => url)
     .map(([name, url]) => `export ${name}=${url}\n`)
     .join("");
+}
+
+export function joinCommands(role: string, urls: JoinUrls = {}) {
+  const exports = joinExports(urls);
   return {
     prompt: `${exports}read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN   # paste the token, press Enter\nburn run --role ${role} -- <your agent command>`,
     clipboard: `${exports}pbpaste | burn run --role ${role} --token-stdin -- <your agent command>`,

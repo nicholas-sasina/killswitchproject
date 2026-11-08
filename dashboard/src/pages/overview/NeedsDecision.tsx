@@ -76,7 +76,7 @@ function Actions({
       );
     case "caller":
       // No route registers a badge Burn did not issue: Register it opens
-      // Add agents, where a real agent gets a join token.
+      // Connect an agent, where a real agent is connected through Burn.
       return (
         <div className="ov-decide-actions">
           <button

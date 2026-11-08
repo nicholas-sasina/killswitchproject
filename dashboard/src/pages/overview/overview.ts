@@ -331,7 +331,7 @@ export function heroCopy({
     title: [title],
     lede:
       running === 0
-        ? "Agents appear here as they join. Add agents to start a role."
+        ? "Agents appear here as they join. Connect an agent to start one."
         : allClearLede(events, flags, history, model.now),
   };
 }
