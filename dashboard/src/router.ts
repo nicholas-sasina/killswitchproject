@@ -84,7 +84,18 @@ export function parseHash(hash: string): { route: Route; canonical: boolean } {
         : { page: "overview" };
     }
   }
-  return { route, canonical: hash === routeHref(route) };
+  // A page may keep its own state in the query (#/roles/worker?show=burned);
+  // only the old overview's ?instance= is rewritten away.
+  const keep = head === "overview" || head === "" ? "" : query;
+  return {
+    route,
+    canonical: hash === routeHref(route) + (keep ? `?${keep}` : ""),
+  };
+}
+
+/** The query after the route: a page's own state, such as a filter. */
+export function hashParams(hash: string): URLSearchParams {
+  return new URLSearchParams(hash.split("?")[1] ?? "");
 }
 
 export function routeFromHash(hash: string): Route {
@@ -124,12 +135,18 @@ export function useRoute(): Route {
   useEffect(() => {
     const onChange = () => {
       const { route: next, canonical } = parseHash(window.location.hash);
-      if (!canonical)
+      if (!canonical) {
+        const query = window.location.hash.split("?")[1];
+        const keep =
+          next.page !== "overview" && next.page !== "agent" && query
+            ? `?${query}`
+            : "";
         window.history.replaceState(
           window.history.state,
           "",
-          `${window.location.pathname}${window.location.search}${routeHref(next)}`,
+          `${window.location.pathname}${window.location.search}${routeHref(next)}${keep}`,
         );
+      }
       setRoute((current) => (sameRoute(current, next) ? current : next));
     };
     window.addEventListener("hashchange", onChange);
@@ -142,4 +159,41 @@ export function useRoute(): Route {
 
 export function sameRoute(a: Route, b: Route): boolean {
   return routeHref(a) === routeHref(b);
+}
+
+/**
+ * One value in the hash query, kept in step with the address: a page's
+ * filter that survives a reload and can be bookmarked. Setting it replaces
+ * the history entry rather than adding one.
+ */
+export function useHashParam(
+  name: string,
+): [string | undefined, (value: string | undefined) => void] {
+  const read = () =>
+    typeof window === "undefined"
+      ? undefined
+      : (hashParams(window.location.hash).get(name) ?? undefined);
+  const [value, setValue] = useState(read);
+  useEffect(() => {
+    const onChange = () => setValue(read());
+    window.addEventListener("hashchange", onChange);
+    onChange();
+    return () => window.removeEventListener("hashchange", onChange);
+    // read() depends only on name.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
+  const set = (next: string | undefined) => {
+    const [path] = window.location.hash.split("?");
+    const params = hashParams(window.location.hash);
+    if (next === undefined || next === "") params.delete(name);
+    else params.set(name, next);
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${window.location.search}${path}${query ? `?${query}` : ""}`,
+    );
+    setValue(next || undefined);
+  };
+  return [value, set];
 }

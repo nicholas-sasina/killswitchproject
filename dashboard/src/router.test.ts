@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentHref,
+  hashParams,
   instanceHref,
   parseHash,
   roleHref,
@@ -68,5 +69,14 @@ describe("console routes", () => {
     expect(sectionOf({ page: "role", name: "worker" })).toBe("roles");
     expect(sectionOf({ page: "agent", sessionId: "s" })).toBe("roles");
     expect(sectionOf({ page: "incidents" })).toBe("incidents");
+  });
+
+  it("keeps a page's own query, such as a filter", () => {
+    expect(parseHash("#/roles/worker?show=burned")).toEqual({
+      route: { page: "role", name: "worker" },
+      canonical: true,
+    });
+    expect(hashParams("#/roles/worker?show=burned").get("show")).toBe("burned");
+    expect(parseHash("#/incidents?show=open").canonical).toBe(true);
   });
 });
