@@ -27,7 +27,14 @@ export function useSharedPoll<T>(
       try {
         const result = await run(controller.signal);
         if (!controller.signal.aborted) {
-          setData(result);
+          // An answer equal to the last keeps the same object, so the
+          // pages that read it do not re-render every five seconds.
+          setData((current) =>
+            current !== undefined &&
+            JSON.stringify(current) === JSON.stringify(result)
+              ? current
+              : result,
+          );
           setError("");
         }
       } catch (caught) {
