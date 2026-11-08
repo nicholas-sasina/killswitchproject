@@ -230,7 +230,7 @@ class RecordingApi:
     def __init__(self, *statuses):
         self.bodies, self.statuses = [], list(statuses)
 
-    def heartbeat(self, session_id, session_token, progress=None):
+    def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
         self.bodies.append(progress)
         status = self.statuses.pop(0) if self.statuses else 200
         if status != 200:
@@ -636,7 +636,7 @@ class ProgressFailsApi(RecordingApi):
         super().__init__()
         self.status, self.stop_after, self.done = status, stop_after, done
 
-    def heartbeat(self, session_id, session_token, progress=None):
+    def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
         self.bodies.append(progress)
         if self.stop_after and len(self.bodies) >= self.stop_after:
             self.done.set()
@@ -666,3 +666,51 @@ def test_the_heartbeat_loop_keeps_the_instance_alive_while_progress_keeps_failin
     loop.join(20)
     assert not loop.is_alive()
     assert api.bodies.count([]) >= 3  # bare heartbeats got through between the failing ones
+
+
+
+class SlowApi(RecordingApi):
+    """Takes `takes` seconds of a fake clock per heartbeat, and records when each began and its timeout."""
+
+    def __init__(self, clock, takes):
+        super().__init__()
+        self.clock, self.takes, self.calls = clock, takes, []
+
+    def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+        self.calls.append((self.clock[0], timeout))
+        self.clock[0] += self.takes
+        return super().heartbeat(session_id, session_token, progress)
+
+
+def on_fake_clock(api, clock):
+    inst = supervisor(api)
+    inst._clock = lambda: clock[0]
+    inst._sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+    return inst
+
+
+def test_the_exit_flush_keeps_the_minimum_gap_between_heartbeats():
+    clock = [1000.0]
+    api = SlowApi(clock, takes=0.1)
+    inst = on_fake_clock(api, clock)
+    inst.min_gap, inst._last_beat = 3.0, 999.0  # the loop's last beat was a second ago
+    for i in range(120):
+        inst._progress.add(ev(f"item-{i:03d}", "done"))
+    inst._flush_progress()
+    starts = [at for at, _ in api.calls]
+    assert starts[0] >= 1002.0 and all(b - a >= 3.0 for a, b in zip(starts, starts[1:]))
+    assert inst._progress.pending() == 0 and len(starts) == 3
+
+
+def test_the_exit_flush_gives_up_at_one_overall_deadline(capsys):
+    clock = [1000.0]
+    api = SlowApi(clock, takes=4.0)  # an API this slow would hold the exit report back for minutes
+    inst = on_fake_clock(api, clock)
+    inst.min_gap = 0.0
+    for i in range(200):
+        inst._progress.add(ev(f"item-{i:03d}", "done"))
+    inst._flush_progress()
+    assert clock[0] - 1000.0 <= 12.0 and len(api.calls) == 3
+    assert all(timeout <= 10.0 - (at - 1000.0) + 1e-9 for at, timeout in api.calls)  # no call outlives it
+    assert "50 progress events could not be sent before the exit" in capsys.readouterr().err
+

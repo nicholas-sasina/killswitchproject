@@ -27,6 +27,7 @@ EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # how a supervisor receives the secrets of a session someone else started
 STOP_GRACE = 5.0  # seconds between SIGTERM and SIGKILL when stopping the agent
 BARE_AFTER = 2  # failed sends of a batch in a row before one heartbeat goes without it
+FLUSH_DEADLINE = 10.0  # seconds the exit may wait for the progress still queued
 
 
 def log(message: str) -> None:
@@ -63,6 +64,7 @@ class Instance:
         self._beat_lock = threading.Lock()  # one heartbeat at a time, so a batch is never sent twice at once
         self._bare_next = False  # after a refused batch: the API recorded nothing, not even that we are alive
         self._batch_failures = 0  # heartbeats in a row whose batch failed: past BARE_AFTER, liveness goes first
+        self._clock, self._last_beat = time.monotonic, 0.0  # when the last heartbeat began
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -189,20 +191,18 @@ class Instance:
             log(f"could not report the exit ({exc})")
 
     def _heartbeat_loop(self) -> None:
-        last = 0.0
         while not self._done.is_set():
             woke = self._activity.wait(self.heartbeat_every)  # MCP activity and new progress wake the loop early
             if self._done.is_set():
                 return
             if woke:
                 self._activity.clear()
-                gap_left = self.min_gap - (time.monotonic() - last)
+                gap_left = self.min_gap - (self._clock() - self._last_beat)
                 if gap_left > 0:
                     if not (self._progress.pending() or self._bare_next):
                         continue  # MCP activity just after a beat: that beat already showed the instance alive
                     if self._done.wait(gap_left):  # progress goes out as soon as the minimum gap allows
                         return
-            last = time.monotonic()
             status = self._beat()
             if status in (404, 409):  # burned, exited or gone: the agent must not keep running
                 self._stopped_by_api = True
@@ -214,7 +214,7 @@ class Instance:
                 self._activity.set()  # the next beat goes after the minimum gap: a bare one, the next 50, or a retry
             # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
 
-    def _beat(self, liveness_first: bool = True) -> int:
+    def _beat(self, liveness_first: bool = True, timeout: float = 60.0) -> int:
         """One heartbeat with the oldest queued progress, at most 50 events, or none when liveness goes first
         (after a refused batch, or a batch that keeps failing). The exit flush passes False: an exit follows.
 
@@ -224,8 +224,9 @@ class Instance:
             bare = self._bare_next and liveness_first
             self._bare_next = False  # one bare try each time, whatever its outcome
             batch = [] if bare else self._progress.batch()
+            self._last_beat = self._clock()
             try:
-                self.api.heartbeat(self.session["session_id"], self._token, batch)
+                self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
             except ApiError as exc:
                 if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
                     self._progress.dropped(len(batch), str(exc))
@@ -246,18 +247,25 @@ class Instance:
     def _flush_progress(self) -> None:
         """Send the progress still queued when the agent exits, so the instance's record is complete.
 
-        A transient failure (network, 5xx, a 429 when progress changed while the API saved it) is tried again,
-        up to three times in a row.
+        It keeps the minimum gap between heartbeats, tries a transient failure (network, 5xx, a 429 when progress
+        changed while the API saved it) up to three times in a row, and gives up at one overall deadline, so a
+        slow or unreachable API cannot hold back the exit report for long.
         """
-        failures = 0
+        deadline, failures = self._clock() + FLUSH_DEADLINE, 0
         while self._progress.pending():
-            status = self._beat(liveness_first=False)
+            wait = self.min_gap - (self._clock() - self._last_beat)
+            if failures:
+                wait = max(wait, retry.delay(failures))
+            if self._clock() + max(wait, 0.0) >= deadline:
+                break
+            if wait > 0:
+                self._sleep(wait)
+            status = self._beat(liveness_first=False, timeout=deadline - self._clock())
             failures = 0 if status in (200, 400) else failures + 1
             if status in (404, 409) or failures == 3:
-                log(f"{self._progress.pending()} progress events could not be sent before the exit")
-                return
-            if failures:
-                self._sleep(retry.delay(failures))
+                break
+        if self._progress.pending():
+            log(f"{self._progress.pending()} progress events could not be sent before the exit")
 
     def _stop_agent(self) -> None:
         """SIGTERM the agent's whole group, then SIGKILL whatever is left after the grace period."""

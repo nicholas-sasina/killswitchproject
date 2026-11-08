@@ -16,14 +16,15 @@ class InstanceApi:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
-    def _request(self, method: str, path: str, body: dict | None = None, session_token: str = "") -> dict:
+    def _request(self, method: str, path: str, body: dict | None = None, session_token: str = "",
+                 timeout: float = 60.0) -> dict:
         headers = {"content-type": "application/json"}
         if session_token:
             headers["authorization"] = f"Bearer {session_token}"
         req = urllib.request.Request(self.base_url + path, method=method, headers=headers,
                                      data=None if body is None else json.dumps(body).encode())
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as err:
             try:
@@ -43,10 +44,11 @@ class InstanceApi:
         """Start a child of this instance, with exactly {role, parent_session} and the parent's session token."""
         return self._request("POST", "/instances", {"role": role, "parent_session": parent_session}, session_token)
 
-    def heartbeat(self, session_id: str, session_token: str, progress: list[dict] | None = None) -> dict:
+    def heartbeat(self, session_id: str, session_token: str, progress: list[dict] | None = None,
+                  timeout: float = 60.0) -> dict:
         """Keep the instance alive; `progress` (oldest first, at most 50) goes in the body when there is any."""
         return self._request("POST", f"/instances/{session_id}/heartbeat",
-                             {"progress": progress} if progress else None, session_token)
+                             {"progress": progress} if progress else None, session_token, timeout)
 
     def exit(self, session_id: str, session_token: str) -> dict:
         return self._request("POST", f"/instances/{session_id}/exit", session_token=session_token)
