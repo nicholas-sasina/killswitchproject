@@ -22,7 +22,7 @@ class Drop:
     name: str
     uid: int
     gid: int
-    claim: str | None = None  # the marker that keeps another instance from drawing the same uid
+    claim: str | None = None  # set only for a uid of the instance's own; the marker keeps it from ever being drawn again
 
     def popen_args(self) -> dict:
         return {"user": self.uid, "group": self.gid, "extra_groups": []}
@@ -38,7 +38,7 @@ def _claim_dir() -> str:
 
 
 def allocate(rng=random.SystemRandom()) -> Drop:
-    """A uid (and gid) no other instance in this container holds. Claims are atomic directory creations."""
+    """A uid (and gid) no other instance in this container has held. Claims are atomic directory creations."""
     base = _claim_dir()
     for _ in range(100):
         uid = UID_BASE + rng.randrange(UID_COUNT)
@@ -49,14 +49,6 @@ def allocate(rng=random.SystemRandom()) -> Drop:
             continue
         return Drop(f"burn-{uid}", uid, uid, marker)
     raise ValueError("no free instance uid")
-
-
-def release(drop: Drop | None) -> None:
-    if drop and drop.claim:
-        try:
-            os.rmdir(drop.claim)
-        except OSError:
-            pass
 
 
 def kill_all(uid: int) -> None:

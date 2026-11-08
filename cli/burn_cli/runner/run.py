@@ -93,7 +93,6 @@ class Instance:
         cleanups.append(mcp.stop)
         spawn = SpawnEndpoint(self.spawn_child, local_token).start()
         cleanups.append(spawn.stop)
-        cleanups.append(lambda: privs.release(self.drop))
         home = self._make_home()
         cleanups.append(lambda: shutil.rmtree(home, ignore_errors=True))  # last, so nothing recreates it behind us
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
@@ -183,7 +182,7 @@ class Instance:
     def _kill_everything(self) -> None:
         if self._proc is not None:
             self._signal_group(signal.SIGKILL)  # members that ignored SIGTERM survive their leader otherwise
-        if self.drop:
+        if self.drop and self.drop.claim:  # only a uid of the instance's own: --user's is shared with other instances
             privs.kill_all(self.drop.uid)
 
     def _signal_group(self, sig: int) -> None:

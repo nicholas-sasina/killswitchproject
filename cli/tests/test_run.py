@@ -487,14 +487,26 @@ def test_every_instance_gets_its_own_uid_from_the_reserved_range(claims):
     assert all(d.popen_args() == {"user": d.uid, "group": d.uid, "extra_groups": []} for d in drops)
 
 
-def test_a_claimed_uid_is_not_handed_out_again_until_released(claims):
+def test_a_uid_is_never_handed_out_twice_even_after_its_instance_ended(claims):
     from burn_cli.runner import privs
     import random
     first = privs.allocate(random.Random(1))
-    again = privs.allocate(random.Random(1))  # same random stream: the first draw collides with the claim
-    assert again.uid != first.uid
-    privs.release(first)
-    assert privs.allocate(random.Random(1)).uid == first.uid
+    # same random stream: the first draw collides with the claim, which is kept so leftovers (files in /tmp,
+    # a process that forked during the kill scan) can never be seen by a later instance
+    assert privs.allocate(random.Random(1)).uid != first.uid
+    assert not hasattr(privs, "release")
+
+
+def test_a_shared_user_is_never_swept_with_kill_all(stack, monkeypatch):
+    from burn_cli.runner import privs
+    swept = []
+    monkeypatch.setattr(privs, "kill_all", swept.append)
+    monkeypatch.setattr(runmod.os, "chown", lambda *a: None)
+    monkeypatch.setattr(runmod.subprocess, "Popen", FakePopen)
+    assert instance(stack, py("pass"), drop=privs.Drop("svc", 999, 999)).run() == 0  # --user: no claim, shared
+    assert swept == []
+    assert instance(stack, py("pass"), drop=privs.Drop("burn-100001", 100001, 100001, "/run/x")).run() == 0
+    assert swept == [100001]  # an instance's own uid is swept
 
 
 def test_claim_directory_must_be_private_and_root_owned(monkeypatch, tmp_path):
