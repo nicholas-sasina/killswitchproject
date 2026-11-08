@@ -38,6 +38,7 @@ from burn_contracts import names
 import burn
 import db
 import minter_client
+import replace
 
 
 def _now() -> str:
@@ -148,7 +149,7 @@ def _check_attribution(ref: str, row: dict | None):
 
 
 def handle_incident(incident: dict) -> dict:
-    start = time.perf_counter()
+    start, received = time.perf_counter(), _now()  # the incident's arrival is evidence of compromise
     ref = incident.get("secret_ref") if isinstance(incident, dict) else None
     event_id = incident.get("event_id") if isinstance(incident, dict) else None
     if not isinstance(ref, str) or not names.is_canary_ref(ref):
@@ -212,6 +213,7 @@ def handle_incident(incident: dict) -> dict:
                                   "containment incomplete, burn the agent manually")
     rotated_ms = _ms(start)
     burn.flag_blocked_attempts(agent_id)
+    replace.after_burn(agent_id, [session_id], [], received)  # best effort, never raises
     return {"outcome": outcome, "agent_id": agent_id, "session_id": session_id,
             "rotated": rotated, "flagged": flagged, "rotation_deferred_for": sharing,
             "timings_ms": {"revoked": revoked_ms, "rotation_done": rotated_ms}}

@@ -393,3 +393,38 @@ def test_the_earliest_evidence_wins(env, ledger):
     add_event(env, inst["agent_id"], inst["session_id"], "blocked", "2026-11-07T19:45:00.000Z")
     call(env, "POST", "/burn/by-source", {"source_ref": SOURCE})
     assert replacement_of(env, inst["session_id"])["cutoff"] == "2026-11-07T19:45:00.000Z"
+
+
+# --- a canary burn (the provider -> Burn API -> minter path, in process) -------------------------
+
+from test_canary_containment import VICTIM, fleet, leak_and_present, stack  # noqa: E402,F401 (fixtures)
+
+
+def _row(stack, session_id):
+    return stack.table("burn-sessions").get_item(Key={"session_id": session_id})["Item"]
+
+
+def test_a_canary_burn_cuts_off_at_the_canary_use(stack, fleet):
+    victim = fleet[VICTIM]
+    stack.set_role(victim["session_id"], "worker", replace_on_burn=True)
+    leak_and_present(stack, victim)
+    [used] = stack.events("canary_used")
+    record = _row(stack, victim["session_id"])["replacement"]
+    assert record["status"] == "pending"
+    assert (record["cutoff"], record["cutoff_source"]) == (used["ts"], "evidence")
+    others = [s for agent_id, s in fleet.items() if agent_id != VICTIM]
+    assert all("replacement" not in _row(stack, s["session_id"]) for s in others)
+
+
+def test_a_canary_burn_falls_back_to_when_burn_received_the_incident(stack, fleet, monkeypatch):
+    """If the canary use is not readable yet, the incident's arrival is still evidence, and before the burn."""
+    from burn_contracts.progress import parse_time
+    victim = fleet[VICTIM]
+    stack.set_role(victim["session_id"], "worker", replace_on_burn=True)
+    monkeypatch.setattr(replace, "_evidence", lambda agent_id, session_id: [])
+    leak_and_present(stack, victim)
+    [used] = stack.events("canary_used")
+    row_ = _row(stack, victim["session_id"])
+    record = row_["replacement"]
+    assert record["cutoff_source"] == "evidence"
+    assert parse_time(used["ts"]) <= parse_time(record["cutoff"]) <= parse_time(row_["revoked_at"])
