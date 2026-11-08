@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from burn_contracts import names
 from burn_contracts.events import utc_now_iso
 
+import canary
 import db
 import errors
 import minter_client
@@ -92,6 +93,11 @@ def start_session(agent_id: str) -> dict:
         credentials = result["credentials"]
 
     session_id = "sess_" + secrets.token_hex(8)
+    try:
+        role_name = names.scenario_role_name(agent_id)
+    except ValueError:  # an agent id too long to read as a role name: default canary policy
+        role_name = None
+    canary.issue_for_session(agent_id, session_id, role_name)
     badge = badges.create_badge(agent_id, session_id)
     badge_ref = _store_badge(agent_id, badge)
 
@@ -195,6 +201,7 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
                 "POST", f"/agents/{agent_id}/credentials", {"types": limits["credentials"]})["credentials"]
 
         session_id = "sess_" + secrets.token_hex(8)
+        canary.issue_for_session(agent_id, session_id, role_name)  # None when the role has canaries off
         badge = badges.create_badge(agent_id, session_id)
         badge_ref = _store_badge(agent_id, badge)
 
