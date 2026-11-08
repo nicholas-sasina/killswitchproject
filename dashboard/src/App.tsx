@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { createApi, readConfig, type ApiConfig } from "./api";
 import { attentionCount, toAlerts } from "./alerts";
+import { containedFleet, liveFleet, mergeFleet } from "./fleet";
 import type { AgentState, BurnResult } from "./contracts";
 import { newestEvents } from "./events";
 import { MockBanner, mockDataReducer } from "./MockBanner";
-import { useEventFeed } from "./polling";
+import { useEventFeed, usePolling } from "./polling";
 import { hrefFor, useView, VIEWS, type View } from "./router";
 import { useSystemTheme } from "./theme";
 import { ErrorMessage } from "./components/common";
@@ -46,6 +47,23 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   // The navigation marker counts anything above "noted", so the operator can
   // stay on another view and still know the queue is filling.
   const pending = useMemo(() => attentionCount(toAlerts(events)), [events]);
+  // /events lists only the scenario agents; /instances lists every instance
+  // that joined, including swarm workers and probes. The roster is both.
+  const loadInstances = useCallback(
+    (signal: AbortSignal) => api.instances(undefined, signal),
+    [api],
+  );
+  const instancePoll = usePolling(configured ? loadInstances : null, 5_000);
+  const instances = instancePoll.data?.instances ?? [];
+  const fleet = useMemo(
+    () => mergeFleet(state.agents, instances),
+    [state.agents, instancePoll.data],
+  );
+  const live = useMemo(() => liveFleet(fleet), [fleet]);
+  const contained = useMemo(
+    () => containedFleet(fleet, events),
+    [fleet, events],
+  );
   const [selectedId, setSelectedId] = useState("");
   const [confirmAgent, setConfirmAgent] = useState<AgentState>();
   const [busy, setBusy] = useState(false);
@@ -54,18 +72,25 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
     Record<string, { result: BurnResult; sessionId: AgentState["session_id"] }>
   >({});
   const [refresh, setRefresh] = useState(0);
-  const activeCount = state.agents.filter(
-    (agent) => agent.status === "active",
-  ).length;
-  const revokedCount = state.agents.filter(
-    (agent) => agent.status === "revoked",
-  ).length;
+  const activeCount = live.length;
+  const revokedCount = contained.length;
+  // Finished instances are neither running nor contained. They stay out of
+  // the roster, which is for what is running, but they are counted here and
+  // listed in Roles and instances, so nothing is hidden.
+  const exitedCount = fleet.filter((entry) => entry.status === "exited").length;
   // The overview roster is the live fleet: burned agents move to Contained.
   // Selection still resolves against every agent, so the containment detail
   // stays on screen for the agent you just burned.
-  const liveAgents = state.agents.filter((agent) => agent.status !== "revoked");
+  const liveAgents: AgentState[] = live.map((entry) => ({
+    agent_id: entry.agentId,
+    role: entry.role,
+    status: entry.status === "idle" ? "idle" : "active",
+    session_id: entry.sessionId,
+    exposures: entry.exposures,
+  }));
   const selectedAgent =
     state.agents.find((agent) => agent.agent_id === selectedId) ??
+    liveAgents.find((agent) => agent.agent_id === selectedId) ??
     liveAgents[0] ??
     state.agents[0];
   function resultFor(agent: AgentState) {
@@ -191,8 +216,9 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 />
                 <BurnedView
                   api={api}
-                  agents={state.agents}
+                  fleet={fleet}
                   events={events}
+                  instances={instances}
                   enabled={configured}
                 />
               </>
@@ -234,9 +260,13 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                       <div className="section-heading">
                         <h2 id="agents-title">Active agents</h2>
                         <span className="muted">
-                          {revokedCount
-                            ? `${revokedCount} contained, see Contained`
-                            : ""}
+                          {[
+                            `${liveAgents.length} running`,
+                            exitedCount ? `${exitedCount} finished` : "",
+                            revokedCount ? `${revokedCount} contained` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </span>
                       </div>
                       {liveAgents.length ? (

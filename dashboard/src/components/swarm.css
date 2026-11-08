@@ -49,8 +49,7 @@
   flex-direction: column;
   gap: 0;
 }
-.swarm-filters input,
-.swarm-filters select {
+.swarm-filters input {
   min-width: 10rem;
 }
 .swarm-viewport {

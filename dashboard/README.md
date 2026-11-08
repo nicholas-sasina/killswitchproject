@@ -4,8 +4,11 @@
 
 Three views in a sidebar, each a bookmarkable location.
 
-**Overview** (`#/overview`) is the live fleet in one place: the agents running right now, the
-credentials the selected one has seen, and the roles and instances they joined through. Burned
+**Overview** (`#/overview`) is the live fleet in one place: every agent running right now, the
+credentials the selected one has seen, and the roles and instances they joined through. The roster
+covers swarm workers and probes, not just the scenario agents, because it is built from `/events`
+and `/instances` merged rather than `/events` alone. Finished instances stay out of the roster,
+which is for what is running, but they are counted beside it and listed in Roles and instances. Burned
 agents are not on this roster, so it always reflects what is actually running; a count links to
 Contained. The agent you just burned stays in the containment detail so you can read the outcome
 without changing view.
@@ -168,9 +171,21 @@ every field editable and still creating a _new_ role. Passing `role` instead kee
 behaviour of minting another token for a role that already exists. Both are additive, so existing
 call sites are unchanged.
 
-**Burned agents map to roles by name.** `roleForAgent` in `src/burned.ts` matches an agent to its
-role by exact name first, then by the `agent-<role>` convention scenario agents use. If the role is
-gone, the rebuild actions are replaced with an explanation rather than a dead button.
+**One fleet list, two sources.** `src/fleet.ts` merges `/events` (scenario agents only) with
+`/instances` (every instance that ever joined, including swarm workers, livecheck probes and eval
+agents). The unit is the **instance**, keyed by session, because one agent name legitimately has
+many sessions with different outcomes: a deployed stack showed `agent-reader` with eight sessions.
+Reading only `/events` is what made the dashboard report three agents when a hundred and fifty had
+run, and made a burned swarm worker invisible.
+
+**Burned agents map to roles by name.** `roleForAgent` in `src/fleet.ts` matches an agent to its
+role by exact name first, then by the `agent-<role>` convention scenario and swarm agents use. If
+the role is gone, the rebuild actions are replaced with an explanation rather than a dead button.
+
+**Both large-list views are bounded.** Contained filters by role, searches by agent or session, and
+renders at most 60 rows behind a "show all". Alerts filters agents through a select ordered by
+alert count. A livecheck loop can put a hundred agents in the stream, which is why neither renders
+one control per agent.
 
 **`components/common.tsx` still exports `Flame`** as an alias of `BurnMark`, kept so any code that
 imports the old name keeps compiling. Prefer `BurnMark` in new code.

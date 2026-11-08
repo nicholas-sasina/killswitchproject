@@ -1,75 +1,101 @@
 /**
  * Contained agents: what was burned, what it had seen, and how to rebuild it.
  *
- * Burned agents are deliberately absent from the overview, which answers
- * "what is running now". Keeping dead agents in that list made the fleet look
- * bigger than it was and buried the live ones. They are not thrown away
- * though: a burn is the moment you most need the agent's history, so it gets
- * a page where the ledger and the CloudTrail trail are the main content.
+ * Burned agents are deliberately absent from the overview roster, which
+ * answers "what is running now". They are not thrown away though: a burn is
+ * the moment you most need the agent's history, so it gets a page where the
+ * ledger and the CloudTrail trail are the main content.
+ *
+ * Built for a real fleet. A deployed stack accumulates swarm workers,
+ * livecheck probes and eval agents, so this can be well over a hundred rows;
+ * it filters by role, searches by name or session, and renders a bounded
+ * number of rows rather than all of them.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { BurnApi } from "../api";
-import { burnedAgents, roleForAgent } from "../burned";
-import type { AgentState, LedgerEvent, Role } from "../contracts";
+import {
+  byRole,
+  containedFleet,
+  roleForAgent,
+  type FleetAgent,
+} from "../fleet";
+import type { LedgerEvent, Role } from "../contracts";
 import { usePolling } from "../polling";
 import { AddAgent } from "./AddAgent";
 import { BlastTimeline } from "./BlastTimeline";
 import { Ledger } from "./Ledger";
 import { Status, Timestamp } from "./common";
 
+/** Rows drawn before the list is truncated. */
+const ROW_CAP = 60;
+
 export function BurnedView({
   api,
-  agents,
+  fleet,
   events,
+  instances,
   enabled,
 }: {
   api: BurnApi;
-  agents: AgentState[];
+  fleet: FleetAgent[];
   events: LedgerEvent[];
+  instances: import("../contracts").Instance[];
   enabled: boolean;
 }) {
-  const burned = burnedAgents(agents, events);
-  const [selectedId, setSelectedId] = useState("");
-  // Rebuilding needs the role list: either to mint another token for the
-  // agent's own role, or to copy its capabilities into a new one.
-  const loadRoles = useCallback(
-    (signal: AbortSignal) => api.roles(signal),
-    [api],
+  const contained = useMemo(
+    () => containedFleet(fleet, events),
+    [fleet, events],
   );
-  const loadInstances = useCallback(
-    (signal: AbortSignal) => api.instances(undefined, signal),
-    [api],
+  const roles = useMemo(
+    () => byRole(contained.map((item) => item.entry)),
+    [contained],
   );
-  const rolePoll = usePolling(
-    enabled && burned.length ? loadRoles : null,
-    10_000,
-  );
-  const instancePoll = usePolling(
-    enabled && burned.length ? loadInstances : null,
-    10_000,
-  );
-  const roles = rolePoll.data?.roles ?? [];
-  const instances = instancePoll.data?.instances ?? [];
+  const [roleFilter, setRoleFilter] = useState("");
+  const [query, setQuery] = useState("");
+  const [selectedKey, setSelectedKey] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const [rebuild, setRebuild] = useState<{
     role?: Role;
     template?: Role;
     suggestedName?: string;
   }>();
 
+  const search = query.trim().toLowerCase();
+  const matching = useMemo(
+    () =>
+      contained.filter(
+        (item) =>
+          (!roleFilter || (item.entry.role || "no role") === roleFilter) &&
+          (!search ||
+            item.entry.agentId.toLowerCase().includes(search) ||
+            (item.entry.sessionId ?? "").toLowerCase().includes(search)),
+      ),
+    [contained, roleFilter, search],
+  );
+  const shown = showAll ? matching : matching.slice(0, ROW_CAP);
   const selected =
-    burned.find((entry) => entry.agent.agent_id === selectedId) ?? burned[0];
+    matching.find((item) => item.entry.key === selectedKey) ?? matching[0];
+
+  // Only needed once something is selected, so it costs nothing on an empty
+  // page.
+  const loadRoles = useCallback(
+    (signal: AbortSignal) => api.roles(signal),
+    [api],
+  );
+  const rolePoll = usePolling(enabled && selected ? loadRoles : null, 30_000);
+  const roleList = rolePoll.data?.roles ?? [];
   const selectedRole = selected
-    ? roles.find(
+    ? roleList.find(
         (role) =>
           role.name ===
           roleForAgent(
-            selected.agent,
-            roles.map((r) => r.name),
+            selected.entry,
+            roleList.map((item) => item.name),
           ),
       )
     : undefined;
 
-  if (!burned.length)
+  if (!contained.length)
     return (
       <section className="panel">
         <div className="panel-heading">
@@ -90,55 +116,103 @@ export function BurnedView({
         <section className="panel" aria-labelledby="burned-title">
           <div className="panel-heading">
             <h2 id="burned-title">
-              {burned.length} contained{" "}
-              {burned.length === 1 ? "agent" : "agents"}
+              {matching.length} contained{" "}
+              {matching.length === 1 ? "agent" : "agents"}
             </h2>
             <span className="meta">Most recent first</span>
           </div>
-          <ul className="burned-list">
-            {burned.map((entry) => (
-              <li key={entry.agent.agent_id}>
-                <button
-                  type="button"
-                  className="burned-row"
-                  aria-pressed={
-                    entry.agent.agent_id === selected?.agent.agent_id
-                  }
-                  onClick={() => setSelectedId(entry.agent.agent_id)}
+
+          {(roles.length > 1 || contained.length > 10) && (
+            <div className="alert-filters">
+              <label>
+                Role
+                <select
+                  value={roleFilter}
+                  onChange={(event) => setRoleFilter(event.target.value)}
                 >
-                  <span className="burned-head">
-                    <span className="burned-id">{entry.agent.agent_id}</span>
-                    <Status value="revoked" />
-                  </span>
-                  <span className="burned-meta">
-                    {entry.agent.role && (
-                      <>
-                        {entry.agent.role}
-                        <span className="sep">·</span>
-                      </>
-                    )}
-                    {entry.agent.exposures ?? 0} credential
-                    {entry.agent.exposures === 1 ? "" : "s"} seen
-                    {entry.revokedAt && (
-                      <>
-                        <span className="sep">·</span>
-                        burned <Timestamp value={entry.revokedAt} />
-                      </>
-                    )}
-                  </span>
-                  {entry.note && (
-                    <span className="burned-note">{entry.note}</span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <option value="">All roles ({contained.length})</option>
+                  {roles.map(([role, count]) => (
+                    <option key={role} value={role}>
+                      {role} ({count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Find
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="Agent or session"
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+
+          {!matching.length ? (
+            <p className="empty">No contained agent matches these filters.</p>
+          ) : (
+            <>
+              <ul className="burned-list">
+                {shown.map((item) => (
+                  <li key={item.entry.key}>
+                    <button
+                      type="button"
+                      className="burned-row"
+                      aria-pressed={item.entry.key === selected?.entry.key}
+                      onClick={() => setSelectedKey(item.entry.key)}
+                    >
+                      <span className="burned-head">
+                        <span className="burned-id">{item.entry.agentId}</span>
+                        <Status value="revoked" />
+                      </span>
+                      <span className="burned-meta">
+                        {item.entry.role && (
+                          <>
+                            {item.entry.role}
+                            <span className="sep">·</span>
+                          </>
+                        )}
+                        {item.entry.exposures ?? 0} credential
+                        {item.entry.exposures === 1 ? "" : "s"} seen
+                        {item.revokedAt && (
+                          <>
+                            <span className="sep">·</span>
+                            burned <Timestamp value={item.revokedAt} />
+                          </>
+                        )}
+                      </span>
+                      {item.entry.sessionId && (
+                        <span className="burned-session">
+                          <code>{item.entry.sessionId}</code>
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {matching.length > ROW_CAP && (
+                <div className="trail-more">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setShowAll((current) => !current)}
+                  >
+                    {showAll
+                      ? `Show first ${ROW_CAP}`
+                      : `Show all ${matching.length}`}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </section>
 
         <div className="burned-detail">
           <section className="panel">
             <div className="panel-heading">
-              <h2>{selected?.agent.agent_id}</h2>
+              <h2>{selected?.entry.agentId}</h2>
               <span className="meta">
                 {selected?.observed
                   ? "Burned during this session"
@@ -150,6 +224,7 @@ export function BurnedView({
               have been rotated. Credentials it only saw belong to someone else
               and are flagged rather than rotated.
             </p>
+            {selected?.note && <p className="panel-intro">{selected.note}</p>}
             <div className="rebuild-actions">
               {selectedRole ? (
                 <>
@@ -193,15 +268,15 @@ export function BurnedView({
             )}
           </section>
 
-          <Ledger api={api} agentId={selected?.agent.agent_id} refresh={0} />
-          <BlastTimeline api={api} agentId={selected?.agent.agent_id} />
+          <Ledger api={api} agentId={selected?.entry.agentId} refresh={0} />
+          <BlastTimeline api={api} agentId={selected?.entry.agentId} />
         </div>
       </div>
 
       {rebuild && (
         <AddAgent
           api={api}
-          roles={roles}
+          roles={roleList}
           instances={instances}
           role={rebuild.role}
           template={rebuild.template}
