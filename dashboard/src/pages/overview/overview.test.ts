@@ -17,6 +17,7 @@ import {
   evidenceSince,
   heroCopy,
   joinList,
+  restarted,
   roleLine,
   runningNowRows,
   sameRow,
@@ -284,6 +285,38 @@ describe("the hero", () => {
     });
     expect(heroCopy({ ...data, history: complete }).lede).toContain(
       "worker-04 took over its task, and nothing else restarted.",
+    );
+  });
+
+  it("names the replacements that took over after several burns", () => {
+    const burnedAt = { last_seen: at(19, 0) };
+    const data = world({
+      instances: [
+        instance("w1", "worker", "revoked", { ...burnedAt, replaced_by: "w8" }),
+        instance("w2", "worker", "revoked", { ...burnedAt, replaced_by: "w9" }),
+        instance("w3", "worker", "revoked", burnedAt),
+        instance("w8", "worker", "active", { created_at: at(19, 1) }),
+        instance("w9", "worker", "active", { created_at: at(19, 2) }),
+      ],
+    });
+    expect(heroCopy({ ...data, history: complete }).lede).toBe(
+      "Burn revoked each of them. worker-04 and worker-05 took over their tasks, and nothing else restarted.",
+    );
+  });
+
+  it("names whose task one replacement took over", () => {
+    const data = world({
+      instances: [
+        instance("w1", "worker", "revoked", {
+          last_seen: at(18, 0),
+          replaced_by: "w9",
+        }),
+        instance("w2", "worker", "revoked", { last_seen: at(19, 0) }),
+        instance("w9", "worker", "active", { created_at: at(18, 1) }),
+      ],
+    });
+    expect(restarted(data.burned, data.model)).toBe(
+      "worker-03 took over worker-01’s task, and nothing else restarted.",
     );
   });
 
