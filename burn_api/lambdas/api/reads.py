@@ -59,11 +59,12 @@ def ledger(agent_id: str) -> dict:
     entries = []
     for row in rows:
         ref = row.get("secret_ref")
-        status = "active"
+        status, flag_level = "active", None
         if ref:
             cred = creds.get_item(Key={"secret_ref": ref}).get("Item") or {}
             if cred.get("status") in ("active", "rotated", "flagged"):
                 status = cred["status"]
+            flag_level = cred.get("flag_level") if status == "flagged" else None
         entries.append({
             "secret_ref": ref,
             "fingerprint": row.get("fingerprint") or row["secret_ref_or_fp"].removeprefix("fp#"),
@@ -74,6 +75,7 @@ def ledger(agent_id: str) -> dict:
             "via": row.get("via"),
             "first_seen": row.get("first_seen"),
             "status": status,
+            "flag_level": flag_level,
         })
     entries.sort(key=lambda e: e["first_seen"] or "")
     return {"agent_id": agent_id, "entries": entries}

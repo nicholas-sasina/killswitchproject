@@ -15,5 +15,5 @@ package = false
 burn-contracts = { path = "../contracts", editable = true }
 
 [tool.pytest.ini_options]
-pythonpath = ["lambdas/api", "tests"]
+pythonpath = ["lambdas/api", "tests", "scripts"]
 testpaths = ["tests"]

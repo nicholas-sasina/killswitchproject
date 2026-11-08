@@ -10,7 +10,9 @@ import logging
 import re
 from datetime import datetime
 
+import canaries
 import credentials
+import flags
 import key_activity
 import shared
 from burn_contracts.names import is_agent_id
@@ -19,7 +21,8 @@ log = logging.getLogger()
 log.setLevel(logging.INFO)
 
 SHARED_NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
-AGENT_PATH = re.compile(r"^/agents/(?P<agent_id>[^/]+)/(?P<action>credentials|rotate|key-activity)$")
+AGENT_PATH = re.compile(r"^/agents/(?P<agent_id>[^/]+)/(?P<action>credentials|rotate|key-activity|canaries)$")
+SESSION_CANARY_PATH = re.compile(r"^/sessions/(?P<session_id>[^/]+)/canary$")
 
 
 def _parse_since(value: str | None) -> datetime | None:
@@ -34,7 +37,9 @@ def _agent_route(method: str, agent_id: str, action: str, body: dict, query: dic
     if (method, action) == ("DELETE", "credentials"):
         return {"deleted": credentials.delete(agent_id)}
     if (method, action) == ("POST", "rotate"):
-        return credentials.rotate(agent_id, body.get("exposed_refs", []))
+        return credentials.rotate(agent_id, body.get("exposed_refs", []), body.get("evidence"))
+    if (method, action) == ("DELETE", "canaries"):
+        return {"deleted": canaries.delete_for_agent(agent_id)}
     if (method, action) == ("GET", "key-activity"):
         return key_activity.key_activity(agent_id, _parse_since(query.get("since")))
     return None
@@ -44,6 +49,18 @@ def _route(method: str, path: str, body: dict, query: dict):
     match = AGENT_PATH.match(path)
     if match:
         return _agent_route(method, match["agent_id"], match["action"], body, query)
+    match = SESSION_CANARY_PATH.match(path)
+    if match and method == "POST":
+        return canaries.issue(body.get("agent_id", ""), match["session_id"])
+    if match and method == "GET":
+        return canaries.get(query.get("agent_id", ""), match["session_id"])
+    if path == "/flags" and method == "GET":
+        return {"flags": flags.list_flags()}
+    if path == "/flags/resolve" and method == "POST":
+        return flags.resolve(body.get("secret_ref"), body.get("action"), body.get("reason"), body.get("by"),
+                             credentials.rotate_flagged)
+    if path == "/flags" and method == "POST":
+        return {"flags": flags.raise_many(body.get("secret_refs"), body.get("level"), body.get("evidence"))}
     if path == "/shared/credentials" and method == "POST":
         name = body.get("name", "")
         if not SHARED_NAME_RE.match(name):
@@ -65,6 +82,10 @@ def handler(event, context=None):
         result = _route(event.get("method", ""), event.get("path", ""), body, event.get("query") or {})
     except ValueError as err:
         return {"statusCode": 400, "body": {"error": str(err)}}
+    except (canaries.NotFound, flags.NotFound) as err:
+        return {"statusCode": 404, "body": {"error": str(err)}}
+    except flags.Conflict as err:
+        return {"statusCode": 409, "body": {"error": str(err)}}
     except Exception:
         log.exception("minter request failed")  # the traceback holds no credential values
         return {"statusCode": 500, "body": {"error": "internal error"}}

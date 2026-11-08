@@ -80,7 +80,7 @@ def test_rotate_api_key_keeps_previous_and_marks_fingerprints(secrets_client, ta
     ref = f"burn/{AGENT}/api_key"
     old = secret(secrets_client, ref)
     status, body = call("POST", f"/agents/{AGENT}/rotate", {"exposed_refs": []})
-    assert (status, body) == (200, {"rotated": [ref], "flagged": []})
+    assert (status, body) == (200, {"rotated": [ref], "flagged": [], "flag_levels": {}})
 
     new = secret(secrets_client, ref)
     assert new != old and secret(secrets_client, ref, "AWSPREVIOUS") == old
@@ -142,7 +142,8 @@ def test_shared_credential_issue_flag_and_not_rotated(secrets_client, tables):
     _, result = call("POST", "/agents/agent-a/rotate", {
         "exposed_refs": ["burn/shared/crm_db_url", "burn/agent-a/api_key", "burn/agent-b/api_key", "junk"]})
     # own credential is rotated, shared one flagged; unregistered/garbage refs are ignored
-    assert result == {"rotated": ["burn/agent-a/api_key"], "flagged": ["burn/shared/crm_db_url"]}
+    assert result == {"rotated": ["burn/agent-a/api_key"], "flagged": ["burn/shared/crm_db_url"],
+                      "flag_levels": {"burn/shared/crm_db_url": "seen"}}
     row = tables["credentials"].get_item(Key={"secret_ref": "burn/shared/crm_db_url"})["Item"]
     assert row["status"] == "flagged" and row["flagged_by"] == "agent-a"
     assert secret(secrets_client, "burn/shared/crm_db_url") == value

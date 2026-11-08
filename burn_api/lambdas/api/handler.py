@@ -9,7 +9,9 @@ from burn_contracts import names
 
 import auth
 import burn
+import canary
 import db
+import flag_review
 import minter_client
 import reads
 import sessions
@@ -43,6 +45,10 @@ def route(method: str, path: str, query: dict, body: dict):
         if not agent_id:
             return 400, {"error": "agent_id is required (agent-xxx)"}
         return 200, burn.burn_agent(agent_id, str(body.get("reason") or ""))
+    if method == "GET" and path == "/flags":
+        return 200, flag_review.list_flags()
+    if method == "POST" and path == "/flags/resolve":
+        return flag_review.resolve(body)
     if method == "GET" and path == "/events":
         try:
             limit = int(query.get("limit", 200))
@@ -77,6 +83,10 @@ def _preflight(headers: dict):
 
 
 def handler(event, context=None):
+    if "canary_incident" in event and "requestContext" not in event:
+        # Direct async invoke from the mock provider (IAM-only; API Gateway events always
+        # carry requestContext). The payload is re-verified, never trusted: see canary.py.
+        return canary.handle_incident(event["canary_incident"])
     http = event["requestContext"]["http"]
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     if http["method"] == "OPTIONS":
