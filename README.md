@@ -7,9 +7,10 @@ credential the agent held or saw, without touching any other agent or service.
 
 1. **Per-agent credentials.** Every agent gets its own copy of each credential it needs, so burning
    one agent never breaks another, and a leaked key traces to exactly one agent.
-2. **Secret references.** Every tool response passes through the Gateway. A credential Burn minted is
-   swapped for a `{{burn:ref:...}}` reference before the agent sees it, so the agent never holds the
-   value. What each agent saw is recorded in its exposure ledger (fingerprints only, never raw values).
+2. **Secret references.** Every tool response passes through the Gateway. By default, a credential Burn
+   minted is swapped for a `{{burn:ref:...}}` reference before the agent sees it, so its value never
+   enters the agent's context. What each agent saw is recorded in its exposure ledger (fingerprints
+   only, never raw values).
 3. **Canaries.** Each session gets its own canary, a decoy key that can be planted in files its tools
    read. Whoever presents it to the provider from outside Burn trips it, and by default Burn burns that
    one session.
