@@ -39,13 +39,14 @@ from burn_contracts import names  # noqa: E402
 SITE_DIST = REPO / "site" / "dist"  # what `npm run build` writes in site/
 
 # A self-contained Vite React build: its own scripts, styles, images and fonts, nothing from another
-# origin. Links to the dashboard are ordinary navigation, which a CSP does not restrict.
+# origin. Vite inlines files under 4 KB as data: URIs, so small images and fonts arrive that way.
+# Links to the dashboard are ordinary navigation, which a CSP does not restrict.
 SITE_CSP = "; ".join([
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
-    "font-src 'self'",
+    "font-src 'self' data:",
     "connect-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'self'",

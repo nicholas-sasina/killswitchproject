@@ -12,7 +12,7 @@ from burn_contracts import names  # noqa: E402  (path added by burn_infra)
 
 ENV = cdk.Environment(account="123456789012", region="us-east-1")
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-       "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+       "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 IMMUTABLE = "public, max-age=31536000, immutable"
 
 
