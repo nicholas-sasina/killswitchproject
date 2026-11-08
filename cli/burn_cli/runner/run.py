@@ -193,8 +193,11 @@ class Instance:
         try:
             made = harness.write_files(self.preset, home, os.getcwd()) if self.preset else []
             if self.drop:
-                for path in (home, *made):
-                    os.chown(path, self.drop.uid, self.drop.gid)
+                # HOME last: until it is the agent's, only root can enter it, so no agent sharing the uid (--user)
+                # can swap a file for a link between two chowns. And never through a link.
+                for path in reversed(made):
+                    os.chown(path, self.drop.uid, self.drop.gid, follow_symlinks=False)
+                os.chown(home, self.drop.uid, self.drop.gid)
         except BaseException:
             shutil.rmtree(home, ignore_errors=True)
             raise

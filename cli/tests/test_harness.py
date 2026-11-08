@@ -144,13 +144,17 @@ def test_preset_files_are_chowned_to_the_agent_user(stack, fake_claude, monkeypa
     from burn_cli.runner import privs
     from test_run import FakePopen
     chowned = []
-    monkeypatch.setattr(runmod.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid)))
+    monkeypatch.setattr(runmod.os, "chown", lambda path, uid, gid, follow_symlinks=True:
+                        chowned.append((path, uid, gid, follow_symlinks)))
     monkeypatch.setattr(runmod.subprocess, "Popen", FakePopen)
     out = stack.tmp / "claude.json"
     assert instance(stack, [fake_claude, str(out)], drop=privs.Drop("agent", 4242, 4343)).run() == 0
-    home = chowned[0][0]
-    assert {(os.path.relpath(p, home), u, g) for p, u, g in chowned} == {
-        (".", 4242, 4343), (".claude.json", 4242, 4343), (".claude", 4242, 4343), (".claude/settings.json", 4242, 4343)}
+    home = chowned[-1][0]
+    # Files before their directory, and HOME last: until then only root can enter it, so an agent sharing the uid
+    # (--user) cannot swap a file for a link between two chowns. Never through a link.
+    assert [(os.path.relpath(p, home), u, g, follow) for p, u, g, follow in chowned] == [
+        (".claude/settings.json", 4242, 4343, False), (".claude", 4242, 4343, False),
+        (".claude.json", 4242, 4343, False), (".", 4242, 4343, True)]
 
 
 def test_burn_run_says_it_used_the_preset(stack, fake_claude, capfd):

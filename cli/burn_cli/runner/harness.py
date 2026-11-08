@@ -74,14 +74,14 @@ def write_files(preset: Preset, home: str, cwd: str) -> list[str]:
     """Write the preset's files into a new HOME, before the agent starts; returns the paths made, parents first.
 
     Directories are 0700 and files 0600. Nothing is overwritten and no link is followed: the HOME is new, so
-    anything already at a path means something else put it there.
+    anything already at a path means something else put it there, and mkdir and O_EXCL refuse it.
     """
     made = []
     for relative, content in preset.files(cwd).items():
         parent = home
         for part in filter(None, os.path.dirname(relative).split("/")):
             parent = os.path.join(parent, part)
-            if not os.path.lexists(parent):
+            if parent not in made:
                 os.mkdir(parent, 0o700)
                 made.append(parent)
         path = os.path.join(home, relative)
