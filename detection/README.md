@@ -112,8 +112,8 @@ prints blocked/allowed with the reason. Encoding defaults to `random` when omitt
 Set `BURN_PROXY_URL` (default `http://localhost:8080`) and `BURN_SINK_URL` (default `http://sink:8081`)
 in `.env`. The host resolves the sink through the proxy, so its Docker hostname works.
 The tool uses the default AWS chain to read the selected agent's ledger, current session and
-Secrets Manager value. If `BURN_API_URL` is set it reads the ledger through that API using
-`BURN_DEMO_TOKEN`; otherwise it queries `burn-exposures`. Only credentials in that ledger are
+Secrets Manager value. If `BURN_API_URL` is set it reads the ledger through that API, signed
+in as the automation person (or with `BURN_DEMO_TOKEN` until the stack requires sign-in); otherwise it queries `burn-exposures`. Only credentials in that ledger are
 eligible. Free text is sent unchanged. Results include no payload or raw credential.
 The tool prefers the latest active session, falling back to the latest session of any status so
 a burned agent's attempt reaches the proxy and returns `blocked=true` with `session_inactive`.
