@@ -70,3 +70,105 @@ def test_exit_check_preserves_cli_failure(command_env):
     assert "Exit check unavailable." in result.stderr
     assert "Traceback" not in result.stderr
     assert result.stdout == ""
+
+
+# --- hosting: the website's dashboard link, and the dashboard's checks before any deploy ----------
+# The real Makefile runs from a copy with empty component folders and fake uv, npm, npx and aws.
+
+FAKE_TOOL = '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+tool, args = Path(sys.argv[0]).name, sys.argv[1:]
+with open(os.environ["FAKE_LOG"], "a") as log:
+    log.write(json.dumps({"tool": tool, "args": args, "cwd": Path.cwd().name,
+                          "VITE_DASHBOARD_URL": os.environ.get("VITE_DASHBOARD_URL")}) + "\\n")
+if tool == "uv" and "scripts/hosted_dashboard.py" in args:
+    if args[-1] == "url":
+        print(os.environ.get("FAKE_HOSTED_URL", ""))
+    else:
+        sys.exit(int(os.environ.get("FAKE_CHECK_EXIT", "0")))
+if tool == "aws":
+    print("https://dfake.cloudfront.net")
+'''
+
+
+@pytest.fixture
+def hosting(tmp_path):
+    bin_dir, repo = tmp_path / "bin", tmp_path / "repo"
+    bin_dir.mkdir()
+    for tool in ("uv", "npm", "npx", "aws"):
+        (bin_dir / tool).write_text(FAKE_TOOL)
+        (bin_dir / tool).chmod(0o755)
+    for folder in ("site", "burn_api", "infra"):
+        (repo / folder).mkdir(parents=True)
+    (repo / "Makefile").write_text((REPO / "Makefile").read_text())
+    env = {k: v for k, v in os.environ.items() if k not in ("VITE_DASHBOARD_URL", "MAKEFLAGS")}
+    env.update(PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}", FAKE_LOG=str(tmp_path / "log.jsonl"))
+
+    def make(*args, **extra_env):
+        result = subprocess.run(["make", "--no-print-directory", *args], cwd=repo, env={**env, **extra_env},
+                                capture_output=True, text=True)
+        log = tmp_path / "log.jsonl"
+        calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        log.unlink(missing_ok=True)
+        return result, calls
+    return make
+
+
+def npm_build(calls):
+    return next(c for c in calls if c["tool"] == "npm" and c["args"] == ["run", "build"])
+
+
+def test_site_deploy_links_the_hosted_dashboard_once_it_is_live(hosting):
+    result, calls = hosting("site-deploy", FAKE_HOSTED_URL="https://dhosted.cloudfront.net")
+    assert result.returncode == 0, result.stderr
+    assert npm_build(calls)["VITE_DASHBOARD_URL"] == "https://dhosted.cloudfront.net"
+    assert any(c["tool"] == "npx" and "BurnSite" in c["args"] for c in calls)
+
+
+def test_site_deploy_prefers_an_explicit_dashboard_url(hosting):
+    for how in ("environment", "make variable"):
+        if how == "environment":
+            result, calls = hosting("site-deploy", VITE_DASHBOARD_URL="https://mine.example",
+                                    FAKE_HOSTED_URL="https://dhosted.cloudfront.net")
+        else:
+            result, calls = hosting("site-deploy", "VITE_DASHBOARD_URL=https://mine.example",
+                                    FAKE_HOSTED_URL="https://dhosted.cloudfront.net")
+        assert result.returncode == 0, result.stderr
+        assert npm_build(calls)["VITE_DASHBOARD_URL"] == "https://mine.example", how
+
+
+def test_site_deploy_without_a_hosted_dashboard_leaves_the_link_unset(hosting):
+    result, calls = hosting("site-deploy")
+    assert result.returncode == 0, result.stderr
+    assert npm_build(calls)["VITE_DASHBOARD_URL"] is None  # not even empty: site/.env files still apply
+
+
+@pytest.mark.parametrize("target,check,stacks", [
+    ("dashboard-deploy", "build", ["BurnDashboard"]),
+    ("dashboard-hosted", "check-hosted", ["BurnPeople", "BurnApi"]),
+])
+def test_a_refused_check_deploys_nothing(hosting, target, check, stacks):
+    result, calls = hosting(target, FAKE_CHECK_EXIT="1")
+    assert result.returncode != 0
+    assert [c["args"][-1] for c in calls if c["tool"] == "uv"] == [check]
+    assert not any(c["tool"] == "npx" for c in calls)
+
+
+def test_dashboard_deploy_uploads_only_the_checked_build(hosting):
+    result, calls = hosting("dashboard-deploy")
+    assert result.returncode == 0, result.stderr
+    [deploy] = [c for c in calls if c["tool"] == "npx"]
+    assert deploy["args"][deploy["args"].index("deploy") + 1] == "BurnDashboard"
+    assert deploy["args"][-2:] == ["-c", "burn:dashboard_build=checked"]
+    assert "dashboard: https://dfake.cloudfront.net/" in result.stdout
+
+
+def test_dashboard_hosted_keeps_sign_in_on_and_deploys_only_people_and_api(hosting):
+    result, calls = hosting("dashboard-hosted")
+    assert result.returncode == 0, result.stderr
+    [deploy] = [c for c in calls if c["tool"] == "npx"]
+    args = deploy["args"]
+    assert args[args.index("deploy") + 1:args.index("deploy") + 3] == ["BurnPeople", "BurnApi"]
+    assert "--exclusively" in args  # BurnDashboard is not redeployed without its build
+    assert " ".join(args).endswith("-c burn:people_auth=on -c burn:dashboard_hosted=on")
