@@ -345,8 +345,14 @@ def test_a_message_carries_what_the_sender_read_without_an_event(aws):
 def test_fragments_below_the_threshold_are_not_recognized_and_pass(aws):
     session = put_session(aws)
     value = register_api_key(aws)
-    body = respond(session, f"note: {value[:30]} end")  # 21 of 32 random chars
-    assert delivered(body) == f"note: {value[:30]} end" and ledger_rows(aws, "agent-alpha") == {}
+    fragment = value[:30]  # mpk_live_ + 21 of the 32 random chars: 14 of the key's 25 shingles
+    assert len(fp.shingle_windows(value[9:30])) / len(fp.shingle_windows(value[9:])) < detection.scanner().threshold
+    # The scanner also reads text with separators removed, so the word after the fragment joins onto it.
+    # A word starting with the key's next character would rebuild a 15th shingle (15/25 = the threshold),
+    # so pick one that cannot continue the key.
+    after = "end" if value[30].lower() != "e" else "fin"
+    body = respond(session, f"note: {fragment} {after}")
+    assert delivered(body) == f"note: {fragment} {after}" and ledger_rows(aws, "agent-alpha") == {}
 
 
 # ---- resolving references in tool arguments -------------------------------------------------
