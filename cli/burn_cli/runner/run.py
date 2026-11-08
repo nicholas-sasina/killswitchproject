@@ -168,6 +168,9 @@ class Instance:
             return EXIT_STOPPED
         self._done.set()
         self._flush_progress()  # what the agent reported just before it exited still counts
+        if self._stopped_by_api:  # the flush found the instance burned: there is no exit to report
+            log("the instance was burned or has exited")
+            return EXIT_STOPPED
         self._exit()
         return code if code >= 0 else 128 - code
 
@@ -261,8 +264,12 @@ class Instance:
             if wait > 0:
                 self._sleep(wait)
             status = self._beat(liveness_first=False, timeout=deadline - self._clock())
+            if status in (404, 409):  # burned (or gone) after all: burn run exits as it does for any burn
+                self._stopped_by_api = True
+                self._progress.gone()
+                break
             failures = 0 if status in (200, 400) else failures + 1
-            if status in (404, 409) or failures == 3:
+            if failures == 3:
                 break
         if self._progress.pending():
             log(f"{self._progress.pending()} progress events could not be sent before the exit")

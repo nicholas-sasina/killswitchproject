@@ -714,3 +714,17 @@ def test_the_exit_flush_gives_up_at_one_overall_deadline(capsys):
     assert all(timeout <= 10.0 - (at - 1000.0) + 1e-9 for at, timeout in api.calls)  # no call outlives it
     assert "50 progress events could not be sent before the exit" in capsys.readouterr().err
 
+
+def test_a_409_during_the_exit_flush_means_burned():
+    inst = supervisor(RecordingApi(409))
+    inst._progress.add(ev("a", "done"))
+    inst._flush_progress()
+    assert inst._stopped_by_api
+
+
+def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack):
+    stack.heartbeat_status = 409
+    code = REPORT + """
+    report("item-01", "done")"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == EXIT_STOPPED
+    assert not stack.calls("POST", "/instances/" + next(iter(stack.instances)) + "/exit")
