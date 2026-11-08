@@ -1,9 +1,16 @@
 """Return the demo to a clean slate.
 
-Clears ONLY the five demo tables, asks the minter to delete the credentials
-of every agent in the loaded scenario plus the shared ones, and deletes the
-Cognito badges (app clients) of the sessions it removed. Nothing else in the
-account is touched (no other tables, no system secrets, no other Cognito clients).
+Clears ONLY the demo tables (and the join tokens, which belong to a run), asks
+the minter to delete the credentials and canaries of every agent in the loaded
+scenario plus the shared credentials, and deletes the Cognito badges (app
+clients) of the sessions it removed. Roles are configuration and are kept.
+
+Swarm instances are not in the scenario, so they are found in burn-sessions
+BEFORE it is cleared: each one's credentials (IAM user and keys), canaries and
+badge secret are deleted, whatever its status. Nothing else in the account is
+touched (no other tables, no system secrets, no other Cognito clients). It is
+safe to run again after a partial failure: nothing is cleared until every
+instance has been cleaned.
 
     python scripts/reset.py                 full reset
     python scripts/reset.py --orphans-only  only delete badges whose session row is gone
@@ -15,7 +22,7 @@ import boto3
 from common import REGION, invoke_minter, names
 
 DEMO_TABLES = [names.EVENTS_TABLE, names.EXPOSURES_TABLE, names.SESSIONS_TABLE,
-               names.MESSAGES_TABLE, names.SCENARIO_TABLE]
+               names.MESSAGES_TABLE, names.SCENARIO_TABLE, names.ENROLL_TOKENS_TABLE]
 
 
 # Badge clients are named burn-<agent_id>-<session_id> (gateway/badges.py), e.g.
@@ -62,6 +69,50 @@ def loaded_agent_ids(dynamodb) -> list[str]:
     return item["data"]["agent_ids"] if item else []
 
 
+def is_cleanable_agent(agent_id: str) -> bool:
+    """Burn agent ids only; load-test agents (agent-eval-) belong to the eval harness."""
+    return names.is_agent_id(agent_id) and not agent_id.startswith("agent-eval-")
+
+
+def instance_agent_ids(dynamodb) -> list[str]:
+    """Agent ids of every role instance in burn-sessions, any status (burned, exited, active).
+
+    Read before the sessions table is cleared: afterwards the list of instances is gone.
+    """
+    table, ids, kwargs = dynamodb.Table(names.SESSIONS_TABLE), set(), {
+        "FilterExpression": "attribute_exists(#r)", "ProjectionExpression": "agent_id",
+        "ExpressionAttributeNames": {"#r": "role"}}
+    while True:
+        page = table.scan(**kwargs)
+        ids.update(i["agent_id"] for i in page["Items"] if is_cleanable_agent(i["agent_id"]))
+        if "LastEvaluatedKey" not in page:
+            return sorted(ids)
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def delete_badge_secret(secrets, agent_id: str) -> None:
+    try:
+        secrets.delete_secret(SecretId=names.agent_secret_ref(agent_id, "badge"),
+                              ForceDeleteWithoutRecovery=True)
+    except secrets.exceptions.ResourceNotFoundException:
+        pass  # already gone: a rerun after a partial failure
+
+
+def clean_instances(agent_ids: list[str], minter, secrets) -> list[str]:
+    """Delete what each instance left behind. Returns the agent ids that could not be cleaned."""
+    failed = []
+    for agent_id in agent_ids:
+        try:
+            minter("DELETE", f"/agents/{agent_id}/credentials")
+            minter("DELETE", f"/agents/{agent_id}/canaries")
+            delete_badge_secret(secrets, agent_id)
+            print(f"instance {agent_id}: credentials, canaries and badge secret deleted")
+        except Exception as exc:  # keep going; the rerun finishes the rest
+            print(f"instance {agent_id}: cleanup failed ({type(exc).__name__})")
+            failed.append(agent_id)
+    return failed
+
+
 def clear_table(dynamodb, name: str) -> int:
     table = dynamodb.Table(name)
     keys = [k["AttributeName"] for k in table.key_schema]
@@ -78,17 +129,24 @@ def clear_table(dynamodb, name: str) -> int:
         kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
-def reset(extra_agent_ids: list[str] = ()) -> None:
+def reset(extra_agent_ids: list[str] = (), minter=invoke_minter, secrets=None, remove_badges_fn=None) -> None:
     dynamodb = boto3.resource("dynamodb", region_name=REGION)
-    # Delete credentials first: the agent list comes from the scenario table we clear next.
+    secrets = secrets or boto3.client("secretsmanager", region_name=REGION)
+    # Everything below that reads the tables comes first: the lists come from the tables cleared next.
+    failed = clean_instances(instance_agent_ids(dynamodb), minter, secrets)
+    if failed:
+        raise RuntimeError(f"could not clean {len(failed)} instance(s), nothing was cleared; "
+                           f"run reset again: {', '.join(failed)}")
     for agent_id in sorted(set(loaded_agent_ids(dynamodb)) | set(extra_agent_ids)):
-        invoke_minter("DELETE", f"/agents/{agent_id}/credentials")
-        print(f"credentials of {agent_id} deleted")
-    invoke_minter("DELETE", "/shared/credentials")
+        minter("DELETE", f"/agents/{agent_id}/credentials")
+        # Canaries are kept after a burn or exit so they stay attributable; a reset is when they go.
+        minter("DELETE", f"/agents/{agent_id}/canaries")
+        print(f"credentials and canaries of {agent_id} deleted")
+    minter("DELETE", "/shared/credentials")
     for name in DEMO_TABLES:
         print(f"{name}: {clear_table(dynamodb, name)} items cleared")
     # Sessions are gone, so every Burn badge client is now orphaned.
-    _remove_badges_live(keep_client_ids=set())
+    (remove_badges_fn or _remove_badges_live)(keep_client_ids=set())
 
 
 if __name__ == "__main__":
