@@ -22,6 +22,7 @@ One stack per component, so each owner deploys their part without touching the r
 | `burn_infra/egress.py` | BurnEgress: proxy IAM identity |
 | `burn_infra/burn_api.py` | BurnApi: Burn API |
 | `burn_infra/site.py` | BurnSite: the public website (S3 + CloudFront) |
+| `burn_infra/dashboard.py` | BurnDashboard: the hosted dashboard (S3 + CloudFront) |
 
 ## How to test it
 ```bash
@@ -48,6 +49,8 @@ reusable part: a name and a built folder in, a bucket and a distribution out.
 make site-deploy   # npm ci + build in site/, deploy BurnSite, print the address
 VITE_DASHBOARD_URL=https://... make site-deploy   # the same, with the site's dashboard link set
 ```
+Without `VITE_DASHBOARD_URL`, the dashboard link points at the hosted dashboard once it serves a page
+(see below), and stays unset before that.
 
 - Only the distribution can read the bucket (origin access control). HTTP redirects to HTTPS.
 - Every response carries HSTS, nosniff, `X-Frame-Options: DENY`, a strict referrer policy and a CSP that
@@ -58,6 +61,42 @@ VITE_DASHBOARD_URL=https://... make site-deploy   # the same, with the site's da
 - Without a build (`site/dist/index.html` missing), synth and deploy still work: the stack creates the
   bucket and distribution, uploads nothing and leaves the files already there.
 - The first deploy takes several minutes while CloudFront sets up the distribution.
+
+## The hosted dashboard
+`burn_infra/dashboard.py` serves the dashboard at the root of its own CloudFront distribution (a second
+`StaticSite`), so the website's Sign in leads to a dashboard nobody has to run locally. The dashboard
+signs in and out at its origin's root, which is why it is not a path under the website's distribution.
+
+It goes live only once people sign-in is on: before that, a dashboard build can carry the admin demo
+token, which must never be public.
+
+- BurnDashboard never uploads `dashboard/dist` by itself. Only `make dashboard-deploy` uploads, by
+  deploying with `-c burn:dashboard_build=checked` after its checks pass:
+  - people sign-in is on;
+  - the dashboard is rebuilt with the deployed API and sign-in values, local development off and an
+    empty demo token;
+  - no file in the build holds a demo token (from `.env`, `dashboard/.env*` or the deployed secret),
+    or sets `x-burn-demo-token` to a value.
+
+  Every other deploy (`make deploy`, `cdk deploy --all`) creates the bucket and distribution and leaves
+  the uploaded files as they are.
+- `-c burn:dashboard_hosted=on` (default off) adds the hosted dashboard's root to the people pool's
+  callback and sign-out URLs, and its origin to the API's CORS. BurnPeople and BurnApi read the address
+  from SSM (`/burn/dashboard/url`) when they deploy, and depend on BurnDashboard. With the flag off,
+  neither stack changes.
+- The CSP is the website's, plus the API and Cognito sign-in domains in `connect-src`.
+
+Deploy order:
+1. Switch people sign-in on (deploy BurnPeople and BurnApi with `-c burn:people_auth=on`).
+2. `make dashboard-deploy`: refuses unless sign-in is on. It builds and checks the dashboard, uploads it
+   and prints its address.
+3. `make dashboard-hosted`: refuses unless the hosted dashboard serves a page. It deploys BurnPeople and
+   BurnApi with `-c burn:people_auth=on -c burn:dashboard_hosted=on`.
+4. `make site-deploy`: the website's dashboard link now points at the hosted dashboard.
+
+Later deploys of BurnPeople and BurnApi need both flags too. Without them, sign-in goes back to the
+local addresses only. Pass them with `-c` each time, or keep them in the gitignored
+`infra/cdk.context.json`.
 
 ## FAQ
 - **Why so many stacks?** Each component deploys on its own, so changing one part never
@@ -73,3 +112,6 @@ VITE_DASHBOARD_URL=https://... make site-deploy   # the same, with the site's da
 - **Why is the website's bucket private when the site is public?** CloudFront is the only reader, so
   every visitor gets HTTPS, the security headers and the cache. Nobody can list or read the bucket
   directly.
+- **Can the hosted dashboard leak the admin token?** Not through the deploy path. The dashboard is
+  hosted only once people sign-in is on, and its build gets an empty token. The build is scanned for
+  every known token value before upload, and BurnDashboard uploads nothing unless that check ran.

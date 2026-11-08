@@ -1,4 +1,5 @@
 import boto3
+from burn_contracts import names
 from conftest import call
 
 
@@ -147,6 +148,35 @@ def test_preflight_needs_no_token_but_other_methods_do(env):
         assert "authorization" in out["headers"]["access-control-allow-headers"].split(",")  # bearer tokens
     assert call(env, "GET", "/events", token="")[0] == 401
     assert call(env, "POST", "/burn", {"agent_id": "agent-a"}, token="")[0] == 401
+
+
+def _preflight_origin(origin: str):
+    import handler
+    event = {"requestContext": {"http": {"method": "OPTIONS", "path": "/events"}},
+             "headers": {"origin": origin, "access-control-request-method": "GET"}}
+    return handler.handler(event)["headers"].get("access-control-allow-origin")
+
+
+def test_preflight_allows_only_the_local_dashboard_until_a_hosted_one_is_set(env, monkeypatch):
+    monkeypatch.delenv(names.DASHBOARD_ORIGIN_ENV, raising=False)
+    assert _preflight_origin("http://localhost:5173") == "http://localhost:5173"
+    for other in ("https://d111111abcdef8.cloudfront.net", "http://localhost:5174", "null", ""):
+        assert _preflight_origin(other) is None
+
+
+def test_preflight_allows_the_hosted_dashboard_once_set(env, monkeypatch):
+    hosted = "https://d111111abcdef8.cloudfront.net"
+    monkeypatch.setenv(names.DASHBOARD_ORIGIN_ENV, hosted)
+    assert _preflight_origin(hosted) == hosted
+    assert _preflight_origin("http://localhost:5173") == "http://localhost:5173"
+    for other in ("https://d222222abcdef8.cloudfront.net", hosted + "/", "http://d111111abcdef8.cloudfront.net"):
+        assert _preflight_origin(other) is None
+
+
+def test_an_empty_hosted_origin_allows_nothing_new(env, monkeypatch):
+    monkeypatch.setenv(names.DASHBOARD_ORIGIN_ENV, "")
+    assert _preflight_origin("") is None
+    assert _preflight_origin("http://localhost:5173") == "http://localhost:5173"
 
 
 def test_burn_never_flags_credentials_the_agent_only_got_as_references(env):
