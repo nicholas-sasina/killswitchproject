@@ -41,6 +41,23 @@ def put(secret_ref: str, value: str) -> None:
             time.sleep(RECREATE_WAIT_SECONDS)  # already being deleted for good: wait it out
 
 
+def create_only(secret_ref: str, value: str) -> str:
+    """Create the secret unless it already exists, and return the value it holds.
+
+    Never overwrites: if two writers race, the first value wins and both get it back.
+    """
+    sm = aws.secrets()
+    try:
+        sm.create_secret(Name=secret_ref, SecretString=value)
+        return value
+    except sm.exceptions.ResourceExistsException:
+        existing = get(secret_ref)
+        if existing is not None:
+            return existing
+    put(secret_ref, value)  # the name sits in a recovery window: restore it with the new value
+    return value
+
+
 def get(secret_ref: str, stage: str = "AWSCURRENT") -> str | None:
     try:
         return aws.secrets().get_secret_value(SecretId=secret_ref, VersionStage=stage)["SecretString"]

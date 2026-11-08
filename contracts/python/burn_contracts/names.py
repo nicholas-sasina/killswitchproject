@@ -3,6 +3,7 @@
 Stacks and services find each other by these names instead of passing
 CloudFormation exports around, so each stack can be deployed on its own.
 """
+import hashlib
 import re
 
 REGION = "us-east-1"
@@ -96,3 +97,27 @@ def owner_of(secret_ref: str) -> str:
     if len(parts) != 3 or parts[0] != "burn":
         raise ValueError(f"not a burn secret_ref: {secret_ref!r}")
     return parts[1]
+
+
+# Canaries: one decoy credential per agent session. It looks like a mock-provider
+# api_key but never authenticates; presenting it is the signal. The secret name is
+# derived from the session id so every component finds the same canary without a
+# lookup, and the name stays inside the secret_ref grammar whatever the id looks like.
+CANARY_PREFIX = "canary_"
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+# Lambda the mock provider hands a canary incident to (direct async invoke).
+BURN_API_FUNCTION = "burn-api"
+
+
+def canary_secret_ref(agent_id: str, session_id: str) -> str:
+    """burn/<agent_id>/canary_<24 hex of sha256(session_id)>, e.g. for the Gateway's {{canary}}."""
+    if not SESSION_ID_RE.match(session_id or ""):
+        raise ValueError("invalid session id")
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
+    return agent_secret_ref(agent_id, CANARY_PREFIX + digest)
+
+
+def is_canary_ref(secret_ref: str) -> bool:
+    parts = (secret_ref or "").split("/")
+    return len(parts) == 3 and parts[0] == "burn" and parts[2].startswith(CANARY_PREFIX)

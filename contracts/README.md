@@ -57,6 +57,7 @@ cd contracts && uv run --with pytest --with jsonschema --with pyyaml pytest -q
 | `burn/<agent_id>/aws_key` | JSON `{"access_key_id","secret_access_key","iam_user"}` | minter |
 | `burn/<agent_id>/badge` | JSON `{"client_id","client_secret","token_url","scope"}` | burn_api (sessions) |
 | `burn/shared/<name>` | raw value rendered from the scenario template | minter |
+| `burn/<agent_id>/canary_<h>` | raw canary value; `<h>` = first 24 hex of sha256(session_id) (`names.canary_secret_ref`) | minter |
 | `burn-system/fingerprint-key` | 64 hex chars, HMAC key for fingerprints | infra (BurnData) |
 | `burn-system/demo-token` | token for the `x-burn-demo-token` header | infra (BurnData) |
 
@@ -70,6 +71,7 @@ replays the pre-rotation key without anyone having stored a copy.
 | join token | `bjt_` + 16 hex token id + `.` + 43 chars `[A-Za-z0-9_-]` (`secrets.token_urlsafe(32)`) | shown once at creation; only sha256 of the secret part is stored. `names.parse_join_token` |
 | `aws_key` | a real IAM access key on IAM user `burn-agent-<agent_id>` (path `/burn-agents/`) | narrow policy: invoke the allowlisted Bedrock model + `s3:ListAllMyBuckets`. Rotation = new key, old key Inactive |
 | `other` | rendered scenario template, e.g. a connection string | shared credentials |
+| canary | `mpk_live_` + 32 chars `[A-Za-z0-9]`, one per session; looks like an `api_key` | **never authenticates**. Registry rows have `secret_type=canary`; fingerprint rows have `secret_type=other` plus `canary=true` and `session_id` (so detectors that predate canaries still treat it as a normal registered credential, and no provider build can ever accept it) |
 
 ### Fingerprints
 `burn_contracts.fingerprint` is the only implementation. Everyone imports it.
@@ -89,6 +91,13 @@ Scenario `files[].content` and `customers[].notes` may contain:
 - `{{cred:<agent_id>:api_key}}`
 - `{{cred:<agent_id>:aws_key.access_key_id}}` and `{{cred:<agent_id>:aws_key.secret_access_key}}`
 - `{{cred:shared:<name>}}`
+- `{{canary}}`: the **calling session's** canary. It takes no argument: the Gateway resolves it from the
+  verified badge session (`names.canary_secret_ref(session.agent_id, session.session_id)`), so one session
+  can never read another session's canary. Reading it is recorded in the ledger like any credential; only
+  presenting it to the provider is an incident.
+  **Placement**: put `{{canary}}` only where an honest agent has no reason to use it, e.g. a revoked key in
+  an archived migration note, a commented-out line in a backup file, another team's old ticket. Never in
+  the config or instructions the agent needs for its task (it already has its own `api_key` for that).
 
 The tool Lambda resolves them **at read time** from Secrets Manager (`AWSCURRENT`). So the raw
 values exist only in Secrets Manager, and after a rotation the file shows the new value.
@@ -129,6 +138,38 @@ minted for the instance), `last_seen`, `exited_at`.
 - The session row's `tools` comes from the role, so the Gateway enforces it as before.
 - Burn scopes (`POST /burns`): `instance`, `role`, `lineage` (an instance and every descendant),
   `token` (every instance that joined with it; the token is revoked too).
+
+### Canaries and flag levels
+- **Canary incident**: the mock provider recognises a canary by its exact fingerprint, always answers 401
+  (same body as an unknown key), writes one `canary_used` event (`source=provider`) and hands the incident to
+  the Burn API. Repeated presentations only bump a counter on the canary's registry row.
+- **Where it was used from** decides burn vs alert:
+  - *outside Burn* (no valid session proof): the only case that may burn, and only if the role has
+    `auto_burn` on (default). `auto_burn: false` makes the role report-only: alert and flag, never burn.
+  - *through the instance's own session*: an alert, never a burn. With the proxy enforcing, the exit check
+    blocks the canary before it leaves (a `blocked` event naming the canary). If the proxy ever forwards it
+    (report-only egress), it adds `x-burn-session-proof` and the provider records `canary_used` as an alert.
+  - *through another Burn session*: an alert plus a review flag (the canary reached a second instance).
+- **Session proof header** (set by the egress proxy on requests to the provider; the proxy drops any copy
+  the agent sent): `x-burn-session-proof: v1.<session_id>.<unix_ts>.<hmac>` where
+  `hmac = hmac_sha256_hex(fingerprint_key, "burn-session-proof:v1:<session_id>:<unix_ts>")`. The provider
+  accepts it for 120 s. Agents never hold the fingerprint key, so they cannot forge one.
+- **Trusted-signal policy** (what may burn, on top of the above): the canary maps to exactly one session;
+  that session's agent has the canary in its exposure ledger and no other agent does; the session row
+  still exists, belongs to the same agent, and is `active`. Containment is the conditional flip of that one
+  session `active -> revoked`, so concurrent or repeated incidents contain once. Anything else is recorded
+  and flagged for review, never contained, and never widened to the agent or role.
+- **Roles**: `canaries` (default true) gives each instance a canary; `auto_burn` (default true) as above.
+- **Flag levels** for credentials an agent saw but does not own (`burn-credentials.flag_level`):
+  `seen` (entered an agent's context) < `attempted` (an exit or tool-argument check blocked it leaving)
+  < `reported` (trusted evidence it was presented at a monitored service). Levels only go up; each level keeps
+  the first evidence that reached it (`flag_evidence_<level>`, safe metadata only). `status` stays `flagged`
+  for older readers. Flagged credentials are never rotated automatically.
+- **One flag per credential**, on its `burn-credentials` row: highest level, `instance_count` (distinct
+  agent ids whose evidence flagged it; at most 500 ids kept), first evidence per level. Owners resolve it
+  with a reason (`POST /flags/resolve`): `rotate` mints a new version (agents get it through placeholders)
+  and clears the flag; `dismiss` keeps the value and closes the flag. A dismissed flag reopens only on
+  evidence at a higher level than the level it was dismissed at.
 
 ### Events
 - Build every event with `burn_contracts.events.make_event(...)`. It fills `event_id` and `ts`

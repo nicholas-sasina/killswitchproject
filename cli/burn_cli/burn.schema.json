@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://burn.example/contracts/burn.schema.json",
+  "title": "burn.yaml",
+  "description": "Roles defined in code. `burn apply` sends each role to PUT /roles/{name} with managed_by code; the dashboard shows these roles read-only. `burn pull` writes dashboard-made roles out in this format.",
+  "type": "object",
+  "required": ["version", "roles"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/role" }
+    }
+  },
+  "$defs": {
+    "roleName": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" },
+    "role": {
+      "type": "object",
+      "required": ["name", "tools"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/roleName" },
+        "owner": { "type": "string", "description": "Team or person responsible for this role's instances." },
+        "tools": {
+          "type": "array",
+          "description": "MCP tools the role's instances may call (names from contracts/mcp-tools.json). Enforced by the Gateway.",
+          "items": { "type": "string" }
+        },
+        "credentials": {
+          "type": "array",
+          "description": "Own credentials minted for each instance.",
+          "items": { "type": "string", "enum": ["api_key", "aws_key"] }
+        },
+        "may_message": {
+          "type": "array",
+          "description": "Roles this role's instances may send_message to.",
+          "items": { "$ref": "#/$defs/roleName" }
+        },
+        "may_spawn": {
+          "type": "array",
+          "description": "Roles this role's instances may start as children. A child never gets more tools, credentials or egress than its parent.",
+          "items": { "$ref": "#/$defs/roleName" }
+        },
+        "egress": {
+          "type": "array",
+          "description": "Outbound hosts this role may reach through the proxy. Omit for the default allowlist.",
+          "items": { "type": "string", "pattern": "^(\\*\\.)?[a-z0-9.-]{1,253}$" }
+        },
+        "canaries": {
+          "type": "boolean",
+          "default": true,
+          "description": "Give each instance its own canary (a decoy key that never authenticates)."
+        },
+        "auto_burn": {
+          "type": "boolean",
+          "default": true,
+          "description": "Burn an instance automatically when its canary is used from outside Burn. false = report-only: alert and flag, never burn."
+        }
+      }
+    }
+  }
+}
