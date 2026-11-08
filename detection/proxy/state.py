@@ -28,16 +28,28 @@ class AwsState:
 
     def lookup(self, fingerprints: set[str]) -> dict[str, dict]:
         if monotonic() - self._refreshed >= 2:
-            rows, page = {}, {}
-            while True:
-                response = self.fingerprints.scan(**page, ConsistentRead=True)
-                rows.update((row["fingerprint"], row) for row in response.get("Items", []))
-                if not response.get("LastEvaluatedKey"):
-                    break
-                page = {"ExclusiveStartKey": response["LastEvaluatedKey"]}
-            self._rows = rows
-            self._refreshed = monotonic()
+            self._refresh()
         return {fp: self._rows[fp] for fp in fingerprints if fp in self._rows}
+
+    def refresh(self) -> None:
+        """Reload fingerprints early, unless they were reloaded in the last 250 ms.
+
+        A key minted after the last reload looks unknown until the next one. The
+        cooldown keeps a burst of unknown keys from scanning the table per request.
+        """
+        if monotonic() - self._refreshed >= 0.25:
+            self._refresh()
+
+    def _refresh(self) -> None:
+        rows, page = {}, {}
+        while True:
+            response = self.fingerprints.scan(**page, ConsistentRead=True)
+            rows.update((row["fingerprint"], row) for row in response.get("Items", []))
+            if not response.get("LastEvaluatedKey"):
+                break
+            page = {"ExclusiveStartKey": response["LastEvaluatedKey"]}
+        self._rows = rows
+        self._refreshed = monotonic()
 
     def session(self, agent_id: str, session_id: str) -> dict | None:
         now = monotonic()

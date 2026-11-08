@@ -62,6 +62,26 @@ def test_fingerprint_refresh_paginates_and_does_not_reuse_stale_cache_on_failure
         state.lookup({fp})
 
 
+def test_early_refresh_reloads_at_most_once_per_250_ms(monkeypatch):
+    now = [10.0]
+    monkeypatch.setattr("proxy.state.monotonic", lambda: now[0])
+    state = AwsState.__new__(AwsState)
+    state._refreshed = float("-inf")
+    state._rows = {}
+    state.fingerprints = Mock()
+    state.fingerprints.scan.return_value = {"Items": []}
+    state.lookup(set())
+    assert state.fingerprints.scan.call_count == 1
+    now[0] = 10.2
+    state.refresh()
+    assert state.fingerprints.scan.call_count == 1
+    now[0] = 10.25
+    state.refresh()
+    assert state.fingerprints.scan.call_count == 2
+    state.lookup(set())  # an early reload also restarts the regular two-second period
+    assert state.fingerprints.scan.call_count == 2
+
+
 def test_an_egress_event_is_stored_like_every_other_event():
     state = AwsState.__new__(AwsState)
     state.events = Mock()
