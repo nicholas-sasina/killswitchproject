@@ -228,6 +228,8 @@ export interface OwnerRotation {
   actor?: string | null;
   /** The owner's reason, from the event's detail when it carries one. */
   reason?: string;
+  /** The flag's level when its owner rotated it, from the same detail. */
+  level?: FlagLevel;
 }
 
 /**
@@ -245,7 +247,14 @@ export function ownerRotations(events: LedgerEvent[]): OwnerRotation[] {
     if (!ref || seen.has(ref)) continue;
     seen.add(ref);
     const reason = event.detail?.match(/\binstance\(s\)\): (.+)$/s)?.[1];
-    list.push({ ref, at: event.ts, actor: event.actor, reason });
+    const level = event.detail?.match(/\(was (seen|attempted|reported),/)?.[1];
+    list.push({
+      ref,
+      at: event.ts,
+      actor: event.actor,
+      reason,
+      ...(level ? { level: level as FlagLevel } : {}),
+    });
   }
   return list;
 }

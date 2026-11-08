@@ -223,8 +223,10 @@ describe("owner rotations", () => {
         reason: undefined,
       },
     ]);
-    expect(ownerRotations(events.slice(2))[0].reason).toBe(
-      "rotated after review",
-    );
+    expect(ownerRotations(events.slice(2))[0]).toMatchObject({
+      reason: "rotated after review",
+      level: "seen",
+      actor: "priya@example.com",
+    });
   });
 });
