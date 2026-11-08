@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import (
-    SESSION_TOKEN_PREFIX, agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token,
+    SESSION_TOKEN_PREFIX, SESSION_TOKEN_RE, agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token,
     scenario_role_name,
 )
 
@@ -186,10 +186,13 @@ class Swarm:
         fields = {"session_id": session_id, "role": role_name, "parent_session": parent_session}
         self.state.emit(agent_id, "session", "issued", **fields, detail="Mock session issued.")
         self.state.emit(agent_id, "instance", "started", **fields, detail="Mock instance started.")
+        own_secrets = self._fake_secrets(agent_id, credentials)
+        # Only the hash is kept, as the real API does; the token itself is in this reply and nowhere else.
+        self.state.sessions[session_id]["session_token_sha256"] = hashlib.sha256(
+            own_secrets["session_token"].encode()).hexdigest()
         return {"session_id": session_id, "agent_id": agent_id, "badge_ref": agent_secret_ref(agent_id, "badge"),
                 "credentials": issued, "role": role_name, "parent_session": parent_session,
-                "token_id": token_id, "tools": tools, "egress": egress,
-                "secrets": self._fake_secrets(agent_id, credentials)}
+                "token_id": token_id, "tools": tools, "egress": egress, "secrets": own_secrets}
 
     def _fake_secrets(self, agent_id, credentials):
         """Obviously fake values, so nothing here can be mistaken for a real credential."""
@@ -204,6 +207,14 @@ class Swarm:
         if "aws_key" in credentials:
             secrets_["aws_key"] = {"access_key_id": "MOCKACCESSKEYNOTREAL", "secret_access_key": "mock-secret-not-real"}
         return secrets_
+
+    def owns(self, session_id, authorization):
+        """True if `Authorization: Bearer bst_...` is the session token issued to this session."""
+        scheme, _, token = (authorization or "").partition(" ")
+        stored = (self.state.sessions.get(session_id) or {}).get("session_token_sha256")
+        if scheme.lower() != "bearer" or not SESSION_TOKEN_RE.fullmatch(token) or not stored:
+            return False
+        return hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(), stored)
 
     def instance(self, session):
         return {"session_id": session["session_id"], "agent_id": session["agent_id"],

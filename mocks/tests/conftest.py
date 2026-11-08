@@ -27,7 +27,7 @@ def scenario(tmp_path):
 @pytest.fixture
 def client(scenario):
     app = create_app(scenario[0], activity_interval=0)
-    with TestClient(app) as client:
+    with TestClient(app, headers={"x-burn-demo-token": "mock"}) as client:  # the mock takes any admin value
         yield client
 
 

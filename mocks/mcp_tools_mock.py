@@ -33,7 +33,8 @@ def lookup_instance(agent_id: str):
     """The newest instance with this agent id from the mock Burn API, or None. Checked on every call, so an
     instance that was burned or exited is refused straight away."""
     try:
-        with urllib.request.urlopen(API_URL + "/instances", timeout=3) as response:
+        request = urllib.request.Request(API_URL + "/instances", headers={"x-burn-demo-token": "mock"})  # the mock takes any value
+        with urllib.request.urlopen(request, timeout=3) as response:
             instances = json.loads(response.read())["instances"]
     except (OSError, ValueError, KeyError):
         return None
