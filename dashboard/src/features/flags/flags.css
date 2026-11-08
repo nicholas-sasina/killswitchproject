@@ -1,0 +1,91 @@
+/* FlagActions and its dialog. Tokens from styles/tokens.css only. */
+
+.flag-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flag-dialog .flag-dialog-effects {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.flag-dialog .flag-dialog-effects ::marker {
+  color: var(--muted-2);
+}
+
+.flag-reason {
+  margin-top: 20px;
+}
+
+.flag-reason label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.flag-reason-hint {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted-2);
+}
+
+.flag-reason textarea {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--font-sans);
+  resize: vertical;
+}
+
+.flag-reason textarea:hover {
+  border-color: var(--muted-2);
+}
+
+.flag-reason textarea:focus-visible {
+  border-color: var(--ink);
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.flag-reason textarea[aria-invalid="true"] {
+  border-color: var(--ink);
+}
+
+.flag-reason-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.flag-reason-problem {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.flag-reason-count {
+  margin-left: auto;
+  color: var(--muted-2);
+}
+
+.flag-dialog .notice-error {
+  margin-top: 16px;
+}
+
+.flag-dialog [aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: progress;
+}
