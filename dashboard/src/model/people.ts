@@ -1,7 +1,8 @@
 /**
  * People in the console. The API records people by email (`created_by`,
  * `actor`, a flag's `by`) and has no names, so a person is shown as their
- * email. Burn's own actions carry the actor "system".
+ * email. Burn's own actions carry the actor "system", and an agent acting
+ * with its own badge carries "instance:<session_id>", which is not a person.
  */
 
 /** How to write who did something, or "" when nobody is recorded. */
@@ -10,6 +11,7 @@ export function personLabel(who: string | null | undefined): string {
   if (!value) return "";
   if (value === "system") return "Burn";
   if (value === "admin") return "the local admin";
+  if (value.startsWith("instance:")) return "";
   return value;
 }
 

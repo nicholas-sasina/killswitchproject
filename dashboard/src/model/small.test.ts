@@ -15,6 +15,8 @@ describe("keys, people and the region", () => {
     expect(personLabel("priya@example.test")).toBe("priya@example.test");
     expect(personLabel("system")).toBe("Burn");
     expect(personLabel(null)).toBe("");
+    // An agent acting with its own badge is not a person.
+    expect(personLabel("instance:session_0123")).toBe("");
     expect(initials("priya.nair@example.test")).toBe("PN");
     expect(initials("dana@example.test")).toBe("DA");
     expect(initials(undefined)).toBe("?");

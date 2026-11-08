@@ -75,6 +75,16 @@ describe("why an agent was burned", () => {
     expect(triggerShort(trigger)).toBe("Burned: auto-burn");
   });
 
+  it("never names an agent's own badge as the person who burned it", () => {
+    const trigger = triggerOf([
+      event({
+        actor: "instance:session_0123",
+        detail: "1 session(s) revoked (child misbehaved)",
+      }),
+    ]);
+    expect(trigger).toEqual({ kind: "reason", reason: "child misbehaved" });
+  });
+
   it("says when nothing was recorded, and ignores another agent's burn", () => {
     const trigger = triggerOf([
       event({ detail: "Mock badge revocation.", session_id: null }),
