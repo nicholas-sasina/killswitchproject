@@ -27,6 +27,9 @@ log = logging.getLogger("swarm_worker")
 Call = Callable[[str, dict], Awaitable[tuple[bool, str]]]  # (tool, arguments) -> (is_error, text)
 Report = Callable[[str, str], Awaitable[None]]  # (item, "started" | "done"); raises if burn run did not take it
 MAX_CONSECUTIVE_FAILURES = 5
+# burn run holds a "started" until Burn records it, up to 15 s, then answers 503. Wait longer than that, so the worker
+# hears the answer (go ahead, 409 burned, 503 not confirmed) instead of giving up first.
+PROGRESS_TIMEOUT = 20.0
 EXIT_BURNED = 3  # a task worker stopped because it was burned (as `burn run` exits when it stops a burned agent)
 
 
@@ -170,7 +173,7 @@ async def _report(report: Report, item: str, state: str) -> int | None:
 async def progress_reporter(url: str, local_token: str = "", transport=None):
     """A `Report` that posts to burn run's local progress endpoint. Never through a proxy: the endpoint is local."""
     import httpx
-    async with httpx.AsyncClient(timeout=10, trust_env=False, transport=transport) as client:
+    async with httpx.AsyncClient(timeout=PROGRESS_TIMEOUT, trust_env=False, transport=transport) as client:
         async def report(item: str, state: str) -> None:
             reply = await client.post(url, json={"item": item, "state": state},
                                       headers={"Authorization": f"Bearer {local_token}"})
