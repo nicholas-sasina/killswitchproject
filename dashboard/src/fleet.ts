@@ -59,12 +59,27 @@ function fromAgentState(agent: AgentState): FleetAgent {
 }
 
 /**
+ * How far a session has gone. A session only moves forward (it never becomes
+ * active again once ended), so when two reports disagree the furthest one is
+ * the true one.
+ */
+const STAGE: Record<FleetStatus, number> = {
+  idle: 0,
+  active: 1,
+  exited: 2,
+  revoked: 3,
+};
+
+/**
  * Every agent the API knows about, de-duplicated by session.
  *
- * `/instances` wins where both describe the same session, because it carries
- * the role, owner and timestamps. A scenario agent with no matching instance
- * is still included, so the demo keeps working against an API that has no
- * instance records.
+ * `/instances` supplies the entry where both describe the same session,
+ * because it carries the role, owner and timestamps. Its status can lag,
+ * though: the event feed is polled every second and `/instances` every few,
+ * and the latter takes seconds to answer for a large fleet. So the status is
+ * whichever report is further along, and a burn shows as soon as the feed
+ * has it. A scenario agent with no matching instance is still included, so
+ * the demo works against an API that has no instance records.
  */
 export function mergeFleet(
   agents: AgentState[],
@@ -75,9 +90,30 @@ export function mergeFleet(
     byKey.set(instance.session_id, fromInstance(instance));
   for (const agent of agents) {
     const entry = fromAgentState(agent);
-    if (!byKey.has(entry.key)) byKey.set(entry.key, entry);
+    const known = byKey.get(entry.key);
+    if (!known) byKey.set(entry.key, entry);
+    else if (STAGE[entry.status] > STAGE[known.status])
+      byKey.set(entry.key, { ...known, status: entry.status });
   }
   return [...byKey.values()];
+}
+
+/**
+ * Mark the sessions a burn from this dashboard just revoked, ahead of the
+ * next poll that would report it.
+ */
+export function markRevoked(
+  fleet: FleetAgent[],
+  sessions: ReadonlySet<string>,
+): FleetAgent[] {
+  if (!sessions.size) return fleet;
+  return fleet.map((entry) =>
+    entry.sessionId &&
+    sessions.has(entry.sessionId) &&
+    entry.status !== "revoked"
+      ? { ...entry, status: "revoked" }
+      : entry,
+  );
 }
 
 /** Agents running now. Exited and revoked instances are not running. */

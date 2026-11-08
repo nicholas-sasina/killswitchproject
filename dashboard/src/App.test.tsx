@@ -243,6 +243,83 @@ describe("containment dashboard", () => {
     expect(screen.getByText("Source unavailable")).toBeTruthy();
   });
 
+  it("a burned swarm instance leaves the roster at once and stays selected", async () => {
+    const scenario = `agent-${crypto.randomUUID()}`;
+    const worker = `agent-swarm-${crypto.randomUUID().slice(0, 8)}`;
+    const session = `sess_${crypto.randomUUID().slice(0, 8)}`;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      let body: unknown;
+      if (path === "/events")
+        body = {
+          events: [],
+          agents: [{ agent_id: scenario, status: "active", session_id: "s" }],
+        };
+      else if (path === "/instances")
+        // Slow to catch up: still reports the worker active after the burn.
+        body = {
+          instances: [
+            {
+              session_id: session,
+              agent_id: worker,
+              role: "swarm",
+              status: "active",
+              tools: [],
+              created_at: "2026-11-08T05:00:00.000Z",
+              exposures: 0,
+            },
+          ],
+        };
+      else if (path === "/roles") body = { roles: [] };
+      else if (path.endsWith("/ledger"))
+        body = { agent_id: worker, entries: [] };
+      else if (path.endsWith("/blast-radius"))
+        body = { agent_id: worker, keys: [], events: [] };
+      else if (path === "/burn")
+        body = {
+          agent_id: worker,
+          revoked: true,
+          sessions_revoked: [session],
+          rotated: [],
+          flagged: [],
+        };
+      else throw new Error(`Unexpected endpoint ${path}`);
+      return new Response(JSON.stringify(body));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => {
+      render(
+        <App
+          config={{
+            burnUrl: "https://burn.example.test",
+            demoToken: crypto.randomUUID(),
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name: `Burn ${worker}` }));
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", {
+          name: "Confirm Burn",
+        }),
+      );
+    });
+    const roster = screen.getByRole("region", { name: "Active agents" });
+    expect(within(roster).queryByText(worker)).toBeNull();
+    expect(screen.getByRole("status", { name: "Burn result" })).toBeTruthy();
+    // Several polls later, /instances still says active: nothing moves.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_000);
+    });
+    expect(within(roster).queryByText(worker)).toBeNull();
+    expect(screen.getByRole("status", { name: "Burn result" })).toBeTruthy();
+    expect(screen.getByText(/CloudTrail event history can lag/)).toBeTruthy();
+  });
+
   it.each(["handoff", "egress"] as const)(
     "keeps blocked %s traffic visible in the live stream",
     async (source) => {

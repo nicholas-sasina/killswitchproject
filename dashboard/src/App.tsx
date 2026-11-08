@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { createApi, readConfig, type ApiConfig } from "./api";
 import { attentionCount, toAlerts } from "./alerts";
-import { containedFleet, liveFleet, mergeFleet } from "./fleet";
+import { containedFleet, liveFleet, markRevoked, mergeFleet } from "./fleet";
 import type { AgentState, BurnResult } from "./contracts";
 import { newestEvents } from "./events";
 import { MockBanner, mockDataReducer } from "./MockBanner";
@@ -56,9 +56,23 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   );
   const instancePoll = usePolling(configured ? loadInstances : null, 5_000);
   const instances = instancePoll.data?.instances ?? [];
+  const [burnResults, setBurnResults] = useState<
+    Record<string, { result: BurnResult; sessionId: AgentState["session_id"] }>
+  >({});
+  // Sessions a burn from here revoked: shown as revoked at once, not on the
+  // next instance poll.
+  const burnedSessions = useMemo(
+    () =>
+      new Set(
+        Object.values(burnResults).flatMap(
+          (record) => record.result.sessions_revoked,
+        ),
+      ),
+    [burnResults],
+  );
   const fleet = useMemo(
-    () => mergeFleet(state.agents, instances),
-    [state.agents, instancePoll.data],
+    () => markRevoked(mergeFleet(state.agents, instances), burnedSessions),
+    [state.agents, instancePoll.data, burnedSessions],
   );
   const live = useMemo(() => liveFleet(fleet), [fleet]);
   const contained = useMemo(
@@ -69,9 +83,6 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const [confirmAgent, setConfirmAgent] = useState<AgentState>();
   const [busy, setBusy] = useState(false);
   const [burnError, setBurnError] = useState("");
-  const [burnResults, setBurnResults] = useState<
-    Record<string, { result: BurnResult; sessionId: AgentState["session_id"] }>
-  >({});
   const [refresh, setRefresh] = useState(0);
   const activeCount = live.length;
   const revokedCount = contained.length;
@@ -89,9 +100,22 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
     session_id: entry.sessionId,
     exposures: entry.exposures,
   }));
+  // A swarm instance you just burned is on neither list any more, so the
+  // whole fleet is searched too; otherwise its result and timeline vanish on
+  // the next poll and the selection jumps to another agent.
+  const burnedEntry = fleet.find(
+    (entry) => entry.agentId === selectedId && entry.status === "revoked",
+  );
   const selectedAgent =
     state.agents.find((agent) => agent.agent_id === selectedId) ??
     liveAgents.find((agent) => agent.agent_id === selectedId) ??
+    (burnedEntry && {
+      agent_id: burnedEntry.agentId,
+      role: burnedEntry.role,
+      status: "revoked",
+      session_id: burnedEntry.sessionId,
+      exposures: burnedEntry.exposures,
+    }) ??
     liveAgents[0] ??
     state.agents[0];
   function resultFor(agent: AgentState) {
