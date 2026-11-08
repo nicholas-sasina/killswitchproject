@@ -120,3 +120,9 @@ def test_a_model_call_the_proxy_refuses_is_a_burn():
 
     assert looks_revoked(refused("403 Forbidden"))
     assert not looks_revoked(refused("502 Bad Gateway"))
+
+
+def test_the_proxys_refusal_on_an_open_connection_is_a_burn():
+    """Mid-stream, botocore reads the proxy's JSON 403 as a ClientError whose code is the bare status."""
+    assert looks_revoked(ClientError({"Error": {"Code": "403", "Message": ""}}, "ConverseStream"))
+    assert not looks_revoked(ClientError({"Error": {"Code": "500", "Message": ""}}, "ConverseStream"))

@@ -16,6 +16,9 @@ AUTH_ERROR_CODES = {
     "UnrecognizedClientException", "InvalidClientTokenId", "InvalidSignatureException",
     "SignatureDoesNotMatch", "ExpiredToken", "ExpiredTokenException", "AccessDenied",
     "AccessDeniedException", "AuthFailure",
+    # The egress proxy's JSON refusal of a burned session on a connection already open: botocore finds no AWS error
+    # code in it and uses the bare HTTP status. AWS's own refusals always carry a name like AccessDenied.
+    "403",
 }
 BADGE_MARKERS = ("revoked", "unknown badge", "badge issuer refused")
 MESSAGE_MARKERS = ("Proxy Authentication Required", "security token included in the request is invalid")
