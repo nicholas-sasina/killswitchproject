@@ -1,50 +1,135 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type FormEvent,
+  type InputHTMLAttributes,
+} from "react";
 import toolContract from "../../../../contracts/mcp-tools.json";
 import type { BurnApi } from "../../api";
 import type { Instance, Role, RoleSpec } from "../../contracts";
 import { CONNECT_GUIDE_URL, joinCommands, type JoinUrls } from "../../join";
-import { ErrorMessage } from "../../components/common";
-import { SwarmDialog } from "../../components/SwarmDialog";
+import { roleHref } from "../../router";
+import { Dialog, Notice } from "../../ui";
+import { rolePlural } from "./model";
+import "./add-agents.css";
 
 const rolePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const roleNameConflict =
   "A role with that name already exists. Choose a new role name.";
 
+/** A set of mono chips that toggle: tools, keys, roles. */
 function Choices({
   title,
+  hint,
   options,
   selected,
   onChange,
+  empty = "No existing roles.",
 }: {
   title: string;
+  hint?: string;
   options: string[];
   selected: string[];
   onChange: (selected: string[]) => void;
+  empty?: string;
 }) {
   return (
-    <fieldset className="swarm-choices">
-      <legend>{title}</legend>
+    <fieldset className="add-field">
+      <legend className="add-label">{title}</legend>
+      {hint && <p className="add-hint">{hint}</p>}
       {options.length ? (
-        options.map((option) => (
-          <label key={option}>
-            <input
-              type="checkbox"
-              checked={selected.includes(option)}
-              onChange={(event) =>
-                onChange(
-                  event.target.checked
-                    ? [...selected, option]
-                    : selected.filter((value) => value !== option),
-                )
-              }
-            />
-            {option}
-          </label>
-        ))
+        <div className="add-chips">
+          {options.map((option) => (
+            <label key={option} className="add-chip">
+              <input
+                type="checkbox"
+                checked={selected.includes(option)}
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked
+                      ? [...selected, option]
+                      : selected.filter((value) => value !== option),
+                  )
+                }
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
       ) : (
-        <span className="muted">No existing roles.</span>
+        <p className="add-hint">{empty}</p>
       )}
     </fieldset>
+  );
+}
+
+/** One protection, worded as the role page's Protections card words it. */
+function Protection({
+  label,
+  note,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  note: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="add-protection">
+      <div>
+        <label className="add-protection-label" htmlFor={id}>
+          {label}
+        </label>
+        <span id={`${id}-note`} className="add-hint">
+          {note}
+        </span>
+      </div>
+      <input
+        id={id}
+        type="checkbox"
+        aria-describedby={`${id}-note`}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </div>
+  );
+}
+
+/** A labelled input with its hint read out as its description. */
+function TextField({
+  label,
+  hint,
+  className = "",
+  ...input
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+} & InputHTMLAttributes<HTMLInputElement>) {
+  const id = useId();
+  return (
+    <div className="add-field">
+      <label className="add-label" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        id={id}
+        className={`add-input ${className}`}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        {...input}
+      />
+      {hint && (
+        <span id={`${id}-hint`} className="add-hint">
+          {hint}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -107,6 +192,7 @@ export function AddAgent({
     "form" | "command" | "waiting" | "connected"
   >("form");
   const [copyStatus, setCopyStatus] = useState("");
+  const titleId = useId();
 
   useEffect(() => {
     if (!join || step !== "waiting") return;
@@ -217,130 +303,154 @@ export function AddAgent({
       setCopyStatus("Copy unavailable. Select and copy the token above.");
     }
   }
+  const forRole = role ? rolePlural(role.name) : "";
+  const title = role
+    ? `Add ${forRole}`
+    : template
+      ? `Rebuild from ${template.name}`
+      : "Add agents";
   return (
-    <SwarmDialog
-      title={
-        role
-          ? `New token for ${role.name}`
-          : template
-            ? `Rebuild from ${template.name}`
-            : "Add agent"
-      }
-      busy={busy}
+    <Dialog
+      labelledBy={titleId}
       onClose={onClose}
+      busy={busy}
+      width={600}
+      className="add-agents"
     >
+      <div className="add-head">
+        <div>
+          <p className="cap add-eyebrow">
+            {step === "form"
+              ? role
+                ? `New join token / ${role.name}`
+                : "New role and join token"
+              : step === "command"
+                ? "Join token / shown once"
+                : `Joining / ${join?.role ?? ""}`}
+          </p>
+          <h2 id={titleId} className="dialog-title">
+            {title}
+          </h2>
+        </div>
+        <button
+          className="btn btn-sm"
+          type="button"
+          disabled={busy}
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
       {step === "form" ? (
-        <form onSubmit={(event) => void submit(event)}>
+        <form className="add-form" onSubmit={(event) => void submit(event)}>
+          <p className="dialog-body">
+            {role
+              ? `Burn mints a join token for ${role.name}. Each agent that joins with it becomes one of the ${forRole}, with its own identity and its own copies of its keys.`
+              : "Create a role, then a join token for it. Each agent that joins with the token becomes one running copy of the role, with its own identity and its own copies of its keys."}
+          </p>
           {template && !created && (
-            <p>
+            <p className="dialog-body">
               Copied from <strong>{template.name}</strong>: the same tools,
               credentials and permissions. Change anything below before creating
               it, or leave it as is to rebuild the agent exactly.
             </p>
           )}
-          <fieldset
-            disabled={busy || Boolean(created)}
-            className="swarm-fields"
-          >
-            <label>
-              Role name
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                maxLength={32}
-                autoComplete="off"
+          {!role && (
+            <fieldset
+              disabled={busy || Boolean(created)}
+              className="add-fields"
+            >
+              <div className="add-pair">
+                <TextField
+                  label="Role name"
+                  className="id"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  maxLength={32}
+                  autoComplete="off"
+                  spellCheck={false}
+                  hint="1–32 lowercase letters, digits or hyphens; start with a letter or digit."
+                />
+                <TextField
+                  label="Owner"
+                  value={owner}
+                  onChange={(event) => setOwner(event.target.value)}
+                  autoComplete="off"
+                  hint="The team or person who answers for it."
+                />
+              </div>
+              <Choices
+                title="Tools"
+                options={toolContract.tools.map((tool) => tool.name)}
+                selected={tools}
+                onChange={setTools}
               />
-            </label>
-            <p className="muted">
-              1–32 lowercase letters, digits or hyphens; start with a letter or
-              digit.
-            </p>
-            {!role && (
-              <>
-                <Choices
-                  title="Tools"
-                  options={toolContract.tools.map((tool) => tool.name)}
-                  selected={tools}
-                  onChange={setTools}
+              <Choices
+                title="Keys"
+                hint="Each agent gets its own copy."
+                options={["api_key", "aws_key"]}
+                selected={credentials}
+                onChange={setCredentials}
+              />
+              <TextField
+                label="Can reach (optional)"
+                className="id"
+                value={egress}
+                onChange={(event) => setEgress(event.target.value)}
+                placeholder="api.example.com, *.example.org"
+                spellCheck={false}
+                hint="Hosts, separated by commas or spaces. Leave blank for the default allowlist. Burn's Gateway is always reachable."
+              />
+              <Choices
+                title="Can message"
+                options={roles.map((item) => item.name)}
+                selected={mayMessage}
+                onChange={setMayMessage}
+              />
+              <Choices
+                title="Can start"
+                hint="A child never gets more tools than its parent."
+                options={roles.map((item) => item.name)}
+                selected={maySpawn}
+                onChange={setMaySpawn}
+              />
+              <fieldset className="add-field">
+                <legend className="add-label">Protections</legend>
+                <Protection
+                  label="Canary in every session"
+                  note="A decoy key that proves a leak"
+                  checked={canaries}
+                  onChange={setCanaries}
                 />
-                <Choices
-                  title="Credentials"
-                  options={["api_key", "aws_key"]}
-                  selected={credentials}
-                  onChange={setCredentials}
+                <Protection
+                  label="Burn on canary use"
+                  note="Off means alert and flag only"
+                  checked={autoBurn}
+                  disabled={!canaries}
+                  onChange={setAutoBurn}
                 />
-                <div className="swarm-choices">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={canaries}
-                      onChange={(event) => setCanaries(event.target.checked)}
-                    />
-                    Plant a canary credential
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={autoBurn}
-                      disabled={!canaries}
-                      onChange={(event) => setAutoBurn(event.target.checked)}
-                    />
-                    Burn automatically if the canary is used
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={replaceOnBurn}
-                      onChange={(event) =>
-                        setReplaceOnBurn(event.target.checked)
-                      }
-                    />
-                    Replace on burn
-                  </label>
-                </div>
-                <Choices
-                  title="may_message"
-                  options={roles.map((item) => item.name)}
-                  selected={mayMessage}
-                  onChange={setMayMessage}
+                <Protection
+                  label="Replace a burned agent"
+                  note="Its finished work stays; the rest is quarantined"
+                  checked={replaceOnBurn}
+                  onChange={setReplaceOnBurn}
                 />
-                <Choices
-                  title="may_spawn"
-                  options={roles.map((item) => item.name)}
-                  selected={maySpawn}
-                  onChange={setMaySpawn}
-                />
-                <label>
-                  Egress hosts (optional)
-                  <input
-                    value={egress}
-                    onChange={(event) => setEgress(event.target.value)}
-                    placeholder="api.example.com, *.example.org"
-                  />
-                </label>
-                <p className="muted">
-                  Leave blank to use the default allowlist.
-                </p>
-                <label>
-                  Owner
-                  <input
-                    value={owner}
-                    onChange={(event) => setOwner(event.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-              </>
-            )}
-          </fieldset>
-          {created && (
-            <p>Role {created.name} exists. Create a new join token below.</p>
+              </fieldset>
+            </fieldset>
           )}
-          <fieldset disabled={busy} className="swarm-fields">
-            <legend>Join token</legend>
-            <label>
-              Uses
-              <input
+          {created && !role && (
+            <p className="dialog-body">
+              Role <span className="id">{created.name}</span> exists. Create a
+              new join token below.
+            </p>
+          )}
+          <fieldset disabled={busy} className="add-fields">
+            <legend className="add-label">Join token</legend>
+            <div className="add-pair">
+              <TextField
+                label="Uses"
+                className="num"
                 type="number"
                 min={1}
                 max={10000}
@@ -348,11 +458,11 @@ export function AddAgent({
                 required
                 value={uses}
                 onChange={(event) => setUses(event.target.value)}
+                hint="How many agents may join with it."
               />
-            </label>
-            <label>
-              Lifetime (seconds)
-              <input
+              <TextField
+                label="Lifetime (seconds)"
+                className="num"
                 type="number"
                 min={60}
                 max={2592000}
@@ -360,41 +470,50 @@ export function AddAgent({
                 required
                 value={ttl}
                 onChange={(event) => setTtl(event.target.value)}
+                hint="60 to 2,592,000 (30 days)."
               />
-            </label>
+            </div>
           </fieldset>
-          <ErrorMessage message={error} />
-          <button className="secondary-button" disabled={busy} type="submit">
-            {busy
-              ? "Creating…"
-              : created
-                ? "Create token"
-                : "Create role and token"}
-          </button>
+          {error && <Notice tone="error">{error}</Notice>}
+          <div className="dialog-actions">
+            <button className="btn btn-dark" disabled={busy} type="submit">
+              {busy
+                ? "Creating…"
+                : created
+                  ? "Create token"
+                  : "Create role and token"}
+            </button>
+          </div>
         </form>
       ) : step === "command" ? (
-        <div className="swarm-fields">
-          <p>
+        <div className="add-form">
+          <Notice>
             Copy this token now. The token will not be shown again after you
             continue or close this window.
-          </p>
-          <h3>Join token</h3>
-          <pre className="swarm-token">
-            <code>{join?.token}</code>
-          </pre>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void copyToken()}
-          >
-            Copy token
-          </button>
-          <p role="status">{copyStatus}</p>
-          <section aria-label="Join commands">
-            <p>
-              Run one of these where your agent runs. To install the burn CLI
-              there, see{" "}
+          </Notice>
+          <div className="add-token-group">
+            <div className="add-token">
+              <pre className="add-code add-token-value">
+                <code>{join?.token}</code>
+              </pre>
+              <button
+                className="btn btn-sm btn-dark"
+                type="button"
+                onClick={() => void copyToken()}
+              >
+                Copy token
+              </button>
+            </div>
+            <p className="add-hint" role="status">
+              {copyStatus}
+            </p>
+          </div>
+          <section className="add-commands" aria-label="Join commands">
+            <p className="dialog-body">
+              Run one of these where your agent runs. Neither holds the token.
+              To install the burn CLI there, see{" "}
               <a
+                className="text-link"
                 href={CONNECT_GUIDE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -403,45 +522,58 @@ export function AddAgent({
               </a>
               .
             </p>
-            <h3>Join from a hidden prompt</h3>
-            <pre className="swarm-command">
+            <h3 className="add-label">Join from a hidden prompt</h3>
+            <pre className="add-code">
               <code>{commands?.prompt}</code>
             </pre>
-            <h3>Join from the clipboard (macOS)</h3>
-            <p>
+            <h3 className="add-label">Join from the clipboard (macOS)</h3>
+            <p className="add-hint">
               Copy this command first, then use Copy token before running it.
             </p>
-            <pre className="swarm-command">
+            <pre className="add-code">
               <code>{commands?.clipboard}</code>
             </pre>
           </section>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => {
-              setJoin((current) =>
-                current ? { ...current, token: undefined } : current,
-              );
-              setStep("waiting");
-            }}
-          >
-            Continue to waiting
-          </button>
+          <div className="dialog-actions">
+            <button
+              className="btn btn-dark"
+              type="button"
+              onClick={() => {
+                setJoin((current) =>
+                  current ? { ...current, token: undefined } : current,
+                );
+                setStep("waiting");
+              }}
+            >
+              Continue to waiting
+            </button>
+          </div>
         </div>
       ) : (
-        <div className="swarm-fields" role="status">
-          <p>
+        <div className="add-form add-wait" role="status">
+          <p className="add-wait-title">
             {step === "connected"
               ? `Connected · ${join?.role}`
               : `Waiting for ${join?.role} to connect…`}
           </p>
-          <p className="muted">
+          <p className="add-hint">
             {step === "connected"
-              ? "The instance is now listed in Instances by role."
-              : "Run the saved command. Checking instances every five seconds."}
+              ? `It is listed with the other ${rolePlural(join?.role ?? "")} on the role's page.`
+              : "Run the saved command. Burn checks for new agents every five seconds."}
           </p>
+          {step === "connected" && join && (
+            <div className="dialog-actions">
+              <a
+                className="btn btn-dark"
+                href={roleHref(join.role)}
+                onClick={onClose}
+              >
+                Open {join.role}
+              </a>
+            </div>
+          )}
         </div>
       )}
-    </SwarmDialog>
+    </Dialog>
   );
 }

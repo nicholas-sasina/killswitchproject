@@ -1,7 +1,7 @@
-// STUB: the role page's branch restyles Add agents into the console's
-// Dialog. Until then this mounts the existing AddAgent flow unchanged.
-import { AddAgent } from "./AddAgent";
+import { useMemo } from "react";
 import { useConsole } from "../../data/ConsoleData";
+import type { Role } from "../../contracts";
+import { AddAgent } from "./AddAgent";
 
 export interface AddAgentsDialogProps {
   /** Mint a join token for this existing role; otherwise create a role. */
@@ -9,14 +9,32 @@ export interface AddAgentsDialogProps {
   onClose: () => void;
 }
 
+/**
+ * Add agents, as the navigation and a role page open it: the AddAgent flow
+ * with the console's roles, agents and join URLs.
+ */
 export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
   const { api, roles, instances, joinUrls, refreshRoles } = useConsole();
+  // A role known only from its agents still takes a token by name.
+  const target = useMemo<Role | undefined>(
+    () =>
+      role
+        ? (roles.find((item) => item.name === role) ?? {
+            name: role,
+            tools: [],
+            managed_by: "code",
+          })
+        : undefined,
+    // The role is chosen once, when the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [role],
+  );
   return (
     <AddAgent
       api={api}
       roles={roles}
       instances={instances}
-      role={role ? roles.find((item) => item.name === role) : undefined}
+      role={target}
       joinUrls={joinUrls}
       onCreated={() => refreshRoles()}
       onClose={onClose}

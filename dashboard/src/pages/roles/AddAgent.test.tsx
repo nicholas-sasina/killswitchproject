@@ -186,31 +186,32 @@ describe("agent enrollment", () => {
       toolContract.tools.length + 2 + 4 + 3,
     );
     expect(
-      (screen.getByLabelText("Plant a canary credential") as HTMLInputElement)
+      (screen.getByLabelText("Canary in every session") as HTMLInputElement)
         .checked,
     ).toBe(true);
     const autoBurn = screen.getByLabelText(
-      "Burn automatically if the canary is used",
+      "Burn on canary use",
     ) as HTMLInputElement;
     expect(autoBurn.checked).toBe(true);
     expect(autoBurn.disabled).toBe(false);
     expect(
-      (screen.getByLabelText("Replace on burn") as HTMLInputElement).checked,
+      (screen.getByLabelText("Replace a burned agent") as HTMLInputElement)
+        .checked,
     ).toBe(false);
     change("Role name", "worker");
     fireEvent.click(screen.getByLabelText("read_ticket"));
     fireEvent.click(screen.getByLabelText("api_key"));
     fireEvent.click(
-      within(screen.getByRole("group", { name: "may_message" })).getByLabelText(
+      within(screen.getByRole("group", { name: "Can message" })).getByLabelText(
         "reader",
       ),
     );
     fireEvent.click(
-      within(screen.getByRole("group", { name: "may_spawn" })).getByLabelText(
+      within(screen.getByRole("group", { name: "Can start" })).getByLabelText(
         "planner",
       ),
     );
-    change("Egress hosts (optional)", "api.example.com, *.example.org");
+    change("Can reach (optional)", "api.example.com, *.example.org");
     change("Owner", "platform");
     change("Uses", "2");
     change("Lifetime (seconds)", "600");
@@ -307,7 +308,7 @@ describe("agent enrollment", () => {
     await show(fixture);
     await click("Add agent");
     change("Role name", "worker");
-    fireEvent.click(screen.getByLabelText("Replace on burn"));
+    fireEvent.click(screen.getByLabelText("Replace a burned agent"));
     await click("Create role and token");
     expect(
       JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
@@ -332,7 +333,7 @@ describe("agent enrollment", () => {
     await show(fixture);
     await click("Add agent");
     change("Role name", "worker");
-    fireEvent.click(screen.getByLabelText("Replace on burn"));
+    fireEvent.click(screen.getByLabelText("Replace a burned agent"));
     const existing: Role = {
       ...role("worker"),
       tools: ["read_ticket"],
@@ -364,9 +365,9 @@ describe("agent enrollment", () => {
       await show(fixture);
       await click("Add agent");
       change("Role name", "worker");
-      const canary = screen.getByLabelText("Plant a canary credential");
+      const canary = screen.getByLabelText("Canary in every session");
       const autoBurn = screen.getByLabelText(
-        "Burn automatically if the canary is used",
+        "Burn on canary use",
       ) as HTMLInputElement;
       if (!settings.auto_burn) fireEvent.click(autoBurn);
       if (!settings.canaries) fireEvent.click(canary);
