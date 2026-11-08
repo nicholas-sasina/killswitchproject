@@ -167,6 +167,9 @@ is returned once in the join reply and never stored; the supervisor never hands 
 - Auth: a join (`{role, enroll_token}` and nothing else) needs no admin token. An instance's own calls,
   heartbeat, exit and `{role, parent_session}` spawning a child of it, accept its session token
   (`bst_...`) as `Authorization: Bearer`. Every other route needs the admin token.
+- `POST /instances` takes exactly the two role forms of `POST /sessions` (`{role, enroll_token}` or
+  `{role, parent_session}`), with the same auth and the same reply. It exists so a gateway in front of the API
+  can authorize by method and path alone; `POST /sessions` keeps working unchanged.
 - A role's `egress` list narrows every outbound destination except Burn's own Gateway, which it never
   blocks: the Gateway already checks tools per role. Model endpoints such as Bedrock are narrowed like any
   other host, so a role that calls a model lists it.

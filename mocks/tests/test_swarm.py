@@ -164,3 +164,25 @@ def test_the_badge_in_a_join_reply_gets_a_token_the_mock_mcp_server_accepts(clie
                          data={"grant_type": "client_credentials"})
     assert issued.status_code == 200 and issued.json()["access_token"] == "mock-" + reply["agent_id"]
     assert client.post("/mock-token").status_code == 401
+
+
+def test_post_instances_starts_the_same_role_instances_as_post_sessions(client):
+    make_role(client, WORKER)
+    make_role(client, PLANNER | {"may_spawn": ["worker"]})
+
+    def started(body):
+        return check(client.post("/instances", json=body), "/instances", "post", 201)
+
+    joined = started({"role": "worker", "enroll_token": token_for(client, "worker")["token"]})
+    assert set(joined["secrets"]) == {"badge", "session_token", "api_key", "aws_key"}
+    assert joined["agent_id"].startswith("agent-worker-")
+    parent = started({"role": "planner", "enroll_token": token_for(client, "planner")["token"]})
+    child = started({"role": "worker", "parent_session": parent["session_id"]})
+    assert child["parent_session"] == parent["session_id"] and "aws_key" not in child["secrets"]  # narrowed
+    # the same refusals as the role forms of /sessions
+    assert client.post("/instances", json={"role": "worker", "enroll_token": "bjt_bad"}).status_code == 403
+    assert client.post("/instances", json={"role": "planner", "parent_session": child["session_id"]}).status_code == 403
+    # only the two role forms
+    assert client.post("/instances", json={"agent_id": "agent-reader"}).status_code == 400
+    assert client.post("/instances", json={"role": "worker"}).status_code == 400
+    assert client.post("/instances", json={"role": "worker", "enroll_token": "x", "parent_session": "y"}).status_code == 400
