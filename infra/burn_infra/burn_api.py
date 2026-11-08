@@ -91,7 +91,7 @@ class BurnApiStack(cdk.Stack):
         ))
 
         fn = lambda_.Function(
-            self, "Function", function_name="burn-api", runtime=lambda_.Runtime.PYTHON_3_12,
+            self, "Function", function_name=names.BURN_API_FUNCTION, runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.handler", code=lambda_.Code.from_asset(code_dir), role=role,
             timeout=cdk.Duration.seconds(29), memory_size=256,
         )
