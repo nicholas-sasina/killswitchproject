@@ -38,6 +38,26 @@ export interface FlagActionsProps {
 
 type Action = "rotate" | "dismiss";
 
+/**
+ * When the control that had focus is gone, put focus on the card's heading.
+ * The dialog returns focus to its opener when it closes, so this waits for
+ * that (and for the page to stop being inert) before deciding.
+ */
+function keepFocusIn(section: Element | null | undefined, tries = 10) {
+  window.setTimeout(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const heading = section?.querySelector<HTMLElement>("h2, h3");
+    if (!heading?.isConnected) return;
+    if (heading.closest("[inert]")) {
+      if (tries > 0) keepFocusIn(section, tries - 1);
+      return;
+    }
+    heading.tabIndex = -1;
+    heading.focus();
+  }, 16);
+}
+
 export function FlagActions({
   flag,
   variant = "full",
@@ -64,14 +84,7 @@ export function FlagActions({
         ? `${key} rotated. Agents read the new value through references.`
         : `Flag on ${key} dismissed.`,
     );
-    window.setTimeout(() => {
-      const active = document.activeElement;
-      if (active && active !== document.body && active.isConnected) return;
-      const heading = section?.querySelector<HTMLElement>("h2, h3");
-      if (!heading?.isConnected) return;
-      heading.tabIndex = -1;
-      heading.focus();
-    }, 0);
+    keepFocusIn(section);
   }
 
   return (

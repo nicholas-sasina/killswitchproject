@@ -7,6 +7,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { ApiError } from "../../api";
 import type { Flag, FlagResolution, FlagResolveResult } from "../../contracts";
@@ -229,5 +230,35 @@ describe("FlagActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps focus in the card when the decided row disappears", async () => {
+    const value = consoleValue({
+      api: { resolveFlag: vi.fn<Resolve>().mockResolvedValue({}) },
+    });
+    function StillOpen() {
+      const [gone, setGone] = useState(false);
+      return (
+        <section aria-labelledby="open-title">
+          <h2 id="open-title">Still open</h2>
+          {!gone && (
+            <FlagActions flag={flag()} onResolved={() => setGone(true)} />
+          )}
+        </section>
+      );
+    }
+    render(
+      <WithConsole value={value}>
+        <StillOpen />
+      </WithConsole>,
+    );
+    await decide(/^Dismiss with/, "fixture key, not real", /^Dismiss the/);
+    expect(screen.queryByRole("button", { name: /^Rotate/ })).toBeNull();
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Still open" }),
+    );
   });
 });
