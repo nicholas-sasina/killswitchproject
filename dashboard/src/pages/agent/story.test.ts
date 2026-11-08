@@ -17,6 +17,7 @@ import {
   blastSentence,
   CLOUDTRAIL_LAG,
   evidenceSentence,
+  finishedNote,
   heroLede,
   replacementOf,
   takeoverOf,
@@ -402,5 +403,50 @@ describe("blastSentence", () => {
     expect(
       blastSentence({ agent_id: "a", keys: [{ key_ref: key }], events: [] }),
     ).toBe(`CloudTrail shows no calls with its AWS key yet. ${CLOUDTRAIL_LAG}`);
+  });
+});
+
+describe("finishedNote", () => {
+  const scenarioModel = (session?: string) =>
+    makeConsole({
+      instances: [],
+      events: [],
+      agents: [
+        {
+          agent_id: "agent-alpha",
+          role: "alpha",
+          status: "idle",
+          session_id: session,
+        },
+      ],
+    }).model;
+
+  it("says an agent that never started a session has nothing to burn", () => {
+    const agent = scenarioModel().byKey.get("agent-alpha")!;
+    expect(finishedNote(agent)).toBe(
+      "alpha-01 has not started a session, so there is nothing to burn.",
+    );
+  });
+
+  it("says a scenario agent keeps its keys for its next session", () => {
+    const agent = scenarioModel("a1").byKey.get("a1")!;
+    expect(finishedNote(agent)).toBe(
+      "alpha-01 finished on its own, so there is nothing to burn. Burn revoked its badge when it exited and keeps its keys for its next session.",
+    );
+    // Listed by /instances too, the role record still says it is a scenario's.
+    expect(finishedNote({ ...agent, from: "instance" }, "scenario")).toBe(
+      finishedNote(agent),
+    );
+  });
+
+  it("says a role instance's own keys went when it exited, once the role is known", () => {
+    const agent = findAgent(makeConsole().model, "sess-w1")!;
+    expect(agent.state).toBe("finished");
+    expect(finishedNote(agent, "code")).toBe(
+      "worker-01 finished on its own, so there is nothing to burn. Burn revoked its badge and deleted its own keys when it exited.",
+    );
+    expect(finishedNote(agent)).toBe(
+      "worker-01 finished on its own, so there is nothing to burn.",
+    );
   });
 });
