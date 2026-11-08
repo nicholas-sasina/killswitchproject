@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 from burn_contracts import names
 from burn_contracts.events import utc_now_iso
 
+import caller
 import canary
 import db
 import errors
@@ -111,6 +112,7 @@ def start_session(agent_id: str) -> dict:
         "tools": list(agent.get("tools", [])),
         "send_to": list(agent.get("send_to", [])),
         "created_at": _now(),
+        "created_by": caller.get().person,
     })
     db.write_event(
         agent_id=agent_id, source="session", action="issued", session_id=session_id,
@@ -184,12 +186,23 @@ def start_instance(role_name: str, enroll_token: str | None = None, parent_sessi
         token_id = tokens.redeem(role_name, enroll_token)
         limits = {"tools": list(role["tools"]), "credentials": list(role.get("credentials") or []),
                   "egress": role.get("egress")}
+    # The person behind the instance: whoever is signed in, else whoever made its token or its parent.
+    limits["created_by"] = caller.get().person or _inherited_creator(token_id, parent_session)
     try:
         return _create_instance(role_name, role, limits, token_id, parent_session)
     except BaseException:
         if token_id:  # the join failed; the token keeps its use
             tokens.refund(token_id)
         raise
+
+
+def _inherited_creator(token_id: str | None, parent_session: str | None) -> str | None:
+    import instances
+    import tokens
+    if token_id:
+        return tokens.get(token_id).get("created_by")
+    parent = instances.get_session_or_none(parent_session) if parent_session else None
+    return (parent or {}).get("created_by")
 
 
 def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
@@ -222,6 +235,7 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
             "session_token_sha256": session_token_hash(own_secrets["session_token"]),
             # Only when the role sets it: an absent field means the Gateway's default mode applies.
             **({"references": role["references"]} if role.get("references") else {}),
+            "created_by": limits.get("created_by"),
         })
     except BaseException:
         _discard_partial_instance(agent_id, minted, badge, session_id)
@@ -229,7 +243,9 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
     _recheck_after_write(agent_id, session_id, badge, token_id, parent_session)
     # The row exists and the token use is spent. A failed event write must not look like a failed
     # join (the caller would refund the use), so events are best effort from here on.
-    fields = {"session_id": session_id, "role": role_name, "parent_session": parent_session}
+    # A join has no caller of its own yet: its events are the new instance's.
+    fields = {"session_id": session_id, "role": role_name, "parent_session": parent_session,
+              "actor": caller.get().actor or f"instance:{session_id}"}
     for source, action, detail in (("session", "issued", f"session started with {len(credentials)} credentials"),
                                    ("instance", "started", "instance started")):
         try:
@@ -239,7 +255,7 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
     return {
         "session_id": session_id, "agent_id": agent_id, "badge_ref": badge_ref, "credentials": credentials,
         "role": role_name, "parent_session": parent_session, "token_id": token_id,
-        "tools": limits["tools"], "egress": limits["egress"],
+        "tools": limits["tools"], "egress": limits["egress"], "created_by": limits.get("created_by"),
         "secrets": own_secrets,  # returned once; never logged, stored or sent again
     }
 

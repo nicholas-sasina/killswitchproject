@@ -1,22 +1,35 @@
 """Who may call which route.
 
-- The admin (demo) token in the x-burn-demo-token header may call every route.
-- A join needs no admin token: POST /sessions or POST /instances with exactly {role, enroll_token} carries its own authority, the
-  join token, which the route checks (hash, expiry, uses left, revocation). Any other body shape on that route,
-  for example one that also names a parent_session or an agent_id, needs the admin token.
-- An instance's own calls accept its session token (issued once in its join reply) as
-  `Authorization: Bearer bst_...`: POST /instances/{id}/heartbeat and /exit for that instance, and
-  POST /sessions or POST /instances with exactly {role, parent_session} to spawn a child of it. Auth only proves whose token it
-  is; the routes still decide on the session's status (a burned instance's heartbeat gets 409, its spawn 403).
+Two modes, chosen by the deployment (names.PEOPLE_AUTH_ENV, set by infra's people sign-in flag):
 
-Everything else needs the admin token.
+Sign-in off (BURN_PEOPLE_AUTH unset), as before sign-in existed:
+- The admin (demo) token in the x-burn-demo-token header may call every route.
+- A join needs no admin token: POST /sessions or POST /instances with exactly {role, enroll_token} carries its own
+  authority, the join token, which the route checks (hash, expiry, uses left, revocation). Any other body shape on
+  that route, for example one that also names a parent_session or an agent_id, needs the admin token.
+- An instance's own calls accept its session token (issued once in its join reply) as
+  `Authorization: Bearer bst_...`: POST /instances/{id}/heartbeat and /exit for that instance, and POST /sessions or
+  POST /instances with exactly {role, parent_session} to spawn a child of it. Auth only proves whose token it is;
+  the routes still decide on the session's status (a burned instance's heartbeat gets 409, its spawn 403).
+
+Sign-in on (BURN_PEOPLE_AUTH=1):
+- Every route except the three exempt ones needs a signed-in person: the claims API Gateway's JWT authorizer put in
+  requestContext.authorizer.jwt.claims. They are only ever read from there, never from a header or the body, and
+  this check does not rely on the authorizer having run.
+- The exempt routes are POST /instances, POST /instances/{id}/heartbeat and POST /instances/{id}/exit. They take the
+  join token or the instance's session token exactly as above. (POST /sessions is not exempt: it needs a person.)
+- The admin token is honored only when the API also runs with BURN_LOCAL_DEV=1, which a deployment never sets.
+
+In both modes the caller is returned so routes can record who did what (see caller.py).
 """
 import hashlib
 import hmac
+import os
 
 import boto3
 from burn_contracts import names
 
+import caller
 import db
 
 # The two paths that start a role instance. A gateway can then authorize them by path alone.
@@ -76,11 +89,62 @@ def is_session_owner(headers: dict, session_id: str) -> bool:
     return isinstance(stored, str) and hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(), stored)
 
 
-def allows(method: str, path: str, headers: dict, body: dict) -> bool:
-    if is_admin(headers) or is_join(method, path, body):
-        return True
+def people_auth_on() -> bool:
+    return os.environ.get(names.PEOPLE_AUTH_ENV) == "1"
+
+
+def local_dev() -> bool:
+    return os.environ.get(names.LOCAL_DEV_ENV) == "1"
+
+
+def is_exempt(method: str, path: str) -> bool:
+    """The routes that carry their own credential, so sign-in does not apply to them."""
+    if method != "POST":
+        return False
+    parts = path.strip("/").split("/")
+    return parts == ["instances"] or (len(parts) == 3 and parts[0] == "instances" and parts[2] in ("heartbeat", "exit"))
+
+
+def person(event: dict) -> str | None:
+    """The signed-in person's email, from the JWT authorizer's claims in requestContext, or None.
+
+    API Gateway writes requestContext; a client cannot. A token without an email is not a person.
+    """
+    claims = (((event.get("requestContext") or {}).get("authorizer") or {}).get("jwt") or {}).get("claims")
+    if not isinstance(claims, dict):
+        return None
+    email = claims.get("email")
+    return email if isinstance(email, str) and "@" in email and claims.get("sub") else None
+
+
+def _own_credential(method: str, path: str, headers: dict, body: dict) -> caller.Caller | None:
+    """A join token or an instance's session token, for the routes that accept one."""
+    if is_join(method, path, body):
+        return caller.Caller(actor=None, person=None)  # the new instance does not exist yet
     session_id = instance_session(method, path, body)
-    return session_id is not None and is_session_owner(headers, session_id)
+    if session_id is not None and is_session_owner(headers, session_id):
+        return caller.Caller(actor=f"instance:{session_id}", person=None)
+    return None
+
+
+def authenticate(event: dict, method: str, path: str, headers: dict, body: dict) -> caller.Caller | None:
+    """Who is calling, or None when the request may not call this route."""
+    email = person(event)
+    if email:
+        return caller.Caller(actor=email, person=email)
+    if not people_auth_on():
+        if is_admin(headers):
+            return caller.Caller(actor="admin", person=None)
+        return _own_credential(method, path, headers, body)
+    if local_dev() and is_admin(headers):
+        return caller.Caller(actor="admin", person=None)
+    if is_exempt(method, path):
+        return _own_credential(method, path, headers, body)
+    return None  # a non-exempt route with no person
+
+
+def allows(method: str, path: str, headers: dict, body: dict, event: dict | None = None) -> bool:
+    return authenticate(event or {}, method, path, headers, body) is not None
 
 
 def reset():

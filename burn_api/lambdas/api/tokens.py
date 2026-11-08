@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from burn_contracts import names
 from burn_contracts.events import utc_now_iso
 
+import caller
 import db
 import errors
 import roles
@@ -37,7 +38,7 @@ def view(row: dict) -> dict:
               else "used_up" if uses_left <= 0 else "active")
     return {"token_id": row["token_id"], "role": row["role"], "uses": int(row["uses"]),
             "uses_left": uses_left, "expires_at": row["expires_at"], "created_at": row["created_at"],
-            "status": status}
+            "created_by": row.get("created_by"), "status": status}
 
 
 def create(role_name: str, body: dict) -> dict:
@@ -51,6 +52,7 @@ def create(role_name: str, body: dict) -> dict:
         "token_id": token_id, "role": role_name, "secret_sha256": hashlib.sha256(secret.encode()).hexdigest(),
         "uses": uses, "uses_left": uses, "revoked": False,
         "expires_at": _iso(datetime.now(timezone.utc) + timedelta(seconds=ttl)), "created_at": utc_now_iso(),
+        "created_by": caller.get().person,
     }
     db.table(names.ENROLL_TOKENS_TABLE).put_item(Item=row)
     return view(row) | {"token": f"{names.JOIN_TOKEN_PREFIX}{token_id}.{secret}"}

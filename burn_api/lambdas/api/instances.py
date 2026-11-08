@@ -73,7 +73,8 @@ def view(session: dict, exposures: int | None = None) -> dict:
     return {
         "session_id": session["session_id"], "agent_id": session["agent_id"], "role": role_of(session),
         "status": session["status"], "tools": list(session.get("tools", [])),
-        **{k: session.get(k) for k in ("parent_session", "token_id", "owner", "egress", "last_seen", "exited_at")},
+        **{k: session.get(k) for k in ("parent_session", "token_id", "owner", "created_by", "egress", "last_seen",
+                                       "exited_at")},
         "created_at": session.get("created_at"),
         "exposures": _exposures(session["agent_id"]) if exposures is None else exposures,
     }
