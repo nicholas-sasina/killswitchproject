@@ -120,3 +120,21 @@ def test_env_file_output_never_shows_values(tmp_path):
     env.chmod(0o600)
     code, out = run(["live-check", "--dry-run", "--env-file", str(env)])
     assert code == 0 and "topsecretvalue" not in out and "BURN_NOTIFY_TEAMS_WORKFLOW_URL" in out
+
+
+def test_live_check_without_email_needs_no_aws(monkeypatch):
+    """Regression: the first real run crashed creating an SES client with no region configured."""
+    from burn_notify import config as config_mod, livecheck
+    from burn_notify.http import Response
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    cfg = config_mod.parse({"destinations": [{"id": "d", "provider": "discord", "secret_ref": "env:D",
+                                              "options": {"private_channel_confirmed": True}}]}, environ={})
+    from conftest import FakeTransport, DictSecrets
+    from burn_notify.providers import REGISTRY
+    providers = {n: c(transport=FakeTransport(default=Response(200, {}, b'{"id":"9"}'))) for n, c in REGISTRY.items()
+                 if n != "email"}
+    providers["email"] = REGISTRY["email"]()  # real provider, no client created unless email sends
+    report = livecheck.run(cfg, secrets=DictSecrets({"env:D": "https://discord.com/api/webhooks/1/x"}),
+                           providers=providers)
+    assert report["duplicate_sent_nothing"]

@@ -46,7 +46,8 @@ class SecretResolver:
         if self._client is None:
             import boto3
             from botocore.config import Config
-            self._client = boto3.client("secretsmanager", config=Config(
+            region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+            self._client = boto3.client("secretsmanager", region_name=region, config=Config(
                 connect_timeout=3, read_timeout=5, retries={"max_attempts": 2, "mode": "standard"}))
         return self._client
 

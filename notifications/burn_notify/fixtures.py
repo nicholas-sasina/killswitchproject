@@ -140,6 +140,28 @@ def recorded(**kw) -> dict:
                 secret_ref="burn/shared/synthetic_test_key", fingerprint=_fp("billing"), **kw)
 
 
+# Fake values shaped like secrets, planted in every field that must never reach a message.
+REDACTION_MARKERS = {
+    # credential-shaped fakes are assembled at runtime so secret scanners never see a literal
+    "detail": "FAKE-SECRET-detail " + "sk_" + "live_" + "FAKE" + "0" * 16 + " " + "AK" + "IA" + "FAKE" * 3 + "0000",
+    "destination": "fake-exfil-destination.example.net",
+    "fingerprint": hashlib.sha256(b"fixture:redaction-probe").hexdigest(),
+    "tool": "fake_tool_FAKESECRET",
+    "actor": "fake.person.FAKESECRET@example.com",
+    "encoding": "base64-FAKESECRET",
+    "target_agent_id": "agent-fake-target-secret",
+}
+
+
+def redaction_probe(**kw) -> dict:
+    """A blocked-disclosure event whose sensitive fields all carry REDACTION_MARKERS."""
+    fields = dict(REDACTION_MARKERS)
+    fields.update(session_id=SESSION, secret_ref="burn/shared/synthetic_test_key", secret_type="api_key",
+                  owner="shared")
+    fields.update(kw)
+    return base("blocked", "egress", **fields)
+
+
 ALL = {
     "canary_used": canary_used, "canary_revoked": canary_revoked, "rotated": rotated,
     "flagged_seen": lambda **kw: flagged("seen", **kw), "flagged_attempted": lambda **kw: flagged("attempted", **kw),
@@ -148,6 +170,7 @@ ALL = {
     "refused": refused, "unregistered": unregistered, "burn_revoked": burn_revoked, "dismissed": dismissed,
     "replaced": replaced, "resumed": resumed, "recorded": recorded,
     "replacement_not_recorded": replacement_not_recorded, "provider_reported": provider_reported,
+    "redaction_probe": redaction_probe,
 }
 
 

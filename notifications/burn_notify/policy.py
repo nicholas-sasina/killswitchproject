@@ -199,12 +199,12 @@ def classify(event: dict) -> Classification:
 
     if action == "revoked":
         if source == "burn" and is_canary_ref(event.get("secret_ref")):
-            return _c("canary_contained", CONTAINMENT_UPDATE, "Containment update: canary session revoked",
+            return _c("canary_contained", CONTAINMENT_UPDATE, "Canary session revoked",
                       "Burn revoked the one session whose canary was used.",
                       [("Status", "Session revoked"), ("Other instances", "No broad containment requested")])
         match = _SESSIONS_REVOKED_RE.match(detail)
         count = f"{int(match.group(1))} session(s) revoked" if match else "Badge revoked"
-        return _c("agent_burned", CONTAINMENT_UPDATE, "Containment update: agent burned",
+        return _c("agent_burned", CONTAINMENT_UPDATE, "Agent burned",
                   "Burn revoked this agent's badge.",
                   [("Status", count), ("Scope of this event", "This agent only")])
 

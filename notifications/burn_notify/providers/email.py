@@ -7,6 +7,7 @@ MessageRejected, which is recorded as a permanent failure.
 """
 from __future__ import annotations
 
+import os
 import re
 
 from .. import escape
@@ -36,7 +37,8 @@ class EmailProvider(Provider):
             import boto3
             from botocore.config import Config
             # boto3 defaults (60 s connect/read, several retries) would outlast the Lambda's budget.
-            self._ses = boto3.client("sesv2", config=Config(connect_timeout=5, read_timeout=10,
+            region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+            self._ses = boto3.client("sesv2", region_name=region, config=Config(connect_timeout=5, read_timeout=10,
                                                             retries={"max_attempts": 2, "mode": "standard"}))
         return self._ses
 

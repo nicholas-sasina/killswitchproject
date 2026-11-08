@@ -58,8 +58,17 @@ class _Counting:
 
 
 class _CountingSES:
+    """inner may be a client or a zero-argument factory (the client is then made on first use, so a
+    config without an email destination never needs AWS credentials or a region)."""
+
     def __init__(self, inner):
-        self.inner, self.calls, self.fail_next = inner, 0, 0
+        self._inner, self.calls, self.fail_next = inner, 0, 0
+
+    @property
+    def inner(self):
+        if callable(self._inner) and not hasattr(self._inner, "send_email"):
+            self._inner = self._inner()
+        return self._inner
 
     def send_email(self, **kwargs):
         if self.fail_next:
@@ -103,8 +112,8 @@ def run(cfg: Config, *, inject_failure: bool = False, secrets: SecretResolver | 
         providers = {}
         for name, cls in REGISTRY.items():
             if name == "email":
-                import boto3
-                counters[name] = _CountingSES(boto3.client("sesv2"))
+                real_email = cls()
+                counters[name] = _CountingSES(real_email._client)  # factory: created only if email sends
                 providers[name] = cls(ses_client=counters[name])
             else:
                 real = cls()
@@ -113,7 +122,7 @@ def run(cfg: Config, *, inject_failure: bool = False, secrets: SecretResolver | 
     else:
         for name, p in providers.items():
             if name == "email":
-                counters[name] = p._ses = _CountingSES(p._client())
+                counters[name] = p._ses = _CountingSES(p._ses if p._ses is not None else p._client)
             else:
                 counters[name] = p.transport = _Counting(p.transport)
     proc = Processor(cfg, MemoryStore(), providers=providers, secrets=secrets, clock=clock, notice=NOTICE)
@@ -180,6 +189,19 @@ def run(cfg: Config, *, inject_failure: bool = False, secrets: SecretResolver | 
         for c in counters.values():
             c.fail_next = 0
         step("6b SQS redelivery", probe, receive_count=2)
+    # 7. Redaction: fake secret-shaped values in every sensitive field must appear nowhere, neither in what
+    # was sent nor in the copy the provider stored.
+    probe = fixtures.redaction_probe(offset_ms=20)
+    result = step("7 redaction probe (fake secrets in sensitive fields)", probe)
+    markers = [v for v in fixtures.REDACTION_MARKERS.values()] + ["FAKESECRET", "sk_" + "live_FAKE", "AK" + "IAFAKE"]
+    leaks = []
+    for outcome in result.outcomes:
+        texts = [json.dumps(proc.providers[cfg.destination(outcome.destination_id).provider].build(
+            proc.incident_for(probe)[0], cfg.destination(outcome.destination_id)).body, ensure_ascii=False)]
+        if outcome.echo:
+            texts.append(outcome.echo)
+        leaks += [f"{outcome.destination_id}: {m[:12]}..." for m in markers for t in texts if m in t]
+    report["redaction_leaks"] = leaks
     report["delivery_history"] = proc.store.list_deliveries()
     return report
 
@@ -199,4 +221,6 @@ def render(report: dict) -> str:
             if r.get("facts"):
                 lines.append(f"      {r['facts'].get('Owned credentials')} | {r['facts'].get('Shared credentials')}")
     lines.append(f"\nduplicate sent nothing: {report.get('duplicate_sent_nothing')}")
+    leaks = report.get("redaction_leaks")
+    lines.append(f"redaction probe: {'PASS (no fake secret in any payload or stored copy)' if leaks == [] else leaks}")
     return "\n".join(lines)

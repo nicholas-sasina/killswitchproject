@@ -242,7 +242,7 @@ def cmd_live_check(args, out=sys.stdout) -> int:
         with open(args.report, "w", encoding="utf-8") as fh:
             json.dump(report, fh, indent=2, default=str)
         out.write(f"report written to {args.report}\n")
-    ok = report.get("duplicate_sent_nothing") and all(
+    ok = report.get("duplicate_sent_nothing") and report.get("redaction_leaks") == [] and all(
         r["status"] in ("delivered", "suppressed") or r["status"].startswith("skipped_") or
         (s["step"].startswith("6a") and r["status"] == "retrying")
         for s in report["steps"] for r in s["results"])
