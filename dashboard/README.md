@@ -4,12 +4,19 @@
 
 Three views in a sidebar, each a bookmarkable location.
 
-**Overview** (`#/overview`) shows live agent status, credential exposure and containment activity
-with agents and events side by side. Burn an agent and inspect its CloudTrail history alongside
-blocked events from real traffic.
+**Overview** (`#/overview`) is the live fleet in one place: the agents running right now, the
+credentials the selected one has seen, and the roles and instances they joined through. Burned
+agents are not on this roster, so it always reflects what is actually running; a count links to
+Contained. The agent you just burned stays in the containment detail so you can read the outcome
+without changing view.
 
-**Fleet** (`#/fleet`) holds roles, join tokens and instance lineage, so managing the swarm
-does not share a page with watching containment.
+**Contained** (`#/burned`) holds the agents that were burned, newest first, with each one's
+exposure ledger and the CloudTrail history of its AWS keys. Two actions rebuild an agent:
+_Re-add with the same setup_ mints a fresh join token for the same role, so the new instance gets
+identical tools and permissions with its own newly minted credentials, and _Copy setup to a new
+role_ prefills the Add agent form from that role so you can change tools, credentials,
+permissions, egress or canary settings before creating it. Nothing the burned agent held is ever
+reused.
 
 **Alerts** (`#/alerts`) shows only the events that need an operator, most serious first, with what
 each one proves and what to do about it beside every field recorded for it. Severity reflects what
@@ -151,9 +158,19 @@ be deployed in lockstep with the API.
 **New endpoints are additive.** `src/api.ts` is the only place that knows about routes. A view that
 is not mounted issues no requests, so adding a view costs nothing on the others.
 
-**Views are independent.** `Overview`, `Fleet` and `Alerts` share only the event poll in `App.tsx`.
-If `/roles` or `/instances` are unavailable, only `Fleet` shows an error; the overview and alerts
-are unaffected.
+**Views are independent.** `Overview`, `Contained` and `Alerts` share only the event poll in
+`App.tsx`. If `/roles` or `/instances` are unavailable, the roles panel shows an error and the rest
+of the overview is unaffected; Alerts never touches those routes.
+
+**`AddAgent` takes an optional `template`.** Passing a `Role` prefills the form with that role's
+tools, credentials, messaging and spawn permissions, egress and canary settings, while leaving
+every field editable and still creating a _new_ role. Passing `role` instead keeps the existing
+behaviour of minting another token for a role that already exists. Both are additive, so existing
+call sites are unchanged.
+
+**Burned agents map to roles by name.** `roleForAgent` in `src/burned.ts` matches an agent to its
+role by exact name first, then by the `agent-<role>` convention scenario agents use. If the role is
+gone, the rebuild actions are replaced with an explanation rather than a dead button.
 
 **`components/common.tsx` still exports `Flame`** as an alias of `BurnMark`, kept so any code that
 imports the old name keeps compiling. Prefer `BurnMark` in new code.

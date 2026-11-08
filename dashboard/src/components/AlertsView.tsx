@@ -118,10 +118,19 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
   const [agentFilter, setAgentFilter] = useState("");
   const [selectedId, setSelectedId] = useState("");
 
-  const agents = useMemo(
-    () => [...new Set(alerts.map((alert) => alert.event.agent_id))].sort(),
-    [alerts],
-  );
+  // Agents that actually have alerts, noisiest first, so the one flooding
+  // the queue is the first thing you can filter to.
+  const agents = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const alert of alerts)
+      counts.set(
+        alert.event.agent_id,
+        (counts.get(alert.event.agent_id) ?? 0) + 1,
+      );
+    return [...counts.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    );
+  }, [alerts]);
   const shown = useMemo(
     () =>
       alerts.filter(
@@ -184,25 +193,32 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
 
           {agents.length > 1 && (
             <div className="alert-filters">
-              <button
-                type="button"
-                className="chip"
-                aria-pressed={agentFilter === ""}
-                onClick={() => setAgentFilter("")}
-              >
-                All agents
-              </button>
-              {agents.map((agent) => (
+              <label>
+                Agent
+                <select
+                  value={agentFilter}
+                  onChange={(event) => setAgentFilter(event.target.value)}
+                >
+                  <option value="">All agents ({alerts.length})</option>
+                  {agents.map(([agent, count]) => (
+                    <option key={agent} value={agent}>
+                      {agent} ({count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {filtering && (
                 <button
-                  key={agent}
                   type="button"
                   className="chip"
-                  aria-pressed={agentFilter === agent}
-                  onClick={() => setAgentFilter(agent)}
+                  onClick={() => {
+                    setAgentFilter("");
+                    setHidden([]);
+                  }}
                 >
-                  {agent}
+                  Clear filters
                 </button>
-              ))}
+              )}
             </div>
           )}
 

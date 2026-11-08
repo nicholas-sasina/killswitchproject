@@ -2,8 +2,8 @@
  * Three views, addressed by hash so each is a real location: it survives a
  * reload, can be bookmarked, and can be put on a second screen during a demo.
  *
- *   overview  what the agents are doing right now, and containment detail
- *   fleet     roles, join tokens and instance lineage
+ *   overview  the live fleet: active agents, their roles and instances
+ *   burned    contained agents, their history, and how to rebuild them
  *   alerts    only what needs an operator, worst first
  *
  * Splitting them keeps any one page from becoming a long stack of equally
@@ -18,7 +18,7 @@
  */
 import { useEffect, useState } from "react";
 
-export const VIEWS = ["overview", "fleet", "alerts"] as const;
+export const VIEWS = ["overview", "burned", "alerts"] as const;
 export type View = (typeof VIEWS)[number];
 
 export function viewFromHash(hash: string): View {

@@ -16,12 +16,13 @@ import { BurnOutcome } from "./components/BurnOutcome";
 import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
+import { BurnedView } from "./components/BurnedView";
 import { PageHead } from "./components/PageHead";
 import { SwarmPanel } from "./components/SwarmPanel";
 
 const NAV: Record<View, { label: string; hint: string }> = {
-  overview: { label: "Overview", hint: "Agents and containment" },
-  fleet: { label: "Fleet", hint: "Roles and instances" },
+  overview: { label: "Overview", hint: "Live agents and roles" },
+  burned: { label: "Contained", hint: "Burned agents" },
   alerts: { label: "Alerts", hint: "What needs attention" },
 };
 
@@ -59,8 +60,13 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const revokedCount = state.agents.filter(
     (agent) => agent.status === "revoked",
   ).length;
+  // The overview roster is the live fleet: burned agents move to Contained.
+  // Selection still resolves against every agent, so the containment detail
+  // stays on screen for the agent you just burned.
+  const liveAgents = state.agents.filter((agent) => agent.status !== "revoked");
   const selectedAgent =
     state.agents.find((agent) => agent.agent_id === selectedId) ??
+    liveAgents[0] ??
     state.agents[0];
   function resultFor(agent: AgentState) {
     const record = burnResults[agent.agent_id];
@@ -170,15 +176,23 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 />
                 <AlertsView events={events} />
               </>
-            ) : view === "fleet" ? (
+            ) : view === "burned" ? (
               <>
                 <PageHead
-                  title="Fleet"
-                  description="Roles, join tokens and instance lineage. Add an agent to create a dashboard-managed role, or burn a whole role at once."
+                  title="Contained"
+                  description="Agents that have been burned, what each one had seen, and how to put an equivalent agent back to work."
+                  figures={[
+                    {
+                      label: "Contained",
+                      value: updatedAt ? revokedCount : "—",
+                      tone: revokedCount ? "ember" : undefined,
+                    },
+                  ]}
                 />
-                <SwarmPanel
-                  key={`${config.burnUrl}:${config.demoToken}`}
+                <BurnedView
                   api={api}
+                  agents={state.agents}
+                  events={events}
                   enabled={configured}
                 />
               </>
@@ -186,20 +200,16 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
               <>
                 <PageHead
                   title="Overview"
-                  description="Live agent status, the credentials each agent has seen, and what containment did."
+                  description="The agents running right now, the credentials each one has seen, and the roles they joined through."
                   attention={revokedCount > 0 || pending > 0}
                   figures={[
-                    {
-                      label: "Agents",
-                      value: updatedAt ? state.agents.length : "—",
-                    },
                     {
                       label: "Active",
                       value: updatedAt ? activeCount : "—",
                       tone: activeCount ? "nominal" : undefined,
                     },
                     {
-                      label: "Revoked",
+                      label: "Contained",
                       value: updatedAt ? revokedCount : "—",
                       tone: revokedCount ? "ember" : undefined,
                     },
@@ -222,16 +232,16 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                       className="agents-section"
                     >
                       <div className="section-heading">
-                        <h2 id="agents-title">Agents</h2>
+                        <h2 id="agents-title">Active agents</h2>
                         <span className="muted">
-                          {state.agents.length
-                            ? `${state.agents.length} in this scenario`
+                          {revokedCount
+                            ? `${revokedCount} contained, see Contained`
                             : ""}
                         </span>
                       </div>
-                      {state.agents.length ? (
+                      {liveAgents.length ? (
                         <div className="agent-grid">
-                          {state.agents.map((agent) => (
+                          {liveAgents.map((agent) => (
                             <AgentCard
                               key={agent.agent_id}
                               agent={agent}
@@ -250,9 +260,11 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                         </div>
                       ) : (
                         <div className="empty panel">
-                          {updatedAt
-                            ? "No agents in the current scenario. Start a scenario to see its agents here."
-                            : "Agent cards will appear when the API connects."}
+                          {!updatedAt
+                            ? "Agents will appear when the API connects."
+                            : revokedCount
+                              ? "Every agent has been contained. Re-add one from Contained, or add a new agent below."
+                              : "No agents running. Add one below, or start a scenario."}
                         </div>
                       )}
                     </section>
@@ -271,6 +283,19 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                       />
                       <BlastTimeline api={api} agentId={burnedId} />
                     </div>
+                    <section aria-labelledby="roles-title">
+                      <div className="section-heading">
+                        <h2 id="roles-title">Roles and instances</h2>
+                        <span className="muted">
+                          Add or rebuild agents here
+                        </span>
+                      </div>
+                      <SwarmPanel
+                        key={`${config.burnUrl}:${config.demoToken}`}
+                        api={api}
+                        enabled={configured}
+                      />
+                    </section>
                   </div>
                   <EventFeed events={events} />
                 </div>

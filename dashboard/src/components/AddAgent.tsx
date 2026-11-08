@@ -50,25 +50,39 @@ export function AddAgent({
   roles,
   instances,
   role,
+  template,
+  suggestedName,
   onCreated,
   onClose,
 }: {
   api: BurnApi;
   roles: Role[];
   instances: Instance[];
+  /** Mint another join token for this existing role; capabilities unchanged. */
   role?: Role;
+  /**
+   * Prefill the form from an existing role's capabilities, usually a burned
+   * one being rebuilt. Every field stays editable, so this is a starting
+   * point rather than a copy, and it creates a new role.
+   */
+  template?: Role;
+  suggestedName?: string;
   onCreated: (role: Role) => void;
   onClose: () => void;
 }) {
-  const [name, setName] = useState(role?.name ?? "");
-  const [tools, setTools] = useState<string[]>([]);
-  const [credentials, setCredentials] = useState<string[]>([]);
-  const [mayMessage, setMayMessage] = useState<string[]>([]);
-  const [maySpawn, setMaySpawn] = useState<string[]>([]);
-  const [egress, setEgress] = useState("");
-  const [owner, setOwner] = useState("");
-  const [canaries, setCanaries] = useState(true);
-  const [autoBurn, setAutoBurn] = useState(true);
+  const [name, setName] = useState(role?.name ?? suggestedName ?? "");
+  const [tools, setTools] = useState<string[]>(template?.tools ?? []);
+  const [credentials, setCredentials] = useState<string[]>(
+    template?.credentials ?? [],
+  );
+  const [mayMessage, setMayMessage] = useState<string[]>(
+    template?.may_message ?? [],
+  );
+  const [maySpawn, setMaySpawn] = useState<string[]>(template?.may_spawn ?? []);
+  const [egress, setEgress] = useState((template?.egress ?? []).join(", "));
+  const [owner, setOwner] = useState(template?.owner ?? "");
+  const [canaries, setCanaries] = useState(template?.canaries ?? true);
+  const [autoBurn, setAutoBurn] = useState(template?.auto_burn ?? true);
   const [uses, setUses] = useState("1");
   const [ttl, setTtl] = useState("3600");
   const [created, setCreated] = useState(role);
@@ -185,12 +199,25 @@ export function AddAgent({
   }
   return (
     <SwarmDialog
-      title={role ? `New token for ${role.name}` : "Add agent"}
+      title={
+        role
+          ? `New token for ${role.name}`
+          : template
+            ? `Rebuild from ${template.name}`
+            : "Add agent"
+      }
       busy={busy}
       onClose={onClose}
     >
       {step === "form" ? (
         <form onSubmit={(event) => void submit(event)}>
+          {template && !created && (
+            <p>
+              Copied from <strong>{template.name}</strong>: the same tools,
+              credentials and permissions. Change anything below before creating
+              it, or leave it as is to rebuild the agent exactly.
+            </p>
+          )}
           <fieldset
             disabled={busy || Boolean(created)}
             className="swarm-fields"
