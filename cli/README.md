@@ -5,6 +5,16 @@
 instances, burning an instance, a role, a lineage or a token) and inspects agents: ledger, blast radius and
 the event stream. It is the terminal twin of the dashboard. `import burn` is a small SDK for the code it runs.
 
+## Install
+```bash
+uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"
+burn --help
+```
+This needs [uv](https://docs.astral.sh/uv/) and no checkout; uv fetches Python 3.12 or later when the machine has none.
+To update, run the same command with `--reinstall`. Use uv rather than pip or pipx: `burn` depends on `burn-contracts`
+from the same repository, which uv finds through the CLI's `[tool.uv.sources]` and pip and pipx ignore. In a
+checkout, `make burn ARGS="..."` runs the same CLI.
+
 ## How it works
 - `argparse` + `urllib` for the API client; PyYAML and jsonschema for `burn.yaml`.
 - `BURN_API_URL` comes from the environment, else from the repo-root `.env` (`make env`).
