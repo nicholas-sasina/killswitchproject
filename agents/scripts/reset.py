@@ -15,8 +15,7 @@ instance has been cleaned.
 A full reset is unchanged. --orphans-only additionally sweeps badge secrets
 nothing references any more: clean_instances() finds one by looking its agent
 up in burn-sessions, so a secret whose row was already cleared is invisible to
-that path and is then billed indefinitely. Secrets Manager charges per secret
-per month and a swarm or load test leaves one behind per agent id.
+that path, and Secrets Manager bills it every month until something deletes it.
 
     python scripts/reset.py                 full reset
     python scripts/reset.py --orphans-only  only delete badge clients and badge
@@ -134,15 +133,16 @@ def remove_orphaned_badge_secrets(secrets, keep_agent_ids: set[str]) -> list[str
 
     clean_instances() finds a badge secret by looking its agent up in
     burn-sessions, so a secret whose session row was already cleared is
-    invisible to that path and is then billed indefinitely. Secrets Manager
-    charges per secret per month and a swarm or load test leaves one behind per
-    agent id, so on a long-lived account this is the bulk of the bill.
+    invisible to that path, and Secrets Manager bills it every month until
+    something deletes it.
 
     Only run from --orphans-only, never from a full reset. A reset is followed
-    by new sessions under the same scenario agent ids, and _store_badge() adds
-    a version to an existing secret rather than creating one; deleting the
-    secret there would force a recreate into the window Secrets Manager keeps
-    a deleted name in, which _store_badge() does not handle.
+    by new sessions under the same scenario agent ids, and each of those adds a
+    version to the agent's existing badge secret. Deleting the secrets in a
+    reset would make the first start after it create the name again while
+    Secrets Manager may still be freeing it. _store_badge() survives that, but
+    only by retrying for up to 20 s of a session start's budget, and the secret
+    is reused anyway.
 
     The Cognito side of this already exists: _remove_badges_live() sweeps
     orphaned badge clients the same way.
