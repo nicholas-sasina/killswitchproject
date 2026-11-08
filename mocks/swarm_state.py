@@ -14,7 +14,7 @@ from burn_contracts.names import (
     agent_secret_ref, instance_agent_id, parse_join_token, scenario_role_name,
 )
 
-ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner")
+ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn")
 
 
 class SwarmError(Exception):
@@ -48,7 +48,8 @@ class Swarm:
         return {"name": scenario_role_name(agent_id), "tools": list(agent["tools"]),
                 "credentials": list(agent["credentials"]),
                 "may_message": [scenario_role_name(peer) for peer in agent.get("send_to", [])],
-                "may_spawn": [], "egress": None, "owner": None, "managed_by": "scenario"}
+                "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
+                "managed_by": "scenario"}
 
     def _scenario_roles(self):
         roles = {}
@@ -183,7 +184,18 @@ class Swarm:
         self.state.emit(agent_id, "instance", "started", **fields, detail="Mock instance started.")
         return {"session_id": session_id, "agent_id": agent_id, "badge_ref": agent_secret_ref(agent_id, "badge"),
                 "credentials": issued, "role": role_name, "parent_session": parent_session,
-                "token_id": token_id, "tools": tools, "egress": egress}
+                "token_id": token_id, "tools": tools, "egress": egress,
+                "secrets": self._fake_secrets(session_id, credentials)}
+
+    def _fake_secrets(self, session_id, credentials):
+        """Obviously fake values, so nothing here can be mistaken for a real credential."""
+        secrets_ = {"badge": {"client_id": "mock-client-" + session_id[-6:], "client_secret": "mock-badge-secret",
+                              "token_url": "http://localhost:8700/mock-token", "scope": "burn/tools"}}
+        if "api_key" in credentials:
+            secrets_["api_key"] = "mock-api-key-not-real"
+        if "aws_key" in credentials:
+            secrets_["aws_key"] = {"access_key_id": "MOCKACCESSKEYNOTREAL", "secret_access_key": "mock-secret-not-real"}
+        return secrets_
 
     def instance(self, session):
         return {"session_id": session["session_id"], "agent_id": session["agent_id"],

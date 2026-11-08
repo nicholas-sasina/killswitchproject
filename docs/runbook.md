@@ -60,7 +60,7 @@ The command walkthrough and expected observations are in [demo-script.md](demo-s
 ## Between runs
 
 ```bash
-make reset           # clears demo state and deletes the scenario's minted credentials
+make reset           # clears demo state; deletes the credentials and canaries of the scenario's agents and of every swarm instance, and their badge secrets (join tokens are cleared, roles kept)
 make demo
 ```
 

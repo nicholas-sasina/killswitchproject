@@ -14,7 +14,8 @@ export type EventAction =
   | "started"
   | "exited"
   | "unregistered"
-  | "canary_used";
+  | "canary_used"
+  | "dismissed";
 export type FlagLevel = "seen" | "attempted" | "reported";
 
 export interface LedgerEvent {
@@ -89,6 +90,68 @@ export interface BurnResult {
   sessions_revoked: string[];
   rotated: string[];
   flagged: string[];
+}
+
+export interface RoleFields {
+  name: string;
+  tools: string[];
+  credentials?: ("api_key" | "aws_key")[];
+  may_message?: string[];
+  may_spawn?: string[];
+  egress?: string[] | null;
+  owner?: string | null;
+  canaries?: boolean;
+  auto_burn?: boolean;
+}
+
+export interface RoleSpec extends RoleFields {
+  managed_by?: "code" | "ui";
+}
+
+export interface Role extends RoleFields {
+  managed_by: "code" | "ui" | "scenario";
+  created_at?: string;
+  updated_at?: string;
+  active_instances?: number;
+}
+
+export interface EnrollToken {
+  token_id: string;
+  role: string;
+  uses: number;
+  uses_left: number;
+  expires_at: string;
+  status: "active" | "used_up" | "expired" | "revoked";
+  created_at?: string;
+}
+
+export interface Instance {
+  session_id: string;
+  agent_id: string;
+  role: string;
+  status: "active" | "revoked" | "exited";
+  parent_session?: string | null;
+  token_id?: string | null;
+  owner?: string | null;
+  tools?: string[];
+  egress?: string[] | null;
+  created_at: string;
+  last_seen?: string | null;
+  exited_at?: string | null;
+  exposures?: number;
+}
+
+export interface ScopedBurnRequest {
+  scope: "instance" | "role" | "lineage" | "token";
+  id: string;
+  reason?: string;
+}
+
+export interface ScopedBurnResult {
+  scope: string;
+  id: string;
+  burned: BurnResult[];
+  failed?: { agent_id?: string; error?: string }[];
 }
 
 export interface BlastEvent {

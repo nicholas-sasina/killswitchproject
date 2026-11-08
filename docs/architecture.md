@@ -145,7 +145,10 @@ must identify the source checkout and the actual path they exercised.
 - The proxy runs as its own IAM user with read-only access to sessions and fingerprints and
   write access to events only.
 - Agents run with nothing but their own minted credentials. There is no fallback to the host's
-  AWS credentials.
+  AWS credentials. A role instance receives those values once, in the reply to its join, so a
+  worker host needs only the join token and no read access to Burn's secrets.
+- In production, short-lived STS role sessions would replace the per-instance IAM users and
+  access keys: nothing long-lived to rotate, delete or leak, and expiry would do the work of a reset.
 
 ## Known limits
 

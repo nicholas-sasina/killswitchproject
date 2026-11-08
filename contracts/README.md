@@ -95,6 +95,9 @@ Scenario `files[].content` and `customers[].notes` may contain:
   verified badge session (`names.canary_secret_ref(session.agent_id, session.session_id)`), so one session
   can never read another session's canary. Reading it is recorded in the ledger like any credential; only
   presenting it to the provider is an incident.
+  **Placement**: put `{{canary}}` only where an honest agent has no reason to use it, e.g. a revoked key in
+  an archived migration note, a commented-out line in a backup file, another team's old ticket. Never in
+  the config or instructions the agent needs for its task (it already has its own `api_key` for that).
 
 The tool Lambda resolves them **at read time** from Secrets Manager (`AWSCURRENT`). So the raw
 values exist only in Secrets Manager, and after a rotation the file shows the new value.
@@ -117,7 +120,8 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 
 `burn-sessions` rows keep their existing fields (`session_id`, `agent_id`, `client_id`, `status`,
 `tools`, `send_to`, `created_at`). Instances add optional fields, never renaming or removing one:
-`role`, `parent_session`, `token_id`, `owner`, `egress`, `last_seen`, `exited_at`.
+`role`, `parent_session`, `token_id`, `owner`, `egress`, `credentials` (the narrowed credential types
+minted for the instance), `last_seen`, `exited_at`.
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
 `burn-enroll-tokens` rows: `token_id`, `role`, `secret_sha256`, `uses`, `uses_left`, `expires_at`,
@@ -132,6 +136,12 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
   credentials are the role's intersected with the parent's; its egress is the role's list
   intersected with the parent's (null on one side means take the other side's list).
 - The session row's `tools` comes from the role, so the Gateway enforces it as before.
+- A role instance's `POST /sessions` reply carries its own secret values once (`secrets`: badge, api_key,
+  aws_key), so the host needs only the token. A join token is therefore a credential (it yields
+  credentials once): keep it out of shell history, logs and files.
+- A role's `egress` list narrows every outbound destination except Burn's own Gateway, which it never
+  blocks: the Gateway already checks tools per role. Model endpoints such as Bedrock are narrowed like any
+  other host, so a role that calls a model lists it.
 - Burn scopes (`POST /burns`): `instance`, `role`, `lineage` (an instance and every descendant),
   `token` (every instance that joined with it; the token is revoked too).
 
@@ -139,16 +149,33 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 - **Canary incident**: the mock provider recognises a canary by its exact fingerprint, always answers 401
   (same body as an unknown key), writes one `canary_used` event (`source=provider`) and hands the incident to
   the Burn API. Repeated presentations only bump a counter on the canary's registry row.
-- **Trusted-signal policy** (what may contain a session automatically): the canary maps to exactly one
-  session; that session's agent has the canary in its exposure ledger (it was really delivered to it); the
-  session row still exists, belongs to the same agent, and is `active`. Containment is the
-  conditional flip of that one session `active -> revoked`, so concurrent or repeated incidents contain once.
-  Anything else is recorded and flagged for review, never contained, and never widened to the agent or role.
+- **Where it was used from** decides burn vs alert:
+  - *outside Burn* (no valid session proof): the only case that may burn, and only if the role has
+    `auto_burn` on (default). `auto_burn: false` makes the role report-only: alert and flag, never burn.
+  - *through the instance's own session*: an alert, never a burn. With the proxy enforcing, the exit check
+    blocks the canary before it leaves (a `blocked` event naming the canary). If the proxy ever forwards it
+    (report-only egress), it adds `x-burn-session-proof` and the provider records `canary_used` as an alert.
+  - *through another Burn session*: an alert plus a review flag (the canary reached a second instance).
+- **Session proof header** (set by the egress proxy on requests to the provider; the proxy drops any copy
+  the agent sent): `x-burn-session-proof: v1.<session_id>.<unix_ts>.<hmac>` where
+  `hmac = hmac_sha256_hex(fingerprint_key, "burn-session-proof:v1:<session_id>:<unix_ts>")`. The provider
+  accepts it for 120 s. Agents never hold the fingerprint key, so they cannot forge one.
+- **Trusted-signal policy** (what may burn, on top of the above): the canary maps to exactly one session;
+  that session's agent has the canary in its exposure ledger and no other agent does; the session row
+  still exists, belongs to the same agent, and is `active`. Containment is the conditional flip of that one
+  session `active -> revoked`, so concurrent or repeated incidents contain once. Anything else is recorded
+  and flagged for review, never contained, and never widened to the agent or role.
+- **Roles**: `canaries` (default true) gives each instance a canary; `auto_burn` (default true) as above.
 - **Flag levels** for credentials an agent saw but does not own (`burn-credentials.flag_level`):
   `seen` (entered an agent's context) < `attempted` (an exit or tool-argument check blocked it leaving)
   < `reported` (trusted evidence it was presented at a monitored service). Levels only go up; each level keeps
   the first evidence that reached it (`flag_evidence_<level>`, safe metadata only). `status` stays `flagged`
   for older readers. Flagged credentials are never rotated automatically.
+- **One flag per credential**, on its `burn-credentials` row: highest level, `instance_count` (distinct
+  agent ids whose evidence flagged it; at most 500 ids kept), first evidence per level. Owners resolve it
+  with a reason (`POST /flags/resolve`): `rotate` mints a new version (agents get it through placeholders)
+  and clears the flag; `dismiss` keeps the value and closes the flag. A dismissed flag reopens only on
+  evidence at a higher level than the level it was dismissed at.
 
 ### Events
 - Build every event with `burn_contracts.events.make_event(...)`. It fills `event_id` and `ts`

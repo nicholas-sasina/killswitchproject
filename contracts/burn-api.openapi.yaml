@@ -76,6 +76,31 @@ paths:
                   token_id: { type: string, nullable: true }
                   tools: { type: array, items: { type: string } }
                   egress: { type: array, items: { type: string }, nullable: true }
+                  secrets:
+                    type: object
+                    required: [badge]
+                    description: |
+                      The instance's own secret values, returned ONLY when a role instance starts
+                      (`enroll_token` or `parent_session`); the scenario `agent_id` form never returns it.
+                      Returned once: Burn never sends these values again. The caller hands them to the
+                      instance and must not log or store them. The join token is the authority to receive them.
+                    properties:
+                      badge:
+                        type: object
+                        required: [client_id, client_secret, token_url, scope]
+                        properties:
+                          client_id: { type: string }
+                          client_secret: { type: string }
+                          token_url: { type: string }
+                          scope: { type: string }
+                      api_key: { type: string, description: Present if the role mints an api_key. }
+                      aws_key:
+                        type: object
+                        description: Present if the role mints an aws_key.
+                        required: [access_key_id, secret_access_key]
+                        properties:
+                          access_key_id: { type: string }
+                          secret_access_key: { type: string }
         '403': { description: join token invalid, expired, used up or revoked; or role not in the parent's may_spawn }
         '404': { description: agent_id is not in the loaded scenario, or the role or parent session does not exist }
         '429': { description: rate limited while issuing credentials; retry with backoff }
@@ -374,6 +399,41 @@ paths:
                         agent_id: { type: string }
                         error: { type: string }
         '404': { description: nothing matches the scope and id }
+  /flags:
+    get:
+      summary: Flagged credentials awaiting (or after) owner review, highest level first.
+      responses:
+        '200':
+          description: Flags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flags]
+                properties:
+                  flags: { type: array, items: { $ref: '#/components/schemas/Flag' } }
+  /flags/resolve:
+    post:
+      summary: Owner decision on one flag - rotate the credential or dismiss the flag, with a reason.
+      description: |
+        A later event at a HIGHER level than the level at dismissal reopens a dismissed flag;
+        same-or-lower evidence only updates the instance count. Writes a `rotated` or `dismissed` event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FlagResolution' }
+      responses:
+        '200':
+          description: The flag after the decision (after rotate, the new version has no flag)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flag: { $ref: '#/components/schemas/Flag' }
+                  rotated_to_version: { type: integer, nullable: true }
+        '404': { description: not a flagged credential }
 components:
   securitySchemes:
     demoToken:
@@ -381,6 +441,48 @@ components:
       in: header
       name: x-burn-demo-token
   schemas:
+    Flag:
+      type: object
+      description: One flag per credential. Never contains a credential value.
+      required: [secret_ref, flag_level, instance_count, state]
+      properties:
+        secret_ref: { type: string, example: burn/shared/crm_db_url }
+        secret_type: { type: string, enum: [aws_key, api_key, other] }
+        owner_agent_id: { type: string, description: '"shared", or the agent that owns the credential' }
+        flag_level: { type: string, enum: [seen, attempted, reported], description: highest level reached; never decreases }
+        instance_count: { type: integer, description: distinct instances (agent ids) whose evidence flagged it }
+        state: { type: string, enum: [open, dismissed, rotated], description: 'open until an owner decides. rotated is only returned by /flags/resolve: the new credential version starts with no flag, so GET /flags no longer lists it' }
+        flagged_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        evidence:
+          type: object
+          description: The first evidence that reached each level (safe ids only).
+          properties:
+            seen: { type: object }
+            attempted: { type: object }
+            reported: { type: object }
+        resolution:
+          type: object
+          nullable: true
+          description: The latest owner decision.
+          properties:
+            action: { type: string, enum: [rotate, dismiss] }
+            reason: { type: string }
+            by: { type: string, nullable: true }
+            at: { type: string, format: date-time }
+            level: { type: string, enum: [seen, attempted, reported], description: level when the owner decided }
+    FlagResolution:
+      type: object
+      required: [secret_ref, action, reason]
+      additionalProperties: false
+      properties:
+        secret_ref: { type: string }
+        action:
+          type: string
+          enum: [rotate, dismiss]
+          description: 'rotate = mint a new value now (agents read it through placeholders) and clear the flag; dismiss = keep the value, close the flag'
+        reason: { type: string, minLength: 3, maxLength: 300, description: 'Shown in the event feed. Refused if it contains a registered credential.' }
+        by: { type: string, pattern: '^[A-Za-z0-9 ._@-]{1,64}$', description: who decided }
     AgentId:
       type: string
       pattern: '^agent-[a-z0-9-]{1,40}$'
@@ -437,8 +539,13 @@ components:
           type: array
           items: { type: string }
           nullable: true
-          description: Allowed outbound hosts for this role's instances. Null = the default allowlist.
+          description: "Allowed outbound hosts for this role's instances. Null = the default allowlist. Burn's own Gateway is never blocked by it, since the Gateway already checks tools per role; every other destination, model endpoints included, must be listed."
         owner: { type: string, nullable: true, description: team or person responsible }
+        canaries: { type: boolean, default: true, description: "Give each instance its own canary (a decoy key that never authenticates)." }
+        auto_burn:
+          type: boolean
+          default: true
+          description: "Burn an instance automatically when its canary is used from outside Burn. false = report-only: alert and flag, never burn."
     RoleSpec:
       description: Request body for creating or saving a role.
       allOf:

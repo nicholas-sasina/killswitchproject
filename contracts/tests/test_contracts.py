@@ -243,3 +243,30 @@ def test_canary_secret_ref_is_per_session_deterministic_and_valid():
             names.canary_secret_ref(WORKER, bad)
     with pytest.raises(ValueError):
         names.canary_secret_ref("shared", "sess_aaaa")
+
+
+def test_roles_can_turn_off_canaries_and_auto_burn():
+    schema = json.loads((ROOT / "burn.schema.json").read_text())
+    role = {"name": "worker", "tools": ["read_config"], "canaries": True, "auto_burn": False}
+    jsonschema.validate({"version": 1, "roles": [role]}, schema)
+    props = schema["$defs"]["role"]["properties"]
+    assert props["canaries"]["default"] is True and props["auto_burn"]["default"] is True
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"version": 1, "roles": [role | {"auto_burn": "no"}]}, schema)
+    api = yaml.safe_load((ROOT / "burn-api.openapi.yaml").read_text())
+    fields = api["components"]["schemas"]["RoleFields"]["properties"]
+    assert fields["canaries"]["default"] is True and fields["auto_burn"]["default"] is True
+
+
+def test_dismissed_event_and_flag_routes():
+    event = events.make_event(agent_id="system", source="burn", action="dismissed",
+                              secret_ref="burn/shared/crm_db_url", flag_level="attempted",
+                              detail="dismissed by sec-team: test fixture, not a real database")
+    jsonschema.validate(event, EVENT_SCHEMA)
+    for spec in ("burn-api.openapi.yaml", "minter.openapi.yaml"):
+        doc = yaml.safe_load((ROOT / spec).read_text())
+        assert {"/flags", "/flags/resolve"} <= set(doc["paths"])
+        resolution = doc["components"]["schemas"]["FlagResolution"]
+        assert resolution["properties"]["action"]["enum"] == ["rotate", "dismiss"]
+        assert "reason" in resolution["required"]
+        assert "instance_count" in doc["components"]["schemas"]["Flag"]["required"]

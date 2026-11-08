@@ -45,23 +45,39 @@ class BurnApiStack(cdk.Stack):
                 "service-role/AWSLambdaBasicExecutionRole")],
         )
         role.add_to_policy(iam.PolicyStatement(
-            actions=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+            # Scan: instance, role, parent and token lookups are filtered scans of this table.
+            actions=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem",
+                     "dynamodb:Scan"],
             resources=[table_arn(names.SESSIONS_TABLE), f"{table_arn(names.SESSIONS_TABLE)}/index/by_agent"],
         ))
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:GetItem"],
             resources=[table_arn(names.SCENARIO_TABLE), table_arn(names.CREDENTIALS_TABLE)],
         ))
-        role.add_to_policy(iam.PolicyStatement(
-            actions=["dynamodb:PutItem", "dynamodb:Query"], resources=[table_arn(names.EVENTS_TABLE)]))
-        role.add_to_policy(iam.PolicyStatement(
-            actions=["dynamodb:Query"], resources=[table_arn(names.EXPOSURES_TABLE)]))
+        role.add_to_policy(iam.PolicyStatement(  # roles: get, put and list (Scan) only
+            actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan"],
+            resources=[table_arn(names.ROLES_TABLE)],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # join tokens: create, redeem (conditional update), revoke
+            actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+            resources=[table_arn(names.ENROLL_TOKENS_TABLE)],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # by_agent: a burn raises what the agent tried to send out
+            actions=["dynamodb:PutItem", "dynamodb:Query"],
+            resources=[table_arn(names.EVENTS_TABLE), f"{table_arn(names.EVENTS_TABLE)}/index/by_agent"]))
+        role.add_to_policy(iam.PolicyStatement(  # Scan: a canary incident checks no other agent holds it
+            actions=["dynamodb:Query", "dynamodb:Scan"], resources=[table_arn(names.EXPOSURES_TABLE)]))
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:{names.DEMO_TOKEN_SECRET}-*"],
         ))
-        role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge
-            actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue"],
+        role.add_to_policy(iam.PolicyStatement(  # a role instance's own values, handed to it once at join
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/api_key-*",
+                       f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/aws_key-*"],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge (delete: a failed join's)
+            actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:DeleteSecret"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/*/badge-*"],
         ))
         role.add_to_policy(iam.PolicyStatement(
@@ -81,7 +97,7 @@ class BurnApiStack(cdk.Stack):
         ))
 
         fn = lambda_.Function(
-            self, "Function", function_name="burn-api", runtime=lambda_.Runtime.PYTHON_3_12,
+            self, "Function", function_name=names.BURN_API_FUNCTION, runtime=lambda_.Runtime.PYTHON_3_12,
             handler="handler.handler", code=lambda_.Code.from_asset(code_dir), role=role,
             timeout=cdk.Duration.seconds(29), memory_size=256,
         )
@@ -91,7 +107,8 @@ class BurnApiStack(cdk.Stack):
             default_integration=integrations.HttpLambdaIntegration("Integration", fn),
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_origins=[DASHBOARD_ORIGIN],
-                allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.OPTIONS],
+                allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.PUT,
+                               apigw.CorsHttpMethod.DELETE, apigw.CorsHttpMethod.OPTIONS],
                 allow_headers=["content-type", names.DEMO_TOKEN_HEADER],
             ),
         )
