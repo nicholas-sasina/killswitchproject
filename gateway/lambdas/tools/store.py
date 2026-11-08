@@ -11,6 +11,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from burn_contracts.events import utc_now_iso
 from burn_contracts.ids import new_ulid
+from burn_contracts.events import EVENT_RETENTION_DAYS, TTL_ATTRIBUTE, ttl_epoch
 from burn_contracts.names import MESSAGES_TABLE, REGION, SCENARIO_TABLE
 
 OUTBOX = "outbox"  # burn-messages partition for notify() output
@@ -54,7 +55,11 @@ def put_message(to_agent: str, from_agent: str, text: str, **extra) -> str:
     msg_id = new_ulid()  # sorts by time, so an inbox reads oldest first
     _dynamodb().Table(MESSAGES_TABLE).put_item(Item={
         "to_agent": to_agent, "msg_id": msg_id, "from_agent": from_agent,
-        "text": text, "ts": utc_now_iso(), **extra,
+        "text": text, "ts": utc_now_iso(),
+        # Read deletes the row; this only reclaims mail an agent never
+        # collected because it was burned mid-flight.
+        TTL_ATTRIBUTE: ttl_epoch(EVENT_RETENTION_DAYS),
+        **extra,
     })
     return msg_id
 
@@ -65,4 +70,6 @@ def take_messages(to_agent: str) -> list[dict]:
     items = table.query(KeyConditionExpression=Key("to_agent").eq(to_agent), ConsistentRead=True).get("Items", [])
     for item in items:
         table.delete_item(Key={"to_agent": to_agent, "msg_id": item["msg_id"]})
-    return items
+    # The TTL attribute is storage bookkeeping, and DynamoDB returns numbers as
+    # Decimal, which json.dumps cannot encode. Keep it out of the tool payload.
+    return [{k: v for k, v in item.items() if k != TTL_ATTRIBUTE} for item in items]

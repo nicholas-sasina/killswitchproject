@@ -9,7 +9,7 @@ the conditions; this module only notices and asks. It never blocks the request.
 import logging
 
 import boto3
-from burn_contracts.events import make_event, utc_now_iso
+from burn_contracts.events import for_storage, make_event, utc_now_iso
 from burn_contracts.names import CREDENTIALS_TABLE, EVENTS_STREAM, EVENTS_TABLE, REGION
 
 import dispatch
@@ -38,7 +38,7 @@ def maybe_report(row: dict, digest: str) -> str | None:
             secret_type=row.get("secret_type"), owner="shared", flag_level="reported",
             detail="flagged shared credential presented at the provider; owner should rotate it")
         boto3.resource("dynamodb", region_name=REGION).Table(EVENTS_TABLE).put_item(
-            Item={"stream": EVENTS_STREAM, **event})
+            Item={"stream": EVENTS_STREAM, **for_storage(event)})
         return "reported"
     except Exception as exc:  # reporting must never break a legitimate request
         log.error("shared credential report failed for %s: %s", ref, type(exc).__name__)
