@@ -46,7 +46,7 @@ const WORDS = [
   "ten",
 ];
 
-/** "two" for small counts, digits from 11 up, as the board writes them. */
+/** "two" for small counts, digits from 11 up. */
 export function countWord(n: number): string {
   return WORDS[n] ?? String(n);
 }
@@ -231,6 +231,31 @@ function triggerSentence(agent: ConsoleAgent, trigger: BurnTrigger): string {
 }
 
 /**
+ * What started again after today's burns, from the replacements the API
+ * linked: "worker-18 took over its task, and nothing else restarted."
+ */
+export function restarted(burned: ConsoleAgent[], model: ConsoleModel): string {
+  const replaced = burned.filter((agent) => agent.instance?.replaced_by);
+  if (!replaced.length) return "Nothing else restarted.";
+  const names = replaced.map(
+    (agent) => findAgent(model, agent.instance?.replaced_by)?.name,
+  );
+  const who =
+    names.length <= 3 && names.every(Boolean)
+      ? joinList(names as string[])
+      : names.length === 1
+        ? "A fresh agent"
+        : `${capitalise(countWord(names.length))} fresh agents`;
+  const task =
+    burned.length === 1
+      ? "its task"
+      : replaced.length === 1
+        ? `${replaced[0].name}’s task`
+        : "their tasks";
+  return `${who} took over ${task}, and nothing else restarted.`;
+}
+
+/**
  * The night hero's state: an incident when an agent was burned today
  * ("worker-07 was burned. The other 19 kept working."), all clear otherwise
  * ("All 20 agents are clean."). `burned` is today's burns, newest first;
@@ -285,15 +310,10 @@ export function heroCopy({
         own?.flagged.length ?? 0,
         false,
       );
-      const replacement = newest.instance?.replaced_by
-        ? findAgent(model, newest.instance.replaced_by)?.name
-        : undefined;
       const lede = [
         triggerSentence(newest, burnTrigger(newest, events)),
         `Burn ${joinList([`revoked ${newest.name}`, ...did])}.`,
-        replacement
-          ? `${replacement} took over its task, and nothing else restarted.`
-          : "Nothing else restarted.",
+        restarted(burned, model),
       ].join(" ");
       return {
         incident: true,
@@ -317,7 +337,7 @@ export function heroCopy({
         `${burned.length} agents were burned today.`,
         otherLine(running).replace("The other agent", "One other agent"),
       ],
-      lede: `Burn ${joinList(["revoked each of them", ...did])}. Nothing else restarted.`,
+      lede: `Burn ${joinList(["revoked each of them", ...did])}. ${restarted(burned, model)}`,
       ...links,
     };
   }

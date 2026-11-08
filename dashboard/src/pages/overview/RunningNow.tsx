@@ -112,16 +112,22 @@ export function RunningNow({
       }
       className="ov-now"
       aside={
-        <div className="ov-legend" aria-label="Legend">
-          <span className="ov-legend-item">
-            <span className="square square-running square-12" />
+        <ul className="ov-legend" aria-label="Legend">
+          <li className="ov-legend-item">
+            <span
+              className="square square-running square-12"
+              aria-hidden="true"
+            />
             Running
-          </span>
-          <span className="ov-legend-item">
-            <span className="square square-burned square-12" />
+          </li>
+          <li className="ov-legend-item">
+            <span
+              className="square square-burned square-12"
+              aria-hidden="true"
+            />
             Burned today, still shown here for one day
-          </span>
-        </div>
+          </li>
+        </ul>
       }
     >
       {loading ? (

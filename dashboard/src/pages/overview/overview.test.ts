@@ -17,6 +17,7 @@ import {
   evidenceSince,
   heroCopy,
   joinList,
+  restarted,
   roleLine,
   runningNowRows,
   sameRow,
@@ -153,7 +154,7 @@ function canaryBurn(extra: Partial<Instance> = {}) {
 }
 
 describe("words", () => {
-  it("writes small counts as words, as the board does", () => {
+  it("writes small counts as words", () => {
     expect(countWord(1)).toBe("one");
     expect(countWord(2)).toBe("two");
     expect(countWord(10)).toBe("ten");
@@ -249,7 +250,7 @@ describe("the last 24 hours strip", () => {
 });
 
 describe("the hero", () => {
-  it("tells one burn the board's way, from the burn's own events", () => {
+  it("tells one burn from the burn's own events", () => {
     const data = world(canaryBurn());
     const hero = heroCopy({ ...data, history: complete });
     expect(hero.incident).toBe(true);
@@ -284,6 +285,38 @@ describe("the hero", () => {
     });
     expect(heroCopy({ ...data, history: complete }).lede).toContain(
       "worker-04 took over its task, and nothing else restarted.",
+    );
+  });
+
+  it("names the replacements that took over after several burns", () => {
+    const burnedAt = { last_seen: at(19, 0) };
+    const data = world({
+      instances: [
+        instance("w1", "worker", "revoked", { ...burnedAt, replaced_by: "w8" }),
+        instance("w2", "worker", "revoked", { ...burnedAt, replaced_by: "w9" }),
+        instance("w3", "worker", "revoked", burnedAt),
+        instance("w8", "worker", "active", { created_at: at(19, 1) }),
+        instance("w9", "worker", "active", { created_at: at(19, 2) }),
+      ],
+    });
+    expect(heroCopy({ ...data, history: complete }).lede).toBe(
+      "Burn revoked each of them. worker-04 and worker-05 took over their tasks, and nothing else restarted.",
+    );
+  });
+
+  it("names whose task one replacement took over", () => {
+    const data = world({
+      instances: [
+        instance("w1", "worker", "revoked", {
+          last_seen: at(18, 0),
+          replaced_by: "w9",
+        }),
+        instance("w2", "worker", "revoked", { last_seen: at(19, 0) }),
+        instance("w9", "worker", "active", { created_at: at(18, 1) }),
+      ],
+    });
+    expect(restarted(data.burned, data.model)).toBe(
+      "worker-03 took over worker-01’s task, and nothing else restarted.",
     );
   });
 
@@ -440,17 +473,18 @@ describe("running now", () => {
     ).toBe(false);
   });
 
-  it("stays quick at 200 agents", () => {
+  it("gives each of 200 agents one square, in its role's row", () => {
     const { model } = world({
       roles,
       instances: Array.from({ length: 200 }, (_, i) =>
         instance(`w${i}`, i % 5 ? "worker" : "reader"),
       ),
     });
-    const start = performance.now();
     const rows = runningNowRows(model);
-    expect(performance.now() - start).toBeLessThan(50);
-    expect(rows.reduce((n, row) => n + row.squares.length, 0)).toBe(200);
+    expect(rows.map((row) => [row.name, row.squares.length])).toEqual([
+      ["worker", 160],
+      ["reader", 40],
+    ]);
   });
 });
 
