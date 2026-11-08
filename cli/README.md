@@ -98,8 +98,9 @@ burn env            # what an instance's environment would hold (values hidden; 
    items per instance); a broken rule is a 400 that names it. A `done` is answered at once, 200 `{"queued": true}`
    (`false` for a repeat that changes nothing), and sent with the next heartbeat. A `started` is answered only
    once Burn has recorded it, because the agent must not act on an item Burn does not know it touched: 200
-   `{"queued": ..., "recorded": true}` means go ahead; 409 means the instance was burned, 400 that Burn refused
-   the start, and 503 that Burn has not confirmed it within 15 s (it stays queued). Only a 200 means go ahead.
+   `{"queued": ..., "recorded": true}` means go ahead; 409 means the instance was burned; 503 means it was not
+   recorded: Burn has not confirmed it within 15 s (it stays queued), or Burn refused the heartbeat that carried
+   it, usually over another event (report it again). Only a 200 means go ahead.
 6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL
    after 5 s) and `burn run` exits with 3. A normal exit posts `/instances/{id}/exit`. SIGINT and SIGTERM are
    forwarded to the agent. Queued progress goes in the heartbeat body, `{"progress": [...]}`, oldest first and at

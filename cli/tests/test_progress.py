@@ -175,12 +175,18 @@ def test_started_on_a_burned_instance_is_a_409_so_the_agent_stops_before_acting(
     assert post(endpoint.progress_url, ev("item-02"))[0] == 409  # and every later start, at once
 
 
-def test_a_start_burn_refused_is_a_400_with_its_reason(endpoint):
+def test_a_start_in_a_refused_batch_is_told_it_may_succeed_if_reported_again(endpoint):
     thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
     until(endpoint.queue.waiting)
-    endpoint.queue.dropped(1, "HTTP 400: at most 500 items per instance")
-    thread.join(2)
-    assert out["reply"][0] == 400 and "at most 500 items per instance" in out["reply"][1]["error"]
+    endpoint.queue.dropped(1, "HTTP 400: item id must match")  # another event in the same batch broke the rule
+    thread.join(5)
+    status, reply = out["reply"]
+    assert status == 503 and "report it again" in reply["error"] and "item id must match" in reply["error"]
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))  # and it does succeed
+    until(endpoint.queue.waiting)
+    endpoint.queue.sent(1)
+    thread.join(5)
+    assert out["reply"] == (200, {"queued": True, "recorded": True})
 
 
 def test_a_start_burn_has_not_recorded_in_time_is_a_503_and_stays_queued():
@@ -411,7 +417,7 @@ def test_a_refused_heartbeat_drops_its_progress_and_the_agent_keeps_running(stac
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
     assert [batch for _, batch in progress_beats(seen)] == [[ev("bad-item")], [ev("good-item")]]
     (bad_status, bad), (good_status, good) = json.loads(out.read_text())
-    assert bad_status == 400 and "at most 500 items per instance" in bad["error"]  # the agent must not start it
+    assert bad_status == 503 and "report it again" in bad["error"]  # not recorded: the agent must not start it yet
     assert (good_status, good) == (200, {"queued": True, "recorded": True})
     assert "refused 1 progress events" in capfd.readouterr().err
     assert next(iter(stack.instances.values()))["status"] == "exited"
