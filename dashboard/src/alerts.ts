@@ -27,7 +27,7 @@ export const TIER_NAME: Record<Tier, string> = {
 /** A plain sentence for each severity, shown beside the tallies. */
 export const TIER_MEANING: Record<Tier, string> = {
   crit: "Evidence a credential was used by someone else",
-  high: "Stopped at the boundary, or a dead credential reused",
+  high: "A credential stopped at the boundary, or a dead one reused",
   warn: "Contained inside the system; worth a look",
   info: "Recorded for the audit trail; no action needed",
 };
@@ -50,6 +50,66 @@ interface Rule {
   title: string;
   why: string;
   next: string;
+}
+
+/**
+ * Whether a block or refusal concerns a credential. The egress proxy writes
+ * `blocked` for every request it stops, and most are policy decisions about
+ * the destination, port or size with no credential involved. Only a block
+ * that names a credential is evidence that one tried to leave.
+ */
+function carriesCredential(event: LedgerEvent): boolean {
+  return (
+    Boolean(event.secret_ref || event.fingerprint) ||
+    event.detail === "credential_detected"
+  );
+}
+
+/** The reason a component gave, readable. */
+function reason(event: LedgerEvent): string {
+  return event.detail ? event.detail.replaceAll("_", " ") : "no reason given";
+}
+
+/**
+ * `refused` is written by the gateway, the egress proxy and the response
+ * check, for different reasons. Each one gets wording that says what
+ * actually happened.
+ */
+function classifyRefusal(event: LedgerEvent): Rule {
+  const detail = event.detail ?? "";
+  if (event.source === "tool_response")
+    return {
+      tier: "warn",
+      title: "Tool response withheld",
+      why: `The gateway could not make a tool response safe to hand over (${reason(event)}), so the agent got a denial instead. Burn does not hand over what it cannot check.`,
+      next: "Usually a response too large to scan, or a credential the gateway could not replace with a reference. Check the tool's output if it keeps happening.",
+    };
+  if (detail === "badge revoked" || detail === "session_inactive")
+    return {
+      tier: "warn",
+      title: "Burned agent's call refused",
+      why:
+        event.source === "egress"
+          ? "An agent whose session was ended tried to reach the network through the egress proxy and was turned away. This is containment working, visible after the fact."
+          : "An agent whose badge was revoked tried to call a tool and was turned away. This is containment working, visible after the fact.",
+      next: "None, unless the agent keeps trying long after the burn, which means its process did not stop.",
+    };
+  if (detail.startsWith("unknown badge") || detail === "session_required")
+    return {
+      tier: "high",
+      title: "Unknown caller refused",
+      why:
+        event.source === "egress"
+          ? "Something tried to use the egress proxy without a session Burn issued."
+          : "Something called the gateway with a badge Burn never issued.",
+      next: "Match it against current instances. If none matches, treat the host as untrusted and revoke the join token it used.",
+    };
+  return {
+    tier: "warn",
+    title: "Call outside the agent's role refused",
+    why: `The agent asked for something its role does not allow (${reason(event)}) and was refused.`,
+    next: "Check the agent's instructions. Asking for tools, recipients or credentials outside its role is a common sign of injected instructions.",
+  };
 }
 
 function classify(event: LedgerEvent): Rule | undefined {
@@ -76,6 +136,13 @@ function classify(event: LedgerEvent): Rule | undefined {
         next: "Confirm the refusal came from the provider and not from a stale client of your own. If it did not, find what is still holding the old value.",
       };
     case "blocked":
+      if (!carriesCredential(event))
+        return {
+          tier: "warn",
+          title: "Outbound request blocked by policy",
+          why: `The egress proxy stopped a request its policy does not allow (${reason(event)}). No credential was found in it, so nothing secret left.`,
+          next: "If this role should reach that destination, add it to the role's egress list. If not, find out why the agent tried; injected instructions often show up here first.",
+        };
       // Where the block happened changes what it proves, so the two are
       // separate alerts rather than one with a vague title.
       return event.source === "egress"
@@ -92,12 +159,7 @@ function classify(event: LedgerEvent): Rule | undefined {
             next: "Usually the agent copying a config file verbatim. Worth noting if one agent does it repeatedly, which points at its instructions.",
           };
     case "refused":
-      return {
-        tier: "warn",
-        title: "Burned agent's call refused",
-        why: "An agent whose badge was revoked tried to call a tool and was turned away. This is containment working, visible after the fact.",
-        next: "None, unless the agent keeps trying long after the burn, which means its process did not stop.",
-      };
+      return classifyRefusal(event);
     case "flagged": {
       // flag_level says how far the credential actually travelled.
       const reported = event.flag_level === "reported";
