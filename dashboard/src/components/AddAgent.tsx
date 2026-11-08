@@ -6,6 +6,8 @@ import { ErrorMessage } from "./common";
 import { SwarmDialog } from "./SwarmDialog";
 
 const rolePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const roleNameConflict =
+  "A role with that name already exists. Choose a new role name.";
 
 function Choices({
   title,
@@ -83,6 +85,9 @@ export function AddAgent({
   const [owner, setOwner] = useState(template?.owner ?? "");
   const [canaries, setCanaries] = useState(template?.canaries ?? true);
   const [autoBurn, setAutoBurn] = useState(template?.auto_burn ?? true);
+  const [replaceOnBurn, setReplaceOnBurn] = useState(
+    template?.replace_on_burn ?? false,
+  );
   const [uses, setUses] = useState("1");
   const [ttl, setTtl] = useState("3600");
   const [created, setCreated] = useState(role);
@@ -122,6 +127,10 @@ export function AddAgent({
       );
       return;
     }
+    if (!created && roles.some((existing) => existing.name === name)) {
+      setError(roleNameConflict);
+      return;
+    }
     const hosts = egress.split(/[\s,]+/).filter(Boolean);
     if (hosts.some((host) => !/^(\*\.)?[a-z0-9.-]{1,253}$/.test(host))) {
       setError(
@@ -158,12 +167,21 @@ export function AddAgent({
           owner: owner.trim() || null,
           canaries,
           auto_burn: autoBurn,
+          replace_on_burn: replaceOnBurn,
           // Not on the form, so a copy keeps the original's setting rather
           // than falling back to the API's default.
           ...(template?.references ? { references: template.references } : {}),
           managed_by: "ui",
         };
-        target = await api.createRole(spec);
+        target = await api.createRole(spec).catch((error: unknown) => {
+          if (
+            error instanceof Error &&
+            error.message === "API request failed (HTTP 409)."
+          ) {
+            throw new Error(roleNameConflict);
+          }
+          throw error;
+        });
         setCreated(target);
         onCreated(target);
       }
@@ -270,6 +288,16 @@ export function AddAgent({
                       onChange={(event) => setAutoBurn(event.target.checked)}
                     />
                     Burn automatically if the canary is used
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={replaceOnBurn}
+                      onChange={(event) =>
+                        setReplaceOnBurn(event.target.checked)
+                      }
+                    />
+                    Replace on burn
                   </label>
                 </div>
                 <Choices

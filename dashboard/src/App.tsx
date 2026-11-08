@@ -6,7 +6,7 @@ import type { AgentState, BurnResult, Instance } from "./contracts";
 import { newestEvents } from "./events";
 import { MockBanner, mockDataReducer } from "./MockBanner";
 import { useEventFeed, usePolling } from "./polling";
-import { hrefFor, useView, VIEWS, type View } from "./router";
+import { hrefFor, useInstanceId, useView, VIEWS, type View } from "./router";
 import { useSystemTheme } from "./theme";
 import { ErrorMessage } from "./components/common";
 import { Brand } from "./components/Brand";
@@ -23,6 +23,7 @@ import { PageHead } from "./components/PageHead";
 import { SwarmPanel } from "./components/SwarmPanel";
 import { SignIn, ConfigurationNotice } from "./components/SignIn";
 import type { PeopleAuth } from "./auth";
+import { InstanceDetails } from "./components/InstanceDetails";
 
 const NAV: Record<View, { label: string; hint: string }> = {
   overview: { label: "Overview", hint: "Live agents and roles" },
@@ -59,6 +60,7 @@ function Dashboard({ config, auth }: { config: ApiConfig; auth?: PeopleAuth }) {
   const { state, error, updatedAt } = useEventFeed(api, configured);
   const events = useMemo(() => newestEvents(state), [state]);
   const view = useView();
+  const instanceId = useInstanceId();
   // The navigation marker counts anything above "noted", so the operator can
   // stay on another view and still know the queue is filling.
   const pending = useMemo(() => attentionCount(toAlerts(events)), [events]);
@@ -404,6 +406,16 @@ function Dashboard({ config, auth }: { config: ApiConfig; auth?: PeopleAuth }) {
           </main>
         </div>
       </div>
+      {instanceId && (
+        <InstanceDetails
+          key={instanceId}
+          sessionId={instanceId}
+          instances={instances}
+          onClose={() => {
+            window.location.hash = hrefFor(view);
+          }}
+        />
+      )}
       {confirmAgent && (
         <BurnDialog
           key={confirmAgent.agent_id}

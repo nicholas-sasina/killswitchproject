@@ -19,6 +19,21 @@ function setup(
 }
 
 describe("API client", () => {
+  it("saves the replacement setting with PUT to the named role", async () => {
+    const { api, fetcher } = setup();
+    const spec = {
+      name: "worker",
+      tools: [],
+      managed_by: "ui" as const,
+      replace_on_burn: true,
+    };
+    await api.saveRole(spec);
+    expect(fetcher.mock.calls[0][0]).toBe(
+      "https://burn.example.test/roles/worker",
+    );
+    expect(fetcher.mock.calls[0][1]?.method).toBe("PUT");
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual(spec);
+  });
   it("sends the configured token and encodes the since cursor", async () => {
     const { api, fetcher, config } = setup();
     const cursor = `${crypto.randomUUID()}+/?`;

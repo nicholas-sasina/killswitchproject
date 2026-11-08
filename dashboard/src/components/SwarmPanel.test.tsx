@@ -60,6 +60,9 @@ function setup(
       else if (path === "/instances") body = { instances: state.instances };
       else if (path === "/roles" && method === "POST") {
         const created = JSON.parse(String(init?.body)) as Role;
+        if (state.roles.some((role) => role.name === created.name)) {
+          return new Response("conflict", { status: 409 });
+        }
         state.roles = [...state.roles, created];
         body = created;
       } else if (path.endsWith("/tokens")) {
@@ -173,7 +176,7 @@ describe("agent enrollment", () => {
       within(dialog).getByRole("button", { name: "Close" }),
     );
     expect(within(dialog).getAllByRole("checkbox").length).toBe(
-      toolContract.tools.length + 2 + 4 + 2,
+      toolContract.tools.length + 2 + 4 + 3,
     );
     expect(
       (screen.getByLabelText("Plant a canary credential") as HTMLInputElement)
@@ -184,6 +187,9 @@ describe("agent enrollment", () => {
     ) as HTMLInputElement;
     expect(autoBurn.checked).toBe(true);
     expect(autoBurn.disabled).toBe(false);
+    expect(
+      (screen.getByLabelText("Replace on burn") as HTMLInputElement).checked,
+    ).toBe(false);
     change("Role name", "worker");
     fireEvent.click(screen.getByLabelText("read_ticket"));
     fireEvent.click(screen.getByLabelText("api_key"));
@@ -214,6 +220,7 @@ describe("agent enrollment", () => {
       owner: "platform",
       canaries: true,
       auto_burn: true,
+      replace_on_burn: false,
       managed_by: "ui",
     });
     expect(
@@ -287,6 +294,56 @@ describe("agent enrollment", () => {
     expect(fixture.calls("/roles", "POST")).toHaveLength(0);
   });
 
+  it("sends the enabled replacement setting when creating a role", async () => {
+    const fixture = setup();
+    await show(fixture);
+    await click("Add agent");
+    change("Role name", "worker");
+    fireEvent.click(screen.getByLabelText("Replace on burn"));
+    await click("Create role and token");
+    expect(
+      JSON.parse(String(fixture.calls("/roles", "POST")[0][1]?.body)),
+    ).toMatchObject({ replace_on_burn: true });
+  });
+
+  it("rejects an existing name before writing a role", async () => {
+    const fixture = setup([role("worker")]);
+    await show(fixture);
+    await click("Add agent");
+    change("Role name", "worker");
+    await click("Create role and token");
+    expect(screen.getByRole("alert").textContent).toContain("already exists");
+    expect(
+      fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
+    ).toBe(false);
+  });
+
+  it("shows a 409 when another operator creates the name after the role list loads", async () => {
+    const fixture = setup();
+    await show(fixture);
+    await click("Add agent");
+    change("Role name", "worker");
+    fireEvent.click(screen.getByLabelText("Replace on burn"));
+    const existing: Role = {
+      ...role("worker"),
+      tools: ["read_ticket"],
+      egress: ["first.example.test"],
+    };
+    fixture.state.roles.push(existing);
+    await click("Create role and token");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "A role with that name already exists",
+    );
+    expect(fixture.calls("/roles", "POST")).toHaveLength(1);
+    expect(
+      fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
+    ).toBe(false);
+    expect(
+      fixture.state.roles.filter((role) => role.name === "worker"),
+    ).toEqual([existing]);
+    expect(fixture.tokens).toHaveLength(0);
+  });
+
   it.each([
     { canaries: true, auto_burn: false },
     { canaries: false, auto_burn: true },
@@ -322,7 +379,9 @@ describe("agent enrollment", () => {
       change("Role name", name);
       await click("Create role and token");
       expect(screen.getByRole("alert").textContent).toContain("Role name must");
-      expect(fixture.calls("/roles", "POST")).toHaveLength(0);
+      expect(
+        fixture.fetcher.mock.calls.some(([, init]) => init?.method === "PUT"),
+      ).toBe(false);
     },
   );
 
@@ -368,6 +427,33 @@ describe("agent enrollment", () => {
 });
 
 describe("role instances", () => {
+  it.each([
+    [0, "0 roles · 0 instances"],
+    [1, "1 role · 1 instance"],
+    [2, "2 roles · 2 instances"],
+  ] as const)(
+    "pluralizes panel counts for %s roles and instances",
+    async (count, expected) => {
+      const roles = Array.from({ length: count }, (_, index) =>
+        role(`worker-${index}`),
+      );
+      const instances = roles.map((role, index) =>
+        instance(String(index), role.name),
+      );
+      await show(setup(roles, instances));
+      expect(
+        screen.getByText(`${expected} · refreshes every five seconds`),
+      ).toBeTruthy();
+      for (const role of roles) {
+        expect(
+          within(
+            screen.getByRole("region", { name: `Role ${role.name}` }),
+          ).getByText(/1 active \/ 1 instance$/),
+        ).toBeTruthy();
+      }
+    },
+  );
+
   it("labels only roles with report-only or no-canary settings", async () => {
     const fixture = setup([
       role("defaults"),
@@ -523,7 +609,7 @@ describe("scoped containment", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(
         screen.getByRole("status", { name: "Scoped burn result" }).textContent,
-      ).toBe("1 sessions revoked.");
+      ).toBe("1 session revoked.");
       expect(
         within(screen.getByRole("region", { name: "Role worker" })).getByText(
           "revoked",
@@ -551,7 +637,7 @@ describe("scoped containment", () => {
     await click("Confirm Burn");
     expect(
       screen.getByRole("status", { name: "Scoped burn result" }).textContent,
-    ).toContain("1 sessions revoked. 1 burns failed");
+    ).toContain("1 session revoked. 1 burn failed");
     expect(
       (
         screen.getByRole("button", {

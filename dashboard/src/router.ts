@@ -32,6 +32,29 @@ export function hrefFor(view: View): string {
   return `#/${view}`;
 }
 
+export function instanceHref(sessionId: string): string {
+  return `${hrefFor("overview")}?instance=${encodeURIComponent(sessionId)}`;
+}
+
+function instanceFromHash(): string | undefined {
+  return (
+    new URLSearchParams(window.location.hash.split("?")[1] ?? "").get(
+      "instance",
+    ) || undefined
+  );
+}
+
+export function useInstanceId(): string | undefined {
+  const [id, setId] = useState(instanceFromHash);
+  useEffect(() => {
+    const changed = () => setId(instanceFromHash());
+    window.addEventListener("hashchange", changed);
+    changed();
+    return () => window.removeEventListener("hashchange", changed);
+  }, []);
+  return id;
+}
+
 export function useView(): View {
   const [view, setView] = useState<View>(() =>
     viewFromHash(typeof window === "undefined" ? "" : window.location.hash),

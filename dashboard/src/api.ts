@@ -116,6 +116,11 @@ export function createApi(
         method: "POST",
         body: JSON.stringify(body),
       }),
+    saveRole: (body: RoleSpec) =>
+      request<Role>(config.burnUrl, `/roles/${encodeURIComponent(body.name)}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
     createToken: (name: string, body: { uses: number; ttl: number }) =>
       request<EnrollToken & { token: string }>(
         config.burnUrl,

@@ -112,6 +112,7 @@ describe("rebuilding a burned agent", () => {
           managed_by: "ui",
           tools: ["read_ticket"],
           references: "report",
+          replace_on_burn: true,
         },
         {
           name: "a-role-name-that-is-thirty-two-2",
@@ -135,6 +136,7 @@ describe("rebuilding a burned agent", () => {
     expect(spec.name).toBe("a-role-name-that-is-thirty-two-3");
     expect(spec.name.length).toBeLessThanOrEqual(32);
     expect(spec.references).toBe("report");
+    expect(spec.replace_on_burn).toBe(true);
     expect(spec.tools).toEqual(["read_ticket"]);
   });
 });

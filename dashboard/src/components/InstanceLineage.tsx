@@ -1,5 +1,7 @@
 import type { Instance } from "../contracts";
 import { Status, Timestamp } from "./common";
+import { instanceHref } from "../router";
+import { ReplacementInfo } from "./ReplacementInfo";
 
 interface LineageRow {
   instance: Instance;
@@ -96,7 +98,13 @@ export function InstanceLineage({
                 >
                   <strong>
                     {context ? `Parent · ${instance.role}: ` : ""}
-                    {instance.agent_id}
+                    <a
+                      className="instance-link"
+                      href={instanceHref(instance.session_id)}
+                      aria-label={`Inspect ${instance.agent_id}`}
+                    >
+                      {instance.agent_id}
+                    </a>
                   </strong>
                   <code>{instance.session_id}</code>
                   {instance.parent_session && (
@@ -105,6 +113,7 @@ export function InstanceLineage({
                       {parent ? ` (${parent.role})` : " · parent unavailable"}
                     </span>
                   )}
+                  <ReplacementInfo instance={instance} instances={instances} />
                 </td>
                 <td>
                   <Status value={instance.status} />
