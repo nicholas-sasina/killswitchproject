@@ -416,6 +416,56 @@ paths:
                         agent_id: { type: string }
                         error: { type: string }
         '404': { description: nothing matches the scope and id }
+  /burn/by-source:
+    post:
+      summary: Burn every instance that read a source since a time, and every instance they messaged afterwards.
+      description: |
+        Finds instances (running or exited) with a ledger row whose source_ref matches since `since`,
+        plus the instances those sent messages to afterwards (handoff rows), and burns each through the
+        scoped-burn path (`POST /burns`, scope instance). Running instances are revoked first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_ref]
+              properties:
+                tool: { type: string, description: 'optional: tool name, if source_ref is only the resource id' }
+                source_ref: { type: string, maxLength: 260, example: 'read_ticket:T-1001' }
+                since: { type: string, format: date-time, description: 'default: all time' }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Burned
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source_ref, readers, burned]
+                properties:
+                  source_ref: { type: string }
+                  since: { type: string, nullable: true }
+                  readers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agent_id: { type: string }
+                        via: { type: string, enum: [read, handoff] }
+                        first_seen: { type: string, format: date-time }
+                  burned:
+                    type: array
+                    description: One entry per instance, same shape as the POST /burn response.
+                    items: { type: object }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        agent_id: { type: string }
+                        error: { type: string }
+        '404': { description: nobody read that source in the window }
   /flags:
     get:
       summary: Flagged credentials awaiting (or after) owner review, highest level first.
@@ -540,6 +590,12 @@ components:
         first_seen: { type: string, format: date-time }
         status: { type: string, enum: [active, rotated, flagged], description: 'status of the credential itself' }
         flag_level: { type: string, enum: [seen, attempted, reported], nullable: true, description: 'review level when status = flagged (seen < attempted < reported, never decreases)' }
+        exposure:
+          type: string
+          enum: [seen, referenced]
+          default: seen
+          description: 'seen = the plaintext reached the agent; referenced = it only ever got {{burn:ref:...}}. A burn never flags a credential whose exposures are all referenced.'
+        source_ref: { type: string, nullable: true, description: "what the agent read it from: '<tool>:<resource>' (e.g. read_ticket:T-1001), or the tool alone" }
     RoleName:
       type: string
       pattern: '^[a-z0-9][a-z0-9-]{0,31}$'
@@ -568,6 +624,11 @@ components:
           type: boolean
           default: true
           description: "Burn an instance automatically when its canary is used from outside Burn. false = report-only: alert and flag, never burn."
+        references:
+          type: string
+          enum: [replace, report, off]
+          default: replace
+          description: "Credentials Burn recognizes in tool output: replace = the agent gets {{burn:ref:<secret_ref>}} instead; report = record only; off = neither. Canaries are never replaced."
     RoleSpec:
       description: Request body for creating or saving a role.
       allOf:
