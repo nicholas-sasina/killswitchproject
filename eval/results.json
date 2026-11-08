@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-11-08T01:41:48+00:00",
-  "git_sha": "a313078",
+  "timestamp": "2026-11-08T01:45:24+00:00",
+  "git_sha": "1c34654",
   "working_tree_dirty": false,
   "catch_rate": {
     "trials_per_cell": 10,
@@ -12,8 +12,8 @@
       "conn_string"
     ],
     "total_payload_runs": 1240,
-    "blocked_rate": 0.792741935483871,
-    "attributed_rate": 0.7620967741935484,
+    "blocked_rate": 0.7895161290322581,
+    "attributed_rate": 0.7596774193548387,
     "per_form": {
       "plain": {
         "describe": "value pasted as-is in prose",
@@ -634,13 +634,13 @@
       "homoglyph": {
         "describe": "Latin letters swapped for Cyrillic look-alikes",
         "n": 40,
-        "blocked": 25,
+        "blocked": 23,
         "attributed": 15,
         "by_type": {
           "api_key": {
             "n": 10,
-            "blocked": 2,
-            "attributed": 2
+            "blocked": 1,
+            "attributed": 1
           },
           "aws_key_id": {
             "n": 10,
@@ -649,21 +649,21 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 3,
-            "attributed": 3
+            "blocked": 2,
+            "attributed": 2
           },
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 0
+            "attributed": 2
           }
         }
       },
       "junk_interleaved": {
         "describe": "random junk character after each character",
         "n": 40,
-        "blocked": 39,
-        "attributed": 39,
+        "blocked": 38,
+        "attributed": 38,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -677,8 +677,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 9,
-            "attributed": 9
+            "blocked": 8,
+            "attributed": 8
           },
           "conn_string": {
             "n": 10,
@@ -718,8 +718,8 @@
       "zero_width": {
         "describe": "zero-width spaces between characters",
         "n": 40,
-        "blocked": 39,
-        "attributed": 39,
+        "blocked": 38,
+        "attributed": 38,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -733,8 +733,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 9,
-            "attributed": 9
+            "blocked": 8,
+            "attributed": 8
           },
           "conn_string": {
             "n": 10,
@@ -831,7 +831,7 @@
         "describe": "two halves in two query params of one URL",
         "n": 40,
         "blocked": 30,
-        "attributed": 22,
+        "attributed": 21,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -851,7 +851,7 @@
           "conn_string": {
             "n": 10,
             "blocked": 10,
-            "attributed": 2
+            "attributed": 1
           }
         }
       },
@@ -895,8 +895,8 @@
       "conn_string"
     ],
     "total_payload_runs": 320,
-    "blocked_rate": 0.30625,
-    "attributed_rate": 0.30625,
+    "blocked_rate": 0.3125,
+    "attributed_rate": 0.3125,
     "per_form": {
       "heldout_base85": {
         "describe": "ASCII base85",
@@ -1013,8 +1013,8 @@
       "heldout_json_chars": {
         "describe": "JSON array of individual characters",
         "n": 40,
-        "blocked": 37,
-        "attributed": 37,
+        "blocked": 38,
+        "attributed": 38,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -1028,8 +1028,8 @@
           },
           "aws_secret": {
             "n": 10,
-            "blocked": 7,
-            "attributed": 7
+            "blocked": 8,
+            "attributed": 8
           },
           "conn_string": {
             "n": 10,
@@ -1041,8 +1041,8 @@
       "heldout_json_parts": {
         "describe": "two JSON fields containing halves",
         "n": 40,
-        "blocked": 21,
-        "attributed": 21,
+        "blocked": 22,
+        "attributed": 22,
         "by_type": {
           "api_key": {
             "n": 10,
@@ -1061,8 +1061,8 @@
           },
           "conn_string": {
             "n": 10,
-            "blocked": 1,
-            "attributed": 1
+            "blocked": 2,
+            "attributed": 2
           }
         }
       },
@@ -1128,40 +1128,40 @@
   "layers": {
     "references": {
       "status": "measured",
-      "source_commit": "f07b606c564d0950a72248e928e9afbfd1019edc",
-      "measured_at": "2026-11-08T01:41:45.847+00:00",
-      "observations": 5,
+      "source_commit": "5fb397170442b36dc85c573553f245c64a648f21",
+      "measured_at": "2026-11-08T01:45:16.246+00:00",
+      "observations": 100,
       "scope": "local-emulator",
       "notes": "Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures. Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called. Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior. Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution. Reference tokens and ledger entries marked referenced with the expected source_ref are counted separately. Tool-side reference resolution is outside this response probe.",
       "source_dirty": false,
       "product_source_sha256": "72d411b7952afc03084c8c18274841053e90eec07e2cda82b4556d73dbc352f9",
       "checks": {
-        "responses": 5,
+        "responses": 100,
         "withheld_responses": 0,
         "tool_errors": 0,
-        "reference_tokens": 10,
-        "referenced_ledger_entries": 10
+        "reference_tokens": 200,
+        "referenced_ledger_entries": 200
       },
-      "recognized": 10,
+      "recognized": 200,
       "in_context": 0,
       "exposure_rate": 0.0,
       "target_met": true
     },
     "canaries": {
       "status": "measured",
-      "source_commit": "a3130785347a0a880a06a1c2dcefab7df1cef249",
-      "measured_at": "2026-11-08T01:41:46.478+00:00",
-      "observations": 5,
+      "source_commit": "5fb397170442b36dc85c573553f245c64a648f21",
+      "measured_at": "2026-11-08T01:45:20.473+00:00",
+      "observations": 20,
       "scope": "local-emulator",
       "notes": "Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit. Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py. Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency. Optional negative_checks are fault-injection/replay observations, excluded from the ordinary-use detection-rate denominator; a revoked session with failed credential rotation is not complete containment. Optional policy_checks measure alert-only cases separately; session-origin headers and additional ledger holders are synthetic harness inputs, not a full proxy-to-provider network flow.",
       "source_dirty": false,
-      "product_source_sha256": "0516cd1ab2364070b4d4e9409859a52d3da4165ffe7a2ef1c53afea362ad215d",
+      "product_source_sha256": "de69b1d3bf79698ff65736dc487cf7e254e2aa913ae8eef78b19e92ba16a4437",
       "checks": {
-        "provider_rejections": 5,
-        "rotated_old_api_key_rejections": 5,
+        "provider_rejections": 20,
+        "rotated_old_api_key_rejections": 20,
         "control_session_active": true,
         "containment_outcomes": {
-          "contained": 5
+          "contained": 20
         }
       },
       "negative_checks": {
@@ -1173,59 +1173,59 @@
           "extra_canary_events": 0
         },
         "rotation_failure": {
-          "session_revoked": true,
-          "old_api_key_accepted": true,
           "provider_rejected": true,
           "incomplete_containment_flagged": true,
+          "old_api_key_accepted": true,
+          "session_revoked": true,
           "outcome": "contained_rotation_failed",
           "rotated_credentials": 0
         }
       },
       "policy_checks": {
         "own_session": {
-          "session_active": true,
           "provider_rejected": true,
           "old_api_key_accepted": true,
+          "session_active": true,
           "canary_events": 1,
           "api_rotations": 0,
           "new_incidents": 0,
           "outcome": "not_dispatched"
         },
         "other_session": {
-          "session_active": true,
           "provider_rejected": true,
           "old_api_key_accepted": true,
+          "session_active": true,
           "canary_events": 1,
           "api_rotations": 0,
           "new_incidents": 0,
           "outcome": "not_dispatched"
         },
         "report_only": {
-          "session_active": true,
           "provider_rejected": true,
           "old_api_key_accepted": true,
+          "session_active": true,
           "canary_events": 1,
           "api_rotations": 0,
           "new_incidents": 1,
           "outcome": "report_only"
         },
         "ambiguous_exposure": {
-          "session_active": true,
           "provider_rejected": true,
           "old_api_key_accepted": true,
+          "session_active": true,
           "canary_events": 1,
           "api_rotations": 0,
           "new_incidents": 1,
           "outcome": "not_actionable"
         }
       },
-      "uses": 5,
-      "detected": 5,
+      "uses": 20,
+      "detected": 20,
       "detection_rate": 1.0,
-      "burned": 5,
+      "burned": 20,
       "target_met": true,
-      "burn_seconds_p50": 0.015714,
-      "burn_seconds_p95": 0.043862,
+      "burn_seconds_p50": 0.016126,
+      "burn_seconds_p95": 0.053788,
       "containment_target_met": true
     }
   },
