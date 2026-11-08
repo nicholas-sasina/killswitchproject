@@ -337,7 +337,7 @@ def test_the_model_is_haiku_on_bedrock_with_the_instances_own_key_and_throttling
     assert session.get_credentials().access_key == "AKIAFAKEFAKEFAKEFAKE" and session.region_name == "us-east-1"
     model = swarm_worker.bedrock_model(session)
     assert model.config["model_id"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-    assert model.config["temperature"] == 0
+    assert model.config["temperature"] == 0 and model.config["max_tokens"] == swarm_worker.MAX_TOKENS == 1024
     config = model.client.meta.config
     assert config.retries == {"mode": "adaptive", "total_max_attempts": 6} and config.read_timeout == 120
     assert model.client.meta.region_name == "us-east-1"

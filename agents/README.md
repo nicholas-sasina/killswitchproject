@@ -21,9 +21,11 @@ not all call at once, and they stop when the Gateway refuses their badge.
 
 **It costs money.** A ticket is one turn of three to five Haiku calls. Measured on support-desk: 4 calls, about
 6,000 tokens in and 370 out, just under one cent (Haiku 4.5 is $1 per million input tokens and $5 per million output).
-Model calls are capped: 10 per turn, 40 per worker (`--worker-model-calls`), and 400 for the whole run with
-replacements included (`MAX_CALLS=`, `--max-model-calls`), well under $1 at that rate. Each worker is started with its share
-and never makes more calls than that. When it exits, the launcher reads its last line (`model calls used: N of M`)
+Model calls are capped: 10 per turn, 400 for the whole run with replacements included (`MAX_CALLS=`,
+`--max-model-calls`), and per worker 40 (`--worker-model-calls`) or the run's cap split across the workers if that is
+less (20 each for the default N=20). 400 calls cost about $0.80 at that rate. Each call writes at most 1,024 tokens, and
+a turn starts no model call after 300 s, so even a model made to ramble writes at most about $2 of output in a run.
+Each worker is started with its share and never makes more calls than that. When it exits, the launcher reads its last line (`model calls used: N of M`)
 and adds the unused part back to the run's budget.
 
 The workers handle the **loaded scenario's** tickets, so load one first (`uv run python scripts/load_scenario.py

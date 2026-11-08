@@ -61,6 +61,8 @@ EXIT_CAPPED = 4  # it stopped because its model-call budget was spent
 MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"  # the only model the stack allows (infra/burn_infra/minter.py)
 REGION = "us-east-1"
 MAX_MODEL_CALLS = 10  # per turn; a ticket takes three to five
+MAX_TOKENS = 1024  # output per model call; a ticket's calls write about 90 each. Without it Strands asks for 64,000
+TURN_SECONDS = 300  # no model call starts after this; a ticket takes 15 s, or a few minutes when throttled
 DEFAULT_WORKER_CALLS = 40  # per worker, unless --max-model-calls says otherwise: about ten tickets
 USAGE = "model calls used: {used} of {limit}"  # the worker's last line; the launcher reads it (USAGE_RE)
 USAGE_RE = re.compile(r"model calls used: (\d+) of (\d+)\s*$")
@@ -337,7 +339,7 @@ def bedrock_model(session):
     from botocore.config import Config
 
     from .turn import make_model
-    return make_model(MODEL_ID, session, Config(**BEDROCK_CLIENT))
+    return make_model(MODEL_ID, session, Config(**BEDROCK_CLIENT), max_tokens=MAX_TOKENS)
 
 
 def mcp_client(url: str, local_token: str):
@@ -364,7 +366,8 @@ async def ai_task(client, model, report: Report, *, task: list[str], resume: dic
     tools = await asyncio.to_thread(client.list_tools_sync)
     log.info("%d ticket(s) in the loaded scenario; tools: %s", len(tickets), ", ".join(t.tool_name for t in tools))
     spend = Spend()
-    run_turn = TurnRunner(model, SYSTEM_PROMPT, list(tools), max_model_calls=MAX_MODEL_CALLS, budget=budget)
+    run_turn = TurnRunner(model, SYSTEM_PROMPT, list(tools), max_model_calls=MAX_MODEL_CALLS, budget=budget,
+                          turn_seconds=TURN_SECONDS)
     try:
         return await work_task(turn_attempt(run_turn, tickets, task, spend, budget), report, task=task, resume=resume,
                                interval=interval, offset=offset, sleep=sleep)
@@ -380,7 +383,7 @@ def ai_inbox(client, model, *, interval: float, offset: float, budget,
     from .loop import Worker, run_agent
     from .turn import TurnRunner
     run_turn = TurnRunner(model, SYSTEM_PROMPT, list(client.list_tools_sync()), max_model_calls=MAX_MODEL_CALLS,
-                          budget=budget)
+                          budget=budget, turn_seconds=TURN_SECONDS)
 
     def turn(prompt: str):
         if budget.left < 1:

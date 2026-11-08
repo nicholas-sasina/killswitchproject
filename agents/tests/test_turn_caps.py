@@ -70,7 +70,34 @@ def test_make_model_takes_a_botocore_config_and_keeps_strands_own_without_one():
     from botocore.config import Config
     session = boto3.Session(aws_access_key_id="AKIAFAKEFAKEFAKEFAKE", aws_secret_access_key="x", region_name="us-east-1")
     plain = make_model("m", session)
-    tuned = make_model("m", session, Config(retries={"mode": "adaptive", "total_max_attempts": 4}))
+    tuned = make_model("m", session, Config(retries={"mode": "adaptive", "total_max_attempts": 4}), max_tokens=512)
     assert tuned.client.meta.config.retries == {"mode": "adaptive", "total_max_attempts": 4}
     assert plain.client.meta.config.retries != tuned.client.meta.config.retries
     assert plain.config["temperature"] == tuned.config["temperature"] == 0
+    assert tuned.config["max_tokens"] == 512 and "max_tokens" not in plain.config
+
+
+
+def test_a_turn_past_its_deadline_makes_no_more_model_calls(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr("burn_agents.turn.monotonic", lambda: now[0])
+
+    @tool
+    def slow() -> str:
+        """Take a while."""
+        now[0] += 40
+        return "done slowly"
+
+    class Slow(Looping):
+        async def stream(self, messages, tool_specs=None, system_prompt=None, **kw):
+            self.calls += 1
+            yield {"messageStart": {"role": "assistant"}}
+            yield {"contentBlockStart": {"start": {"toolUse": {"toolUseId": f"t{self.calls}", "name": "slow"}}}}
+            yield {"contentBlockDelta": {"delta": {"toolUse": {"input": "{}"}}}}
+            yield {"contentBlockStop": {}}
+            yield {"messageStop": {"stopReason": "tool_use"}}
+
+    model = Slow()
+    with pytest.raises(TurnCut, match="deadline of 100 s"):
+        TurnRunner(model, "be brief", [slow], max_model_calls=10, turn_seconds=100)("go")
+    assert model.calls == 3  # calls at 0, 40 and 80 s; none at 120 s

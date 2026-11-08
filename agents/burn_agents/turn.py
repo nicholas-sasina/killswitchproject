@@ -1,6 +1,7 @@
 """One model turn: build a Strands agent, give it a prompt, let it use tools."""
 import logging
 import threading
+from time import monotonic
 
 from strands import Agent, tool
 from strands.hooks import (AfterToolCallEvent, BeforeModelCallEvent, BeforeToolCallEvent, HookProvider,
@@ -84,19 +85,23 @@ class TurnCut(Exception):
 
 
 class ModelCallCap(HookProvider):
-    """Cancels a model call past `limit` in one turn, or one the `budget` refuses, so a model that keeps calling
-    tools cannot run up the bill. Strands then ends the turn as if the model had (stop reason "end_turn"), so
-    `cut` records why, and TurnRunner raises TurnCut.
+    """Cancels a model call past `limit` in one turn, one the `budget` refuses, or any call once the turn has run
+    `seconds`, so a model that keeps calling tools cannot run up the bill or the clock. Strands then ends the turn as
+    if the model had (stop reason "end_turn"), so `cut` records why, and TurnRunner raises TurnCut. A call already
+    under way is bounded by the model's max_tokens and the client's read timeout.
     """
 
-    def __init__(self, limit: int, budget: CallBudget | None = None):
-        self.limit, self.budget, self.calls, self.cut = limit, budget, 0, ""
+    def __init__(self, limit: int, budget: CallBudget | None = None, seconds: float | None = None):
+        self.limit, self.budget, self.calls, self.cut, self.seconds = limit, budget, 0, "", seconds
+        self._deadline = None if seconds is None else monotonic() + seconds
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(BeforeModelCallEvent, self._before)
 
     def _before(self, event: BeforeModelCallEvent) -> None:
-        if self.calls >= self.limit:
+        if self._deadline is not None and monotonic() >= self._deadline:
+            self.cut = event.cancel = f"stopped at the turn's deadline of {self.seconds:g} s"
+        elif self.calls >= self.limit:
             self.cut = event.cancel = f"stopped after {self.limit} model calls in one turn"
         elif self.budget is not None and not self.budget.take():
             self.cut = event.cancel = f"model-call budget of {self.budget.limit} spent"
@@ -104,25 +109,28 @@ class ModelCallCap(HookProvider):
             self.calls += 1
 
 
-def make_model(model_id: str, session, client_config=None) -> BedrockModel:
+def make_model(model_id: str, session, client_config=None, max_tokens: int | None = None) -> BedrockModel:
     # Temperature 0 so a replay of the same run behaves the same way. client_config is a botocore Config
-    # (retries, timeouts) for the Bedrock client; None keeps Strands' own.
-    return BedrockModel(model_id=model_id, boto_session=session, temperature=0, boto_client_config=client_config)
+    # (retries, timeouts) for the Bedrock client; None keeps Strands' own. max_tokens caps each call's output;
+    # None keeps Strands' default, which for Haiku 4.5 is its 64,000-token maximum.
+    extra = {} if max_tokens is None else {"max_tokens": max_tokens}
+    return BedrockModel(model_id=model_id, boto_session=session, temperature=0, boto_client_config=client_config,
+                        **extra)
 
 
 class TurnRunner:
     def __init__(self, model, system_prompt: str, tools: list, max_model_calls: int | None = None,
-                 budget: CallBudget | None = None):
+                 budget: CallBudget | None = None, turn_seconds: float | None = None):
         self._model, self._system_prompt, self._tools = model, system_prompt, tools
-        self._max_model_calls, self._budget = max_model_calls, budget
+        self._max_model_calls, self._budget, self._turn_seconds = max_model_calls, budget, turn_seconds
 
     def __call__(self, prompt: str):
         """Run one turn and return its AgentResult. Raises Revoked when the gateway refused the badge, and TurnCut
-        when the turn was cut off at a model-call cap."""
+        when the turn was cut off at a cap or its deadline."""
         # A fresh Agent per turn keeps each ticket's context small and cheap.
         watch = RefusalWatch()
-        cap = (ModelCallCap(self._max_model_calls or 10**9, self._budget)
-               if self._max_model_calls is not None or self._budget is not None else None)
+        capped = any(x is not None for x in (self._max_model_calls, self._budget, self._turn_seconds))
+        cap = ModelCallCap(self._max_model_calls or 10**9, self._budget, self._turn_seconds) if capped else None
         agent = Agent(model=self._model, system_prompt=self._system_prompt, tools=self._tools,
                       hooks=[watch] + ([cap] if cap else []), callback_handler=None)
         result = agent(prompt)
