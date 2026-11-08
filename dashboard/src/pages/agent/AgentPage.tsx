@@ -278,11 +278,18 @@ function AgentView({ agent }: { agent: ConsoleAgent }) {
           <>
             {agent.state === "finished" ? (
               <Card title="Finished" pad="narrow" className="agent-finished">
-                <p>
-                  {agent.name} finished on its own, so there is nothing to burn.
-                  Burn revoked its badge and deleted its own keys when it
-                  exited.
-                </p>
+                {agent.sessionId ? (
+                  <p>
+                    {agent.name} finished on its own, so there is nothing to
+                    burn. Burn revoked its badge and deleted its own keys when
+                    it exited.
+                  </p>
+                ) : (
+                  <p>
+                    {agent.name} has not started a session, so there is nothing
+                    to burn.
+                  </p>
+                )}
               </Card>
             ) : (
               <div

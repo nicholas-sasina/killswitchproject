@@ -153,9 +153,9 @@ describe("startedBy", () => {
       events: [],
       now,
     });
-    expect(startedBy(roleRows(scenario, "alpha", "running")[0], scenario)).toBe(
-      "Started by the scenario",
-    );
+    expect(
+      startedBy(roleRows(scenario, "alpha", "finished")[0], scenario),
+    ).toBe("Started by the scenario");
   });
 });
 
