@@ -2,6 +2,7 @@
 import json
 import os
 import signal
+import secrets
 import shutil
 import subprocess
 import sys
@@ -67,11 +68,12 @@ class Instance:
         session = self.start_session()
         creds = self.source.fetch(session)
         badge = BadgeToken(creds.badge)
-        mcp = McpProxy(self.gateway_url, badge, self._activity.set).start()
-        spawn = SpawnEndpoint(self.spawn_child).start()
+        local_token = secrets.token_urlsafe(32)  # per run: only this instance's agent is told it
+        mcp = McpProxy(self.gateway_url, badge, self._activity.set, local_token).start()
+        spawn = SpawnEndpoint(self.spawn_child, local_token).start()
         home = self._make_home()
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
-                        spawn_url=spawn.url, proxy_base=self.proxy_url, home=home)
+                        spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,

@@ -58,11 +58,11 @@ async def work(call: Call, *, tool: str, interval: float, calls: int = 0, offset
 
 
 @asynccontextmanager
-async def mcp_call(url: str):
+async def mcp_call(url: str, local_token: str = ""):
     """A `Call` backed by the official MCP client over streamable HTTP."""
     from mcp import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
-    async with streamablehttp_client(url) as (read, write, _):
+    async with streamablehttp_client(url, headers={"Authorization": f"Bearer {local_token}"}) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
@@ -79,7 +79,7 @@ async def main_async(env: dict) -> int:
         print("BURN_MCP_URL is not set: run this under `burn run`", file=sys.stderr)
         return 2
     interval = float(env.get("BURN_WORKER_INTERVAL", "3"))
-    async with mcp_call(url) as call:
+    async with mcp_call(url, env.get("BURN_LOCAL_TOKEN", "")) as call:
         return await work(call, tool=env.get("BURN_WORKER_TOOL", "read_inbox"), interval=interval,
                           calls=int(env.get("BURN_WORKER_CALLS", "0")),
                           offset=start_offset(env.get("BURN_AGENT_ID", ""), interval))

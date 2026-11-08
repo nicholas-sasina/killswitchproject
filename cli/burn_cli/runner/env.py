@@ -42,7 +42,7 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
-              proxy_base: str = "", home: str = "") -> dict:
+              proxy_base: str = "", home: str = "", local_token: str = "") -> dict:
     """Everything the agent process runs with: the scrubbed host environment plus its own values."""
     env = scrub(host_env)
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
@@ -51,6 +51,8 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
     env.update({
         "BURN_SESSION_ID": session["session_id"], "BURN_AGENT_ID": session["agent_id"],
         "BURN_ROLE": session.get("role", ""), "BURN_MCP_URL": mcp_url, "BURN_SPAWN_URL": spawn_url})
+    if local_token:
+        env["BURN_LOCAL_TOKEN"] = local_token
     if credentials.aws_access_key_id:
         env["AWS_ACCESS_KEY_ID"] = credentials.aws_access_key_id
         env["AWS_SECRET_ACCESS_KEY"] = credentials.aws_secret_access_key
@@ -78,6 +80,7 @@ def describe(host_env: dict, proxy_base: str = "", show: bool = False) -> list[s
               "  BURN_SESSION_ID=<its session id>", "  BURN_AGENT_ID=<its agent id>", "  BURN_ROLE=<its role>",
               "  BURN_MCP_URL=http://127.0.0.1:<port>/...  (adds the badge token; the agent never sees the badge)",
               "  BURN_SPAWN_URL=http://127.0.0.1:<port>/spawn",
+              "  BURN_LOCAL_TOKEN=<random per run; the bearer both local endpoints require>",
               "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY=<its own AWS key>",
               "  BURN_API_KEY=<its own provider key>"]
     if proxy_base:

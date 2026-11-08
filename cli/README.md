@@ -63,7 +63,11 @@ burn env            # what an instance's environment would hold (values hidden; 
 4. `BURN_MCP_URL` is a local endpoint (127.0.0.1, random port) that forwards to `BURN_GATEWAY_URL` and adds
    `Authorization: Bearer <badge token>`. The token comes from the badge's client-credentials token URL and is
    refreshed before it expires. The agent never sees the badge secret or token, and MCP activity triggers heartbeats.
-5. `BURN_SPAWN_URL` is a local endpoint: `POST {role, command}` starts a child with `POST /sessions
+5. Both local endpoints require `Authorization: Bearer $BURN_LOCAL_TOKEN`, a random value made for each run and
+   given only to the agent, because any local process can reach 127.0.0.1. Without it they answer 401. The SDK
+   sends it; MCP clients should be configured to send it as their bearer (it is replaced by the badge token on
+   the way to the Gateway).
+   `BURN_SPAWN_URL` is a local endpoint: `POST {role, command}` starts a child with `POST /sessions
    {role, parent_session}` and runs it under its own `burn run` (own credentials, own endpoints). It returns
    `{session_id, agent_id}`. Children stop when their parent's `burn run` ends.
 6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL

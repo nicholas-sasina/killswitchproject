@@ -216,14 +216,15 @@ def test_mcp_endpoint_adds_the_badge_token_and_hides_the_secret(stack):
     code = """
         import json, os, sys, urllib.request
         req = urllib.request.Request(os.environ["BURN_MCP_URL"] + "/tools", data=b'{"x":1}', method="POST",
-                                     headers={"Authorization": "Bearer the-agents-own-forgery", "X-Custom": "kept"})
+                                     headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"], "X-Custom": "kept"})
         body = json.loads(urllib.request.urlopen(req).read())
         json.dump({"body": body, "env": dict(os.environ)}, open(sys.argv[1], "w"))"""
     assert instance(stack, py(code, str(out))).run() == 0
     result = json.loads(out.read_text())
     (seen,) = stack.gw.seen
     assert seen["path"] == "/mcp/tools" and seen["body"] == b'{"x":1}' and seen["headers"]["X-Custom"] == "kept"
-    assert seen["headers"]["Authorization"] == "Bearer token-1"
+    assert seen["headers"]["Authorization"] == "Bearer token-1"  # the local token is swapped for the badge token
+    assert result["env"]["BURN_LOCAL_TOKEN"] not in json.dumps(seen["headers"])
     client_id, client_secret = stack.badge.state["clients"][0]
     assert client_id.startswith("agent-worker-")
     blob = json.dumps(result)
@@ -237,7 +238,7 @@ def test_mcp_endpoint_passes_gateway_refusals_through(stack):
     code = """
         import os, sys, urllib.request, urllib.error
         try:
-            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST"))
+            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST", headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]}))
         except urllib.error.HTTPError as e:
             open(sys.argv[1], "w").write(f"{e.code} {e.read().decode()}")"""
     instance(stack, py(code, str(out))).run()
@@ -251,7 +252,7 @@ def test_mcp_endpoint_reports_a_refused_badge(stack):
     code = """
         import os, sys, urllib.request, urllib.error
         try:
-            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST"))
+            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST", headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]}))
         except urllib.error.HTTPError as e:
             open(sys.argv[1], "w").write(f"{e.code} {e.read().decode()}")"""
     inst = Instance(Api(stack.url, API_TOKEN), FakeSource(stack.badge.url), "worker", py(code, str(out)),
@@ -264,7 +265,7 @@ def test_mcp_activity_feeds_the_heartbeat(stack):
     code = """
         import os, time, urllib.request
         for _ in range(3):
-            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST")).read()
+            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST", headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]})).read()
             time.sleep(0.4)"""
     inst = instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1)
     assert inst.run() == 0
@@ -338,7 +339,7 @@ def test_spawn_rejects_a_malformed_request(stack):
     code = f"""
         import os, urllib.request, urllib.error, pathlib
         try:
-            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_SPAWN_URL"], data=b'{{"role": "worker"}}', method="POST"))
+            urllib.request.urlopen(urllib.request.Request(os.environ["BURN_SPAWN_URL"], data=b'{{"role": "worker"}}', method="POST", headers={{"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]}}))
         except urllib.error.HTTPError as e:
             pathlib.Path({str(out)!r}).write_text(str(e.code))"""
     instance(stack, py(code)).run()
@@ -540,3 +541,40 @@ def test_child_env_without_a_home_leaves_the_hosts():
     env = child_env({"HOME": "/h"}, session={"session_id": "s", "agent_id": "agent-a"}, credentials=creds,
                     mcp_url="u", spawn_url="v")
     assert env["HOME"] == "/h"
+
+
+# -- local endpoints need the per-run token ------------------------------------------------------------
+def test_local_endpoints_refuse_callers_without_the_per_run_token(stack):
+    out = stack.tmp / "codes.json"
+    code = """
+        import json, os, sys, urllib.request, urllib.error
+        def status(url, headers):
+            try:
+                return urllib.request.urlopen(urllib.request.Request(url, data=b'{"role": "worker", "command": ["true"]}',
+                                                                      method="POST", headers=headers)).status
+            except urllib.error.HTTPError as e:
+                return e.code
+        good = {"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]}
+        json.dump({
+            "mcp_none": status(os.environ["BURN_MCP_URL"], {}),
+            "mcp_wrong": status(os.environ["BURN_MCP_URL"], {"Authorization": "Bearer nope"}),
+            "spawn_none": status(os.environ["BURN_SPAWN_URL"], {}),
+            "spawn_wrong": status(os.environ["BURN_SPAWN_URL"], {"Authorization": "Bearer nope"}),
+            "mcp_good": status(os.environ["BURN_MCP_URL"], good),
+            "token": os.environ["BURN_LOCAL_TOKEN"]}, open(sys.argv[1], "w"))"""
+    assert instance(stack, py(code, str(out)), heartbeat_every=60.0).run() == 0
+    codes = json.loads(out.read_text())
+    assert [codes[k] for k in ("mcp_none", "mcp_wrong", "spawn_none", "spawn_wrong")] == [401] * 4
+    assert codes["mcp_good"] == 200
+    assert len(stack.gw.seen) == 1  # only the authorized call reached the Gateway
+    assert len(stack.calls("POST", "/sessions")) == 1  # no child was started by the refused spawn requests
+    assert len(codes["token"]) >= 40
+
+
+def test_each_run_gets_its_own_local_token(stack):
+    tokens = []
+    for _ in range(2):
+        out = stack.tmp / f"t{len(tokens)}.json"
+        instance(stack, py(DUMP_ENV, str(out))).run()
+        tokens.append(json.loads(out.read_text())["BURN_LOCAL_TOKEN"])
+    assert tokens[0] != tokens[1]

@@ -1,4 +1,5 @@
 """A local endpoint where the agent asks for a child instance: POST {role, command} -> {session_id, agent_id}."""
+import hmac
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,8 +9,8 @@ from ..api import ApiError
 
 
 class SpawnEndpoint:
-    def __init__(self, spawn: Callable[[str, list[str]], dict]):
-        self._spawn = spawn
+    def __init__(self, spawn: Callable[[str, list[str]], dict], local_token: str = ""):
+        self._spawn, self._local_token = spawn, local_token
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self._server.daemon_threads = True
         self.url = f"http://127.0.0.1:{self._server.server_port}/spawn"
@@ -27,6 +28,9 @@ class SpawnEndpoint:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                supplied = self.headers.get("authorization", "").removeprefix("Bearer ")
+                if not hmac.compare_digest(supplied.encode(), outer._local_token.encode()):
+                    return self._send(401, {"error": "missing or wrong local token (send BURN_LOCAL_TOKEN as a bearer)"})
                 try:
                     body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
                     role, command = body["role"], body["command"]

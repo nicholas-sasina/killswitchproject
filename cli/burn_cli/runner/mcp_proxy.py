@@ -1,8 +1,9 @@
 """A local MCP endpoint that forwards to the Gateway and adds the instance's badge token.
 
-The agent talks plain HTTP to 127.0.0.1 and never sees the badge secret or the token. Every forwarded request
-calls `on_activity`, which feeds the instance's heartbeat.
+The agent talks plain HTTP to 127.0.0.1 and never sees the badge secret or the token. Callers must send the
+instance's local token as a bearer. Every forwarded request calls `on_activity`, which feeds the instance's heartbeat.
 """
+import hmac
 import json
 import threading
 import urllib.error
@@ -18,10 +19,11 @@ HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriza
 
 
 class McpProxy:
-    def __init__(self, gateway_url: str, badge: BadgeToken, on_activity: Callable[[], None] = lambda: None):
+    def __init__(self, gateway_url: str, badge: BadgeToken, on_activity: Callable[[], None] = lambda: None,
+                 local_token: str = ""):
         parts = urlsplit(gateway_url)
         self._origin, self._base_path = f"{parts.scheme}://{parts.netloc}", parts.path
-        self._badge, self._on_activity = badge, on_activity
+        self._badge, self._on_activity, self._local_token = badge, on_activity, local_token
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self._server.daemon_threads = True
         self.url = f"http://127.0.0.1:{self._server.server_port}{self._base_path or '/'}"
@@ -39,6 +41,10 @@ class McpProxy:
 
         class Handler(BaseHTTPRequestHandler):
             def _forward(self):
+                supplied = self.headers.get("authorization", "").removeprefix("Bearer ")
+                if not hmac.compare_digest(supplied.encode(), outer._local_token.encode()):
+                    # Any local process can reach 127.0.0.1; only this instance's agent holds BURN_LOCAL_TOKEN.
+                    return self._fail(401, "BURN: missing or wrong local token (send BURN_LOCAL_TOKEN as a bearer)")
                 outer._on_activity()
                 length = int(self.headers.get("content-length") or 0)
                 body = self.rfile.read(length) if length else None
