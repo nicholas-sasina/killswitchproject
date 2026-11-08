@@ -5,7 +5,7 @@
 Creates a join token for the role (shown nowhere: it goes only into .run/swarm.env, mode 600, gitignored),
 generates the compose override and starts it with the standalone docker-compose or the compose plugin.
 Workers make no model calls, so a swarm costs nothing.
-Swarms on the real stack are not available yet, so this refuses to run without --mock.
+Without --mock it exits with an error.
 """
 import argparse
 import json
@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from common import AGENTS_DIR, REPO_ROOT, RUN_DIR
 from swarm_compose import build_compose, swarm_env
 
-NOT_YET = "swarms on the real stack are not available yet: run `make swarm MOCK=1` against the mock servers"
+NEEDS_MOCK = "make swarm runs against the mock servers: pass MOCK=1"
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
 
@@ -57,13 +57,13 @@ def main() -> int:
     parser.add_argument("--role", required=True)
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between a worker's tool calls")
-    parser.add_argument("--mock", action="store_true", help="use the mock servers on the host (required for now)")
+    parser.add_argument("--mock", action="store_true", help="use the mock servers on the host (required)")
     parser.add_argument("--api-url", default=MOCK_API, help="the mock Burn API (localhost only)")
     parser.add_argument("--gateway-url", default=MOCK_GATEWAY, help="the mock MCP server (localhost only)")
     parser.add_argument("--dry-run", action="store_true", help="write the files and print the command, start nothing")
     args = parser.parse_args()
     if not args.mock:
-        sys.exit(NOT_YET)
+        sys.exit(NEEDS_MOCK)
     if args.count < 1:
         sys.exit("--count must be at least 1")
 

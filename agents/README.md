@@ -22,8 +22,7 @@ and writes it with the supervisor's settings to `.run/swarm.env` (mode 600, giti
 `burn run` is PID 1 as root and starts each worker under a uid of its own, so a worker can read neither the
 supervisor's environment nor another worker's. Ctrl-C stops only the workers.
 
-Swarms on the real stack (internal network behind the egress proxy, credentials read from AWS) are coming;
-`make swarm` without `MOCK=1` refuses until then.
+`make swarm` runs against the mock servers (`MOCK=1`); without `MOCK=1` it exits with an error.
 
 ## Key files
 | File | What |

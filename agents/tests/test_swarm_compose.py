@@ -57,7 +57,7 @@ def test_real_stack_swarm_refuses_before_doing_anything(monkeypatch, capsys):
     monkeypatch.setattr(run_swarm.subprocess, "run", lambda *a, **k: pytest.fail("nothing may be started"))
     with pytest.raises(SystemExit) as exc:
         run_swarm.main()
-    assert "not available yet" in str(exc.value) and "MOCK=1" in str(exc.value)
+    assert "MOCK=1" in str(exc.value)
     assert "\n" not in str(exc.value)  # one line
 
 
