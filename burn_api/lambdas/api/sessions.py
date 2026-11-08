@@ -78,15 +78,35 @@ def exit_sessions(agent_id: str) -> list[str]:
             if s.get("status") == "active" and end_session(s, "exited")]
 
 
+#: A badge secret is reused by the next session of the same agent id, and from
+#: this change on it is also deleted when a session ends. Secrets Manager keeps
+#: a just-deleted name unusable for a few seconds, even for a force delete with
+#: no recovery window, so storing the badge retries rather than failing the
+#: session start. minter/vault.py documents the same behaviour for credentials.
+STORE_BADGE_ATTEMPTS = 10
+STORE_BADGE_WAIT_SECONDS = 2
+
+
 def _store_badge(agent_id: str, badge: dict) -> str:
     ref = names.agent_secret_ref(agent_id, "badge")
     client = boto3.client("secretsmanager", region_name=names.REGION)
     value = json.dumps(badge)
-    try:
-        client.put_secret_value(SecretId=ref, SecretString=value)
-    except client.exceptions.ResourceNotFoundException:
-        client.create_secret(Name=ref, SecretString=value)
-    return ref
+    for attempt in range(STORE_BADGE_ATTEMPTS):
+        try:
+            try:
+                client.put_secret_value(SecretId=ref, SecretString=value)
+            except client.exceptions.ResourceNotFoundException:
+                client.create_secret(Name=ref, SecretString=value)
+            return ref
+        except client.exceptions.ResourceExistsException:
+            continue  # a concurrent call created it; the next pass puts a value in
+        except client.exceptions.InvalidRequestException:
+            # Marked for deletion: a previous session's secret is still going.
+            # Both put_secret_value and create_secret report it this way.
+            if attempt == STORE_BADGE_ATTEMPTS - 1:
+                raise
+            time.sleep(STORE_BADGE_WAIT_SECONDS)
+    raise RuntimeError(f"could not store the badge secret for {agent_id}")
 
 
 def start_session(agent_id: str) -> dict:
