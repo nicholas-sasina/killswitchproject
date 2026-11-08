@@ -553,6 +553,11 @@ function flagDecision(flag: Flag, model: ConsoleModel): Decision {
     "An agent";
   const tool = evidence?.tool ? ` through ${evidence.tool}` : "";
   const at = evidence?.ts ? ` at ${dayTime(evidence.ts, model.now)}` : "";
+  // A burn flags the shared keys its agent saw: say the agent was burned.
+  const verb =
+    level === "seen" && evidence?.source === "burn"
+      ? "saw it before it was burned"
+      : LEVEL_VERB[level];
   const others =
     flag.instance_count > 1
       ? ` ${capitalise(countWord(flag.instance_count))} agents have seen it.`
@@ -570,9 +575,7 @@ function flagDecision(flag: Flag, model: ConsoleModel): Decision {
     hot: level !== "seen",
     title: keyName(flag.secret_ref),
     titleId: true,
-    body: [
-      `${who} ${LEVEL_VERB[level]}${tool}${at}.${others} ${LEVEL_ADVICE[level]}`,
-    ],
+    body: [`${who} ${verb}${tool}${at}.${others} ${LEVEL_ADVICE[level]}`],
   };
 }
 

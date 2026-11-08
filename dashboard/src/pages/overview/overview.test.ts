@@ -534,6 +534,29 @@ describe("needs a decision", () => {
     ]);
   });
 
+  it("says when the evidence is the burn itself", () => {
+    const { model, events } = world({
+      instances: [instance("w1", "worker", "revoked")],
+    });
+    const [item] = decisions({
+      model,
+      events,
+      ignored: {},
+      flags: [
+        {
+          secret_ref: "burn/shared/crm_db_url",
+          flag_level: "seen",
+          instance_count: 1,
+          state: "open",
+          evidence: { seen: { source: "burn", agent_id: "agent-worker-w1" } },
+        },
+      ],
+    });
+    expect(item.body).toEqual([
+      "worker-01 saw it before it was burned. Nothing tried to move it, and only its owner can rotate it.",
+    ]);
+  });
+
   it("groups today's unknown callers by badge client", () => {
     const refused = (client: string, ts: string) =>
       event({
