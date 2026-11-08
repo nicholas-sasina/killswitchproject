@@ -11,6 +11,7 @@ import canary_trip
 import dispatch
 import minter_app
 import provider_app
+import session_proof
 from burn_contracts.names import instance_agent_id
 
 AGENT, SESSION = instance_agent_id("worker", "3fa91c"), "sess_0123456789abcdef"
@@ -96,10 +97,10 @@ def test_concurrent_presentations_dispatch_once(canary, tables, dispatched, monk
     barrier, lock = threading.Barrier(8), threading.Lock()
     real = canary_trip._count_presentation
 
-    def atomic(ref, event_id):
+    def atomic(*args):
         barrier.wait()
         with lock:
-            return real(ref, event_id)
+            return real(*args)
 
     monkeypatch.setattr(canary_trip, "_count_presentation", atomic)
     threads = [threading.Thread(target=whoami, args=(value,)) for _ in range(8)]
@@ -180,3 +181,74 @@ def test_flagged_shared_key_used_at_provider_becomes_reported(shared_key, tables
     events = tables["events"].scan()["Items"]
     assert [(e["action"], e["flag_level"]) for e in events] == [("flagged", "reported")]  # once
     assert shared_key not in json.dumps(events, default=str)
+
+
+# ---- origin: only use from outside Burn may burn ------------------------------------------
+
+def key():
+    from burn_contracts import fingerprint as fp
+    return fp.key_from_hex(boto3.client("secretsmanager").get_secret_value(
+        SecretId="burn-system/fingerprint-key")["SecretString"])
+
+
+def whoami_via(token, session_id, proof=None):
+    headers = {"authorization": f"Bearer {token}",
+               "x-burn-session-proof": proof or session_proof.make(session_id, key())}
+    resp = provider_app.handler({"rawPath": "/v1/whoami", "headers": headers})
+    return resp["statusCode"], json.loads(resp["body"])
+
+
+def test_use_through_its_own_session_is_an_alert_not_a_burn(canary, tables, dispatched):
+    meta, value = canary
+    assert whoami_via(value, SESSION) == (401, {"error": "invalid key"})
+    [e] = tables["events"].scan()["Items"]
+    assert e["action"] == "canary_used" and "own session; alert only, not burned" in e["detail"]
+    assert dispatched == []
+    row = tables["credentials"].get_item(Key={"secret_ref": meta["canary_ref"]})["Item"]
+    assert row["presentations_own_session"] == 1 and "incident_event_id" not in row
+
+
+def test_use_through_another_burn_session_is_an_alert_for_review(canary, tables, dispatched):
+    _, value = canary
+    whoami_via(value, "sess_someoneelse00")
+    [e] = tables["events"].scan()["Items"]
+    assert "another Burn session sess_someoneelse00" in e["detail"] and dispatched == []
+
+
+def test_an_earlier_alert_does_not_swallow_a_later_outside_use(canary, tables, dispatched):
+    _, value = canary
+    for _ in range(3):
+        whoami_via(value, SESSION)
+    whoami(value)  # now from outside
+    whoami(value)
+    details = sorted(e["detail"] for e in tables["events"].scan()["Items"])
+    assert len(details) == 2 and any("outside Burn" in d for d in details)
+    assert len(dispatched) == 1
+
+
+@pytest.mark.parametrize("proof", [
+    "v1.sess_0123456789abcdef.1.deadbeef",               # wrong mac
+    "v2.sess_0123456789abcdef.1700000000.00",             # unknown version
+    "garbage",
+])
+def test_forged_or_malformed_proofs_count_as_outside(canary, tables, dispatched, proof):
+    _, value = canary
+    whoami_via(value, SESSION, proof=proof)
+    assert len(dispatched) == 1 and "outside Burn" in tables["events"].scan()["Items"][0]["detail"]
+
+
+def test_stale_proofs_count_as_outside(canary, dispatched):
+    import time
+    _, value = canary
+    whoami_via(value, SESSION, proof=session_proof.make(SESSION, key(), now=time.time() - 600))
+    assert len(dispatched) == 1
+
+
+def test_session_proof_round_trip_and_tamper():
+    k = b"k" * 32
+    proof = session_proof.make("sess.with.dots", k, now=1000)
+    assert session_proof.verified_session({"X-Burn-Session-Proof": proof}, k, now=1050) == "sess.with.dots"
+    assert session_proof.verified_session({"x-burn-session-proof": proof}, k, now=1200) is None
+    assert session_proof.verified_session({"x-burn-session-proof": proof}, b"x" * 32, now=1050) is None
+    tampered = proof.replace("sess.with.dots", "sess.other.one")
+    assert session_proof.verified_session({"x-burn-session-proof": tampered}, k, now=1050) is None
