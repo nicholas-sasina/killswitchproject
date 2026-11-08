@@ -65,6 +65,11 @@ def copy_entry(entry: dict, to_agent: str, *, via: str, call: str) -> bool:
                    status=entry.get("status") or "seen")
 
 
+_NOT_RETRIED = "(attribute_not_exists(seen_in) OR NOT contains(seen_in, :call))"
+# A row with no status was written before statuses existed, when only plaintext was ever recorded.
+_HAS_STATUS_OR_IS_NEW = "(attribute_not_exists(first_seen) OR attribute_exists(#status))"
+
+
 def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, call: str,
             status: str = "seen", report: str | None = None) -> bool:
     # The first sighting decides source/via/first_seen/source_ref; later ones only add to seen_in.
@@ -77,7 +82,12 @@ def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, cal
     sets = [f"#{k} = if_not_exists(#{k}, :{k})" for k in first]
     # "seen" wins for good once plaintext reached the agent; "referenced" only fills a new row.
     names["#status"], values[":status"] = "status", status
-    sets.append("#status = :status" if status == "seen" else "#status = if_not_exists(#status, :status)")
+    condition = _NOT_RETRIED
+    if status == "seen":
+        sets.append("#status = :status")
+    else:
+        sets.append("#status = if_not_exists(#status, :status)")
+        condition = f"{_NOT_RETRIED} AND {_HAS_STATUS_OR_IS_NEW}"
     if report is not None:
         names["#report"], values[":report"] = "report", report
         sets.append("#report = :report")
@@ -85,12 +95,16 @@ def _upsert(agent_id: str, key: str, fields: dict, *, source: str, via: str, cal
         response = _table().update_item(
             Key={"agent_id": agent_id, "secret_ref_or_fp": key},
             UpdateExpression=f"SET {', '.join(sets)}, last_seen = :now ADD seen_in :calls",
-            ConditionExpression="attribute_not_exists(seen_in) OR NOT contains(seen_in, :call)",
+            ConditionExpression=condition,
             ExpressionAttributeNames=names,
             ExpressionAttributeValues={**values, ":now": utc_now_iso(), ":calls": {call}, ":call": call},
             ReturnValues="ALL_OLD",
         )
     except _table().meta.client.exceptions.ConditionalCheckFailedException:
-        return False  # interceptor retry: this call is already in seen_in
+        if status == "seen":
+            return False  # interceptor retry: this call is already in seen_in
+        # Either a retry (the "seen" write below fails the same way) or a row without a status:
+        # that agent had the plaintext, so the row says "seen" rather than becoming "referenced".
+        return _upsert(agent_id, key, fields, source=source, via=via, call=call, status="seen", report=report)
     # ALL_OLD returns the entry as it was before this write: nothing means it is new.
     return not response.get("Attributes")
