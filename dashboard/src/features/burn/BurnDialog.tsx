@@ -34,10 +34,10 @@ import "./burn.css";
 
 export type { BurnDialogProps, BurnOutcome, BurnTarget } from "./types";
 
-/** The most the API takes for a burn's reason. */
 /** Wide enough that the plan's lines rarely wrap. */
 const DIALOG_WIDTH = 576;
 
+/** The most the API takes for a burn's reason. */
 export const REASON_MAX = 200;
 
 function PlanList({ id, lines }: { id: string; lines: PlanLine[] }) {
