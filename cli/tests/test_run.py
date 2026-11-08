@@ -1,6 +1,7 @@
 """burn run: environment, retries, heartbeat, the local endpoints and the spawn path."""
 import json
 import os
+import secrets
 import subprocess
 import sys
 import textwrap
@@ -102,19 +103,23 @@ def test_only_allow_listed_host_variables_reach_the_agent():
                     "SSL_CERT_FILE": "/c.pem", "AWS_CA_BUNDLE": "/c.pem"}
 
 
-@pytest.mark.parametrize("name,value", [
-    ("SECRET_KEY", "django-insecure"), ("PGPASSWORD", "pw"), ("MYSQL_PWD", "pw"), ("OPENAI_KEY", "sk"),
-    ("GITHUB_PAT", "ghp"), ("SENTRY_DSN", "https://k@o.ingest.sentry.io/1"), ("MONGODB_URI", "mongodb://u:p@h/db"),
-    ("CELERY_BROKER_URL", "amqp://u:p@h//"), ("DB_CONNECTION_STRING", "Server=h;Password=p"),
-    ("HTTPS_PROXY", "http://user:pass@corp-proxy:3128"), ("ALL_PROXY", "socks5://u:p@h:1080"),
-    ("http_proxy", "http://user:pass@corp-proxy:3128"), ("NO_PROXY", "internal.example"), ("PYTHONPATH", "/opt/private-libs")])
+@pytest.mark.parametrize("name,value", [  # {m} is a random marker, so a match cannot be a coincidence
+    ("SECRET_KEY", "django-insecure-{m}"), ("PGPASSWORD", "pw-{m}"), ("MYSQL_PWD", "pw-{m}"), ("OPENAI_KEY", "sk-{m}"),
+    ("GITHUB_PAT", "ghp_{m}"), ("SENTRY_DSN", "https://k{m}@o.ingest.sentry.io/1"),
+    ("MONGODB_URI", "mongodb://u:p{m}@h/db"), ("CELERY_BROKER_URL", "amqp://u:p{m}@h//"),
+    ("DB_CONNECTION_STRING", "Server=h;Password=p{m}"), ("HTTPS_PROXY", "http://user:pass{m}@corp-proxy:3128"),
+    ("ALL_PROXY", "socks5://u:p{m}@h:1080"), ("http_proxy", "http://user:pass{m}@corp-proxy:3128"),
+    ("NO_PROXY", "internal-{m}.example"), ("PYTHONPATH", "/opt/private-libs-{m}")])
 def test_credential_looking_variables_the_old_deny_list_missed_do_not_reach_the_agent(stack, name, value):
+    value = value.format(m=secrets.token_hex(12))
     out = stack.tmp / "env.json"
     inst = instance(stack, py(DUMP_ENV, str(out)))
     inst.host_env[name] = value
     assert inst.run() == 0
     env = json.loads(out.read_text())
-    assert name not in env and value not in json.dumps(env)
+    assert name not in env
+    assert value not in env.values()
+    assert not [k for k, v in env.items() if value in v], "the value reached the agent inside another variable"
 
 
 def test_proxy_url_keeps_existing_userinfo_and_adds_the_instance_identity():
