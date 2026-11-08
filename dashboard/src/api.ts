@@ -1,5 +1,7 @@
 import type {
   BlastRadius,
+  BurnBySourceRequest,
+  BurnBySourceResult,
   BurnRequest,
   BurnResult,
   EventsResponse,
@@ -7,6 +9,9 @@ import type {
   Role,
   RoleSpec,
   EnrollToken,
+  Flag,
+  FlagResolution,
+  FlagResolveResult,
   Instance,
   ScopedBurnRequest,
   ScopedBurnResult,
@@ -17,6 +22,19 @@ export interface ApiConfig extends PeopleConfig {
   burnUrl: string;
   localDev?: boolean;
   demoToken?: string;
+}
+
+/**
+ * A request the API answered with an error status. The message is the same
+ * plain sentence as before; `status` lets a caller word a 404 or a 409 itself.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
 }
 
 export function readConfig(): ApiConfig {
@@ -90,13 +108,14 @@ export function createApi(
         if (refreshed) return request<T>(base, path, init, true);
       }
       if (!init.signal?.aborted) auth?.clear();
-      throw new Error("Session expired. Sign in again.");
+      throw new ApiError("Session expired. Sign in again.", 401);
     }
     if (!response.ok) {
-      throw new Error(
+      throw new ApiError(
         response.status === 401 || response.status === 403
           ? `Request denied (HTTP ${response.status}).${config.localDev ? " Check the local development token." : ""}`
           : `API request failed (HTTP ${response.status}).`,
+        response.status,
       );
     }
     try {
@@ -138,12 +157,17 @@ export function createApi(
         method: "POST",
         body: JSON.stringify(body),
       }),
-    events: (since?: string, signal?: AbortSignal) =>
-      request<EventsResponse>(
+    events: (since?: string, signal?: AbortSignal, limit?: number) => {
+      const query = new URLSearchParams();
+      if (since) query.set("since", since);
+      if (limit) query.set("limit", String(limit));
+      const search = query.toString();
+      return request<EventsResponse>(
         config.burnUrl,
-        `/events${since ? `?since=${encodeURIComponent(since)}` : ""}`,
+        `/events${search ? `?${search}` : ""}`,
         { signal },
-      ),
+      );
+    },
     ledger: (id: string, signal?: AbortSignal) =>
       request<LedgerResponse>(
         config.burnUrl,
@@ -161,6 +185,30 @@ export function createApi(
         `/burn/${encodeURIComponent(id)}/blast-radius`,
         { signal },
       ),
+    instance: (sessionId: string, signal?: AbortSignal) =>
+      request<Instance>(
+        config.burnUrl,
+        `/instances/${encodeURIComponent(sessionId)}`,
+        { signal },
+      ),
+    revokeToken: (tokenId: string) =>
+      request<EnrollToken>(
+        config.burnUrl,
+        `/tokens/${encodeURIComponent(tokenId)}`,
+        { method: "DELETE" },
+      ),
+    burnBySource: (body: BurnBySourceRequest) =>
+      request<BurnBySourceResult>(config.burnUrl, "/burn/by-source", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    flags: (signal?: AbortSignal) =>
+      request<{ flags: Flag[] }>(config.burnUrl, "/flags", { signal }),
+    resolveFlag: (body: FlagResolution) =>
+      request<FlagResolveResult>(config.burnUrl, "/flags/resolve", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   };
 }
 
