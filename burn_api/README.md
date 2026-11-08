@@ -70,6 +70,14 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
   revoke does not drop the agent (the burn revokes its sessions again), and a failed burn lands in
   `failed` without stopping the others. Agents that were already revoked are not burned again, since a
   second rotation would move `AWSPREVIOUS`. Finish a failed one with `POST /burn {agent_id}`.
+- **Replace on burn.** When one instance of a role with `replace_on_burn` is burned (`POST /burns` scope
+  `instance`, a burn by source, or a canary burn), Burn writes `replacement` on its session after the
+  revoke and rotation: `pending`, or `needs_person` once the instance is the third replacement in a row.
+  `cutoff` is the earliest evidence of compromise on Burn's clock: the canary use, a blocked or refused
+  call, or for a burn by source the instance's first read of that source (`cutoff_source: evidence`);
+  otherwise the burn time (`burn_time`). Items reported done before the cutoff are `done`; everything else
+  the instance started is `quarantined`. A role, lineage or token burn, and `POST /burn {agent_id}`, never
+  write one. Its launcher reads it and starts the replacement; Burn never starts anything.
 - **The 29 s API limit.** A burn is a few DynamoDB calls plus one minter call (IAM key rotation). With 10
   workers, 20 instances run as two waves, so the call fits if one rotation takes under about 10 s. This is
   not measured against real AWS. To stay inside the limit regardless, the call stops waiting after 24 s
@@ -93,6 +101,7 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
 | `lambdas/api/tokens.py` | Join tokens: create, atomic redeem, revoke |
 | `lambdas/api/instances.py` | Instances: list, heartbeat, exit, idle sweep |
 | `lambdas/api/burn_scopes.py` | `POST /burns`: resolve targets, revoke, burn in a pool |
+| `lambdas/api/replace.py` | At burn time: the replacement record (cutoff, done, quarantined) for one burned instance |
 | `lambdas/api/errors.py` | HTTP errors and throttle detection |
 | `lambdas/api/reads.py` | Events feed, ledger, badge status, blast radius |
 | `lambdas/api/minter_client.py` | Invokes the credential minter Lambda |
@@ -117,4 +126,12 @@ cd burn_api && uv run python scripts/e2e.py   # full burn flow incl. gateway and
   revoked or rotated beyond what exists, and the response lists exactly what happened.
 - **Why one Lambda for all routes?** The API is small; one router file is easier to read and one IAM role
   is easy to audit.
+- **Why was my burned instance not replaced?** Only burning that one instance replaces it, and only if its
+  role has `replace_on_burn` and the burn revoked it (an instance that had already exited or been burned is
+  left alone). Burning its whole role, lineage or join token means stop all of them, so nothing restarts.
+  If recording the replacement fails, the burn still completes and the event feed shows a `flagged` event
+  saying the replacement was not recorded.
+- **Can a compromised instance make its replacement skip work?** No. Burn stamps progress with its own
+  clock and trusts only items done before the cutoff. Anything in flight or touched after it is
+  quarantined for a person, never retried automatically.
 - **Is the blast radius instant?** No. CloudTrail event history can lag 5-15 minutes; the response says so.
