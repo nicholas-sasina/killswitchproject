@@ -2,10 +2,10 @@
 
 The three real Lambda handlers run in-process against moto, wired the way they
 are deployed (provider dispatches the incident to the Burn API, the Burn API
-calls the minter). Steps owned by other workstreams are SIMULATED, clearly:
-- session creation calling the canary hook (onboarding/sessions owner),
-- the Gateway resolving {{canary}} and writing the ledger row (gateway owner),
-- the leak itself and the attacker decoding it (agents / detection owners).
+calls the minter). Session start, {{canary}} resolution and the leak are simulated:
+- session creation calling the canary hook,
+- the Gateway resolving {{canary}} and writing the ledger row,
+- the leak itself and the attacker decoding it.
 
 Used by tests/test_canary_containment.py, and runnable as the local demo with
 real timings (steps 5-7 of the demo):
@@ -74,7 +74,7 @@ def create_tables() -> None:
 
 
 def worker_ids(count: int) -> list[str]:
-    """Instances of role worker, each with its own agent id as since #38 (agent-worker-<6 hex>)."""
+    """Instances of role worker, each with its own agent id (agent-worker-<6 hex>)."""
     from burn_contracts.names import instance_agent_id
     return [instance_agent_id("worker", f"{i:06x}") for i in range(1, count + 1)]
 
@@ -122,7 +122,7 @@ class Stack:
         setattr_(minter_client, "call", self.minter_call)
         setattr_(dispatch, "invoke", self.invoke)
 
-    # ---- simulated neighbours -------------------------------------------------------------
+    # ---- simulated steps ------------------------------------------------------------------
     def api(self, method, path, body=None):
         import handler
         event = {"requestContext": {"http": {"method": method, "path": path}},
@@ -131,7 +131,7 @@ class Stack:
         return out["statusCode"], json.loads(out["body"])
 
     def start_session(self, agent_id: str) -> dict:
-        """POST /sessions, then the canary hook the session owner will call (SIMULATED)."""
+        """POST /sessions, then the canary hook (simulated)."""
         status, session = self.api("POST", "/sessions", {"agent_id": agent_id})
         assert status == 201, session
         session["canary"] = self.minter_call("POST", f"/sessions/{session['session_id']}/canary",
@@ -139,8 +139,8 @@ class Stack:
         return session
 
     def add_sibling_session(self, agent_id: str) -> dict:
-        """Another live session on the SAME agent id. #38 gives every instance its own agent id, so
-        this should not happen; it exercises the guard that never widens a canary burn (SIMULATED)."""
+        """Another live session on the SAME agent id. Every instance normally has its own agent id, so
+        this should not happen; it exercises the guard that never widens a canary burn (simulated)."""
         session_id = "sess_" + secrets.token_hex(8)
         self.table("burn-sessions").put_item(Item={
             "session_id": session_id, "agent_id": agent_id,
@@ -154,7 +154,7 @@ class Stack:
             SecretId=ref, VersionStage=stage)["SecretString"]
 
     def expose(self, agent_id: str, secret_ref: str, via: str = "read_config", owner: str | None = None) -> None:
-        """The Gateway's ledger write when a tool response shows a credential (SIMULATED)."""
+        """The Gateway's ledger write when a tool response shows a credential (simulated)."""
         from burn_contracts import fingerprint as fp
         key = fp.key_from_hex(self.secret("burn-system/fingerprint-key"))
         owner_agent = secret_ref.split("/")[1]
@@ -166,7 +166,7 @@ class Stack:
             "source": "tool_response", "via": via, "first_seen": "2026-11-07T20:00:00.000Z"})
 
     def read_canary(self, session: dict) -> str:
-        """The agent reads a document whose {{canary}} the Gateway filled for ITS session (SIMULATED)."""
+        """The agent reads a document whose {{canary}} the Gateway filled for ITS session (simulated)."""
         ref = session["canary"]["canary_ref"]
         self.expose(session["agent_id"], ref)
         return self.secret(ref)
@@ -178,7 +178,7 @@ class Stack:
         import session_proof
         from burn_contracts import fingerprint as fp
         headers = {"authorization": f"Bearer {key}"}
-        if via_session:  # what the proxy adds (SIMULATED until the proxy owner ships it)
+        if via_session:  # the header the egress proxy adds (simulated)
             hmac_key = fp.key_from_hex(self.secret("burn-system/fingerprint-key"))
             headers[session_proof.HEADER] = session_proof.make(via_session, hmac_key)
         resp = provider_app.handler({"rawPath": "/v1/whoami", "headers": headers,
@@ -209,7 +209,7 @@ class Stack:
 
 
 def leak_gzip_base64(value: str) -> str:
-    """The worker's leak in an encoding the exit scanner does not undo (SIMULATED)."""
+    """The worker's leak in an encoding the exit scanner does not undo (simulated)."""
     return base64.b64encode(gzip.compress(value.encode())).decode()
 
 

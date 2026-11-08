@@ -247,7 +247,7 @@ def test_incident_cannot_be_triggered_through_the_http_api(stack, fleet):
 
 
 def test_sessions_sharing_an_agents_credentials_defer_rotation(stack):  # 9, 10, 15
-    """Guard: if live sessions ever share one agent id (#38 gives each instance its own), revoke only
+    """Guard: if live sessions ever share one agent id (each instance normally has its own), revoke only
     the one whose canary leaked and never rotate credentials the others still use."""
     agent = WORKER_IDS[0]
     first = stack.start_session(agent)

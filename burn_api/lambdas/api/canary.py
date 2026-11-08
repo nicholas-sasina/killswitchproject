@@ -22,7 +22,7 @@ Containment:
      caller can win it, so concurrent or repeated incidents contain once.
   b. Delete its badge client (the gateway already refuses it after step a).
   c. Rotate the agent's own credentials, but only if no other active session
-     uses them (since #38 every instance has its own agent id, so normally none does).
+     uses them (every instance has its own agent id, so normally none does).
      Otherwise rotation is deferred and reported; never widened.
   d. Flag the shared credentials it saw (`seen`, or higher from blocked attempts).
 A failed rotation leaves the session revoked and reports containment incomplete.
