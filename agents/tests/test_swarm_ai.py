@@ -9,7 +9,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ProxyConnectionError
 from strands.types.exceptions import ModelThrottledException
 
 from burn_agents import swarm_worker
@@ -368,7 +368,9 @@ def test_a_key_aws_does_not_accept_at_start_is_a_startup_error_not_a_burn(monkey
 
 def test_the_key_check_at_start_tries_again_while_a_new_key_is_refused():
     from botocore.parsers import ResponseParserError  # what a JSON refusal from the proxy raises
-    answers = [ResponseParserError("not well-formed"), ClientError({"Error": {"Code": "InvalidClientTokenId"}}, "x"),
+    proxy_block = ResponseParserError('Unable to parse response (not well-formed), invalid XML received. Further '
+                                      'retries may succeed:\nb\'{"blocked": true, "reason": "credential_detected"}\'')
+    answers = [proxy_block, ClientError({"Error": {"Code": "InvalidClientTokenId"}}, "x"),
                {"Arn": "arn:aws:iam::123456789012:user/burn-agent-agent-w-1"}]
 
     class Sts:
@@ -383,3 +385,23 @@ def test_the_key_check_at_start_tries_again_while_a_new_key_is_refused():
     answers[:] = [ResponseParserError("x")] * (len(swarm_worker.STARTUP_RETRIES) + 1)
     with pytest.raises(ResponseParserError):
         swarm_worker.wait_for_key(session, sleep=slept.append)
+
+
+@pytest.mark.parametrize("refusal", [
+    ProxyConnectionError(proxy_url="http://proxy:8080", error="Tunnel connection failed: 403 Forbidden"),
+    ClientError({"Error": {"Code": "ExpiredToken"}}, "GetCallerIdentity"),
+    ClientError({"Error": {"Code": "SignatureDoesNotMatch"}}, "GetCallerIdentity"),
+])
+def test_the_key_check_at_start_stops_at_once_on_a_burn(refusal):
+    """A burned instance's session is inactive, so the proxy refuses its connection: no 20 s of retries."""
+    class Sts:
+        calls = 0
+
+        def get_caller_identity(self):
+            Sts.calls += 1
+            raise refusal
+
+    slept = []
+    with pytest.raises(type(refusal)):
+        swarm_worker.wait_for_key(SimpleNamespace(client=lambda name: Sts()), sleep=slept.append)
+    assert Sts.calls == 1 and slept == []

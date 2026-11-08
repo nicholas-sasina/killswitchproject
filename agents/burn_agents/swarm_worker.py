@@ -300,12 +300,24 @@ def own_aws_session(env: dict):
 STARTUP_RETRIES = (1, 2, 4, 5, 5, 5)  # seconds between tries of the key at start: about 20 s in all
 
 
+def new_key_refusal(exc: BaseException) -> bool:
+    """The two refusals a brand-new key gets before AWS and the egress proxy know it.
+
+    AWS answers InvalidClientTokenId until a new IAM key has propagated. The proxy, whose view of new keys refreshes
+    every couple of seconds, can block the first call that carries one as `credential_detected`; its refusal is JSON,
+    which botocore reports as a parse error with the body in the message.
+    """
+    from botocore.exceptions import ClientError
+    if isinstance(exc, ClientError):
+        return exc.response.get("Error", {}).get("Code") == "InvalidClientTokenId"
+    return "credential_detected" in str(exc)
+
+
 def wait_for_key(session, sleep: Callable[[float], None] = time.sleep) -> str:
     """Wait until the instance's fresh key works; return its identity's name. Raises if it never does.
 
-    A new IAM key takes a few seconds before AWS accepts it, and the egress proxy, whose view of new keys refreshes
-    every couple of seconds, can refuse the first call that carries one (its refusal is JSON, which botocore reports
-    as a ParseError). Without this the first model call could fail as if the key had been burned.
+    Only a new key's refusals are tried again (see new_key_refusal). Anything that looks like a burn stops at once:
+    a burned instance's session is no longer active, so the proxy refuses its connection before any call reaches AWS.
     """
     def identity() -> str:
         return session.client("sts").get_caller_identity()["Arn"].rsplit("/", 1)[-1]
@@ -313,7 +325,9 @@ def wait_for_key(session, sleep: Callable[[float], None] = time.sleep) -> str:
     for delay in STARTUP_RETRIES:
         try:
             return identity()
-        except Exception as exc:  # noqa: BLE001 - any refusal at start is retried; Burn says if it was a burn
+        except Exception as exc:  # noqa: BLE001 - sorted below: a burn stops at once, anything else is tried again
+            if looks_revoked(exc) and not new_key_refusal(exc):
+                raise
             log.info("the instance's new key was not accepted yet (%s); trying again in %d s", type(exc).__name__, delay)
             sleep(delay)
     return identity()
