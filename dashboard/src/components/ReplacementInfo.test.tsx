@@ -121,9 +121,44 @@ it("shows quarantined IDs in replacement details from the shared predecessor rec
     />,
   );
   const dialog = screen.getByRole("dialog");
-  expect(within(dialog).getByText("Quarantined item IDs")).toBeTruthy();
+  expect(
+    within(dialog).getByRole("heading", { name: "Inherited quarantine" }),
+  ).toBeTruthy();
   expect(within(dialog).getByText("item-review")).toBeTruthy();
   expect(within(dialog).queryByText("item-a")).toBeNull();
+});
+
+it("labels and shows only the current burn's quarantine for a burned replacement", () => {
+  const previous: Instance = {
+    ...old,
+    generation: 1,
+    replacement: { ...snapshot, quarantined: ["inherited-a", "inherited-b"] },
+  };
+  const burned: Instance = {
+    ...replacement,
+    status: "revoked",
+    generation: 2,
+    replacement: {
+      ...snapshot,
+      status: "needs_person",
+      quarantined: ["current-review"],
+    },
+  };
+  render(
+    <ReplacementInfo instance={burned} instances={[previous, burned]} detail />,
+  );
+  const label = "Quarantined when this instance was burned";
+  expect(screen.getByRole("heading", { name: label })).toBeTruthy();
+  expect(
+    within(screen.getByRole("list", { name: label })).getByText(
+      "current-review",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText("inherited-a")).toBeNull();
+  expect(screen.queryByText("inherited-b")).toBeNull();
+  expect(
+    screen.queryByRole("heading", { name: "Inherited quarantine" }),
+  ).toBeNull();
 });
 
 it("uses the session ID and an explicit missing-progress state when a predecessor is absent", () => {

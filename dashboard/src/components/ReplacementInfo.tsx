@@ -18,6 +18,9 @@ export function ReplacementInfo({
   );
   const resume = previous?.replacement;
   const snapshot = instance.replacement ?? resume;
+  const quarantineLabel = instance.replacement
+    ? "Quarantined when this instance was burned"
+    : "Inherited quarantine";
   if (!instance.replacement && !instance.replaces && !instance.replaced_by)
     return null;
   return (
@@ -58,12 +61,12 @@ export function ReplacementInfo({
       )}
       {detail && snapshot && (
         <div className="replacement-quarantine">
-          <h3>Quarantined item IDs</h3>
+          <h3>{quarantineLabel}</h3>
           {snapshot.quarantined.length ? (
             <ul
               className="quarantined-items"
               tabIndex={0}
-              aria-label="Quarantined item IDs"
+              aria-label={quarantineLabel}
             >
               {snapshot.quarantined.map((id) => (
                 <li key={id}>
