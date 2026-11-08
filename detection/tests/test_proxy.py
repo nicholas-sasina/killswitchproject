@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import secrets
 import socket
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 pytest.importorskip("mitmproxy")
@@ -18,6 +18,7 @@ from burn_detect import Scanner, SessionWindow
 from proxy.addon import BurnProxy
 from proxy.policy import ExitCheck, Settings, public_ip
 from proxy.proof import HEADER as PROOF_HEADER, make_session_proof
+from proxy.state import AwsState
 from test_scanner import Generated, registered
 
 
@@ -35,6 +36,9 @@ class State:
 
     def lookup(self, fps):
         return {fp: self.rows[fp] for fp in fps if fp in self.rows}
+
+    def refresh(self):
+        pass
 
     def session(self, agent, session):
         return {"status": "active"} if self.active and agent == self.agent and session == self.session_id else None
@@ -90,6 +94,81 @@ def test_sigv4_only_exempts_the_owning_agents_expected_header(setup):
     assert request(checker, agent, url=url, headers=[("Authorization", auth)]).reason is None
     assert request(checker, agent, headers=[("Authorization", auth)]).reason
     assert request(checker, "agent-" + secrets.token_hex(4), url=url, headers=[("Authorization", auth)]).reason
+
+
+STS = "https://sts.us-east-1.amazonaws.com/"
+
+
+def aws_key_id():
+    return "A" + "KIA" + secrets.token_hex(8).upper()
+
+
+def signed(key_id):
+    return [("Authorization", "AWS4-HMAC-SHA256 Credential=" + key_id + "/20261108/us-east-1/sts/aws4_request, "
+             "SignedHeaders=host;x-amz-date, Signature=" + secrets.token_hex(32))]
+
+
+@pytest.fixture
+def snapshot(monkeypatch):
+    """The proxy's own fingerprint cache over a fake table and clock, just after a regular reload."""
+    now = [100.0]
+    monkeypatch.setattr("proxy.state.monotonic", lambda: now[0])
+    key, table = secrets.token_bytes(32), {}
+
+    def mint(owner):
+        key_id = aws_key_id()
+        fp = fingerprint(key_id, key)
+        table[fp] = {"fingerprint": fp, "secret_ref": f"burn/{owner}/aws_key", "owner_agent_id": owner,
+                     "secret_type": "aws_key", "kind": "exact", "part": "access_key_id", "version": 1}
+        return key_id
+
+    state = AwsState.__new__(AwsState)
+    state._refreshed, state._rows = float("-inf"), {}
+    state.fingerprints = Mock()
+    state.fingerprints.scan.side_effect = lambda **_: {"Items": list(table.values())}
+    state.lookup(set())
+    state.fingerprints.scan.reset_mock()
+    checker = ExitCheck(Scanner(key, state.lookup), Settings(), refresh=state.refresh)
+    return Generated((now, mint, state.fingerprints.scan, checker))
+
+
+def test_a_key_minted_since_the_last_reload_is_allowed_on_first_use(snapshot):
+    now, mint, scan, checker = snapshot
+    agent = "agent-" + secrets.token_hex(4)
+    key_id = mint(agent)
+    now[0] += 0.5
+    assert request(checker, agent, url=STS, headers=signed(key_id)).reason is None
+    assert scan.call_count == 1
+    assert request(checker, agent, url=STS, headers=signed(key_id)).reason is None
+    assert scan.call_count == 1
+
+
+def test_an_unknown_key_is_still_blocked_after_one_reload(snapshot):
+    now, _, scan, checker = snapshot
+    now[0] += 0.5
+    decision = request(checker, "agent-" + secrets.token_hex(4), url=STS, headers=signed(aws_key_id()))
+    assert decision.reason == "credential_detected" and decision.finding.owner == "unknown"
+    assert scan.call_count == 1
+
+
+def test_a_burst_of_unknown_keys_reloads_at_most_every_250_ms(snapshot):
+    now, _, scan, checker = snapshot
+    agent = "agent-" + secrets.token_hex(4)
+    for _ in range(32):  # one request every 62.5 ms for two seconds
+        now[0] += 0.0625
+        assert request(checker, agent, url=STS, headers=signed(aws_key_id())).reason == "credential_detected"
+    assert scan.call_count == 8
+
+
+@pytest.mark.parametrize("since_reload", [2.0, 0.5])
+def test_another_instances_key_is_still_blocked(snapshot, since_reload):
+    now, mint, scan, checker = snapshot
+    owner = "agent-" + secrets.token_hex(4)
+    key_id = mint(owner)
+    now[0] += since_reload
+    decision = request(checker, "agent-" + secrets.token_hex(4), url=STS, headers=signed(key_id))
+    assert decision.reason == "credential_detected" and decision.finding.owner_agent_id == owner
+    assert scan.call_count == 1
 
 
 def test_boundary_skips_only_body(setup):

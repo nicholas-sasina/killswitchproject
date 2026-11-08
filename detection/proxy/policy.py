@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import ipaddress
 import os
 import re
+from typing import Callable
 from urllib.parse import urlsplit
 
 from burn_detect import Finding, Scanner, SessionWindow
@@ -149,9 +150,10 @@ class Decision:
 
 
 class ExitCheck:
-    def __init__(self, scanner: Scanner, settings: Settings):
+    def __init__(self, scanner: Scanner, settings: Settings, refresh: Callable[[], None] | None = None):
         self.scanner = scanner
         self.settings = settings
+        self.refresh = refresh  # reloads the scanner's fingerprints early; AwsState.refresh limits the rate
 
     def _header(self, name: str, value: str, host: str, scheme: str, agent: str) -> str:
         if name.lower() != "authorization" or scheme != "https":
@@ -159,6 +161,11 @@ class ExitCheck:
         match = _SIGV4.fullmatch(value)
         if host.endswith(".amazonaws.com") and match:
             findings = self.scanner.scan(match[1])
+            if self.refresh and any(f.kind == "format" for f in findings):
+                # An unknown key id may be one minted since the last fingerprint reload,
+                # such as a new instance's own on its first call. Reload once and decide again.
+                self.refresh()
+                findings = self.scanner.scan(match[1])
             if findings and all(f.kind == "exact" and f.secret_type == "aws_key" and f.owner_agent_id == agent
                                 for f in findings):
                 return value[:match.start(1)] + "[home credential]" + value[match.end(1):]

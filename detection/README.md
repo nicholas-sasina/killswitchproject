@@ -8,6 +8,8 @@ Includes a content-free webhook sink and an operator CLI for on-demand exit chec
 - `Scanner(key=..., lookup=...)` uses only the Python standard library and `burn_contracts`.
 - Normalization, exact fingerprints and 60% shingle coverage detect plain, encoded and split credentials.
 - The proxy checks sessions every second, refreshes fingerprints every two seconds and writes safe events.
+- An AWS request signed with an unknown key ID refreshes fingerprints once more before the decision,
+  at most every 250 ms, so a new instance's first call with its just-minted key is not blocked.
 - Only approved destinations pass; Bedrock and gateway bodies and credentials in their own service headers follow the trust boundary.
 - The sink records only size and SHA-256; the operator CLI reads credentials privately and sends them through the proxy.
 
