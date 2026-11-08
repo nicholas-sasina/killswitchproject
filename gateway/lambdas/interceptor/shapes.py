@@ -110,3 +110,35 @@ def result_texts(body) -> list[str]:
         return []
     content = (body.get("result") or {}).get("content") or []
     return [c["text"] for c in content if isinstance(c, dict) and isinstance(c.get("text"), str)]
+
+
+def _strings(node) -> list[str]:
+    """Every string in a JSON value, object keys included."""
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [s for k, v in node.items() for s in (*_strings(k), *_strings(v))]
+    if isinstance(node, list):
+        return [s for v in node for s in _strings(v)]
+    return []
+
+
+def other_strings(body) -> list[str]:
+    """Every string of a tools/call reply that result_texts does not return: the other fields of each
+    content part (an embedded resource's text, for example), structuredContent, _meta, and a JSON-RPC error.
+    The agent reads these too, so they are scanned as well."""
+    if not isinstance(body, dict):
+        return []
+    result = body.get("result")
+    rest: list = [body.get("error")]
+    if isinstance(result, dict):
+        rest.append({k: v for k, v in result.items() if k != "content"})
+        content = result.get("content") or []
+        if isinstance(content, list):
+            rest += [{k: v for k, v in c.items() if k != "text"} if isinstance(c, dict) and isinstance(c.get("text"), str)
+                     else c for c in content]
+        else:
+            rest.append(content)
+    else:
+        rest.append(result)
+    return _strings(rest)

@@ -1,8 +1,9 @@
 """RESPONSE step for tools/call: record every credential the agent is about to see,
 and (by default) make sure it only ever gets a reference to it.
 
-Tool output is scanned before the agent gets it. Placeholders are filled with real values
-at read time, so this sees exactly what a real tool would return.
+Tool output is scanned before the agent gets it: every string of the reply, not only its text
+parts (structuredContent, embedded resources and JSON-RPC errors too). Placeholders are filled
+with real values at read time, so this sees exactly what a real tool would return.
 
 References (the session's `references` mode, from its role; default replace):
 - replace: each located credential Burn minted becomes {{burn:ref:<secret_ref>}} (in a
@@ -59,15 +60,23 @@ def _refuse(event: dict, session: dict, tool: str, detail: str, message: str, fi
     return shapes.deny(shapes.request_body(event), message)
 
 
-def _plan(texts: list[str], per_text: list[list[Finding]]) -> tuple[list[str] | None, str | None]:
-    """What replace mode gives the agent: (new texts, None) or (None, why it must be withheld)."""
+def _plan(texts: list[str], per_text: list[list[Finding]], others: list[str]) -> tuple[list[str] | None, str | None]:
+    """What replace mode gives the agent: (new texts, None) or (None, why it must be withheld).
+
+    Only text parts are rewritten. Everything the agent would get is then scanned again, so a credential
+    anywhere else in the reply, or one that could not be located (split across parts, say), withholds it.
+    """
     planned = [redact.apply(text, found) for text, found in zip(texts, per_text)]
     reason = next((why for _, why in planned if why), None)
     if reason:
         return None, reason
     new = [text for text, _ in planned]
-    if new != texts and any(redact.targets(detection.scan(text)) for text, old in zip(new, texts) if text != old):
-        return None, "a copy of a credential was still found after replacing"
+    try:
+        left = redact.targets(detection.scan("\n".join(new + others)))
+    except ValueError:
+        return None, "too large to check after replacing"
+    if left:
+        return None, "a credential was still found after replacing (outside the text parts, or not located exactly)"
     return new, None
 
 
@@ -81,28 +90,31 @@ def _with_texts(reply: dict, texts: list[str]) -> dict:
 
 def record_tool_output(event: dict, session: dict, tool: str, status: int, reply: dict) -> dict:
     agent_id = session["agent_id"]
-    texts = shapes.result_texts(reply)
+    texts, others = shapes.result_texts(reply), shapes.other_strings(reply)
     try:
-        if len("\n".join(texts)) > MAX_TEXT:
+        whole = "\n".join(texts + others)
+        if len(whole) > MAX_TEXT:
             raise ValueError("too large")
-        per_text = [detection.scan(text) for text in texts]
+        per_text = [detection.scan(text) for text in texts]  # where each copy is, to replace it
+        everywhere = detection.scan(whole)  # also other parts, and evidence that only adds up across parts
     except ValueError:
         # Too large to check: the agent does not get to see what Burn cannot vouch for.
         return _refuse(event, session, tool, f"{tool} output too large to check; withheld from the agent",
                        "tool output too large to check")
 
-    found = [f for fs in per_text for f in fs]
+    found = [f for fs in per_text for f in fs] + everywhere
     mode = references.mode(session)
     targets = redact.targets(found)
     replaced, report = set(), None
     if targets and mode in ("replace", "report"):
-        new_texts, reason = _plan(texts, per_text)
+        new_texts, reason = _plan(texts, per_text, others)
         if mode == "replace":
             if reason:
                 return _refuse(event, session, tool,
                                f"{tool} output withheld: {reason} ({len({f.secret_ref for f in targets})} credential(s))",
                                WITHHELD, targets[0])
-            reply = _with_texts(reply, new_texts)
+            if new_texts != texts:
+                reply = _with_texts(reply, new_texts)
             replaced = {f.secret_ref for f in targets}
         else:
             report = f"would withhold: {reason}" if reason else "would replace with a reference"
