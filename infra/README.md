@@ -21,6 +21,7 @@ One stack per component, so each owner deploys their part without touching the r
 | `burn_infra/minter.py` | BurnMinter: minter, mock API provider |
 | `burn_infra/egress.py` | BurnEgress: proxy IAM identity |
 | `burn_infra/burn_api.py` | BurnApi: Burn API |
+| `burn_infra/site.py` | BurnSite: the public website (S3 + CloudFront) |
 
 ## How to test it
 ```bash
@@ -38,10 +39,37 @@ after a destroy can fail on the secret names. Force-delete them first:
 `aws secretsmanager delete-secret --secret-id burn-system/fingerprint-key --force-delete-without-recovery`
 (same for `burn-system/demo-token`).
 
+## The website
+`burn_infra/site.py` serves the website in `site/` from a private S3 bucket through CloudFront, at the
+distribution's own `https://<id>.cloudfront.net` address (no custom domain). `StaticSite` is the
+reusable part: a name and a built folder in, a bucket and a distribution out.
+
+```bash
+make site-deploy   # npm ci + build in site/, deploy BurnSite, print the address
+VITE_DASHBOARD_URL=https://... make site-deploy   # the same, with the site's dashboard link set
+```
+
+- Only the distribution can read the bucket (origin access control). HTTP redirects to HTTPS.
+- Every response carries HSTS, nosniff, `X-Frame-Options: DENY`, a strict referrer policy and a CSP that
+  allows only the site's own files.
+- `index.html` is sent with `Cache-Control: no-cache`. The hashed files under `assets/` are cached for a
+  year. Each upload invalidates CloudFront's cache.
+- The address is in SSM at `/burn/site/url` and in the stack output `Url`.
+- Without a build (`site/dist/index.html` missing), synth and deploy still work: the stack creates the
+  bucket and distribution, uploads nothing and leaves the files already there.
+- The first deploy takes several minutes while CloudFront sets up the distribution.
+
 ## FAQ
 - **Why so many stacks?** Each component deploys on its own, so changing one part never
   redeploys or risks another.
 - **Where do the secrets come from?** AWS generates them at deploy time. No secret value is in the
   repo, in CDK code, or in a CloudFormation template.
-- **Is anything wildcard?** No execution role gets wildcard actions. Each Lambda gets only the table
-  and secret-name actions it needs.
+- **Is anything wildcard?** No execution role of Burn's own Lambdas gets wildcard actions. Each gets only
+  the table and secret-name actions it needs. The website stack also runs two helper Lambdas that come
+  with CDK: one uploads the build, one empties the bucket on teardown. They get CDK's standard S3 grants
+  (such as `s3:GetObject*`) on the website's bucket, and the upload one reads CDK's own asset bucket. The
+  upload Lambda may also create CloudFront invalidations, which CDK grants on every distribution in the
+  account.
+- **Why is the website's bucket private when the site is public?** CloudFront is the only reader, so
+  every visitor gets HTTPS, the security headers and the cache. Nobody can list or read the bucket
+  directly.

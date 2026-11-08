@@ -14,7 +14,7 @@ export AWS_DEFAULT_REGION := us-east-1
 PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli infra
 
 .DEFAULT_GOAL := help
-.PHONY: burn help hooks deploy env person automation-person test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm teardown
+.PHONY: burn help hooks deploy site-deploy env person automation-person test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm teardown
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -27,6 +27,11 @@ deploy: ## Deploy every AWS stack (us-east-1)
 
 deploy-%: ## Deploy one stack, e.g. make deploy-BurnApi
 	cd infra && uv sync -q && $(CDK) deploy $* --require-approval never
+
+site-deploy: ## Build the website and deploy it to S3 and CloudFront (BurnSite)
+	cd site && npm ci && $(if $(VITE_DASHBOARD_URL),VITE_DASHBOARD_URL='$(VITE_DASHBOARD_URL)' )npm run build
+	cd infra && uv sync -q && $(CDK) deploy BurnSite --require-approval never
+	@echo "website: $$(aws cloudformation describe-stacks --stack-name BurnSite --query "Stacks[0].Outputs[?OutputKey=='Url'].OutputValue" --output text)"
 
 env: ## Write .env and dashboard/.env.local from the deployed stacks
 	cd burn_api && uv run python scripts/make_env.py
