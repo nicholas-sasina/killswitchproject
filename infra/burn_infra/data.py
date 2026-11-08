@@ -24,17 +24,21 @@ class BurnDataStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        def table(name: str, pk: str, sk: str | None = None) -> ddb.Table:
+        def table(name: str, pk: str, sk: str | None = None,
+                  stream: ddb.StreamViewType | None = None) -> ddb.Table:
             return ddb.Table(
                 self, name,
                 table_name=name,
                 partition_key=ddb.Attribute(name=pk, type=S),
                 sort_key=ddb.Attribute(name=sk, type=S) if sk else None,
                 billing_mode=ddb.BillingMode.PAY_PER_REQUEST,
+                stream=stream,
                 removal_policy=cdk.RemovalPolicy.DESTROY,  # hackathon: teardown must be clean
             )
 
-        events = table("burn-events", "stream", "event_id")
+        # The stream feeds notifications (notifications/infra): new rows only, writers unchanged.
+        events = table("burn-events", "stream", "event_id", stream=ddb.StreamViewType.NEW_IMAGE)
+        cdk.CfnOutput(self, "EventsStreamArn", value=events.table_stream_arn or "")
         events.add_global_secondary_index(
             index_name="by_agent",
             partition_key=ddb.Attribute(name="agent_id", type=S),
