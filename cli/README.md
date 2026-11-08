@@ -106,8 +106,10 @@ burn env            # what an instance's environment would hold (values hidden; 
    most 50 events per heartbeat. New progress sends a heartbeat at once, but never sooner than the minimum gap
    after the last one. A 400 means a progress rule was broken: that batch is logged and dropped, the agent keeps
    running, and a heartbeat without progress follows at once, because the refused one did not count. A 429 or any
-   other transient failure keeps the batch for the next heartbeat. Progress still queued when the agent exits is
-   sent before the exit is reported.
+   other transient failure keeps the batch for the next heartbeat. If a batch fails twice in a row, one heartbeat
+   goes without it, so the instance is never swept as idle while only its progress fails. Progress still queued
+   when the agent exits is sent before the exit is reported, keeping the minimum gap, for at most 10 s. A 409 then
+   means burned, and `burn run` exits with 3.
 
 `HTTPS_PROXY` is a convenience so well-behaved clients use the egress proxy. It is **not containment**: a process
 can ignore it. Containment is the network rule in the demo stack, which gives agents no route except the proxy.
