@@ -1,0 +1,247 @@
+/* Add agents: a white dialog on the night stage. Tokens from
+   styles/tokens.css only; the dialog itself is ui/Dialog. */
+
+/* The page is night (color-scheme dark); this card is white, so native
+   checkboxes and number fields draw light. */
+.add-agents {
+  color-scheme: light;
+}
+
+.add-agents .add-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.add-agents .add-eyebrow {
+  color: var(--muted-2);
+}
+
+.add-agents .add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.add-agents .add-form > .dialog-body {
+  margin-top: 0;
+}
+
+.add-agents .add-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+  margin: 0;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.add-agents .add-fields > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 0;
+}
+
+.add-agents .add-fields:disabled {
+  opacity: 0.6;
+}
+
+.add-agents .add-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.add-agents .add-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.add-agents .add-field > legend {
+  padding: 0;
+  margin-bottom: 6px;
+}
+
+.add-agents .add-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.add-agents .add-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted-2);
+}
+
+.add-agents .add-input {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.add-agents .add-input.id {
+  font-size: 13px;
+}
+
+.add-agents .add-input:hover:not(:disabled) {
+  border-color: var(--connector);
+}
+
+.add-agents .add-input::placeholder {
+  color: var(--muted-2);
+}
+
+/* Tools, keys and roles: mono chips that toggle. */
+.add-agents .add-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.add-agents .add-chip {
+  position: relative;
+  display: inline-flex;
+}
+
+.add-agents .add-chip input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.add-agents .add-chip span {
+  padding: 5px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--hairline-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.add-agents .add-chip:hover span {
+  border-color: var(--connector);
+}
+
+.add-agents .add-chip input:checked + span {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.add-agents .add-chip input:focus-visible + span {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.add-agents .add-chip input:disabled + span {
+  opacity: 0.6;
+}
+
+/* Protections: the role page's Protections rows, with a checkbox. */
+.add-agents .add-protection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.add-agents .add-protection:last-child {
+  border-bottom: 0;
+}
+
+.add-agents .add-protection > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.add-agents .add-protection-label {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.add-agents .add-protection input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+/* The token, once, and the commands that never hold it. */
+.add-agents .add-token-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.add-agents .add-token {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.add-agents .add-code {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.add-agents .add-token-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.add-agents .add-commands {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.add-agents .add-commands h3 {
+  margin-top: 8px;
+}
+
+.add-agents .add-wait-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 560px) {
+  .add-agents .add-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .add-agents .add-token {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
