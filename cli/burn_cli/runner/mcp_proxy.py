@@ -5,6 +5,7 @@ instance's local token as a bearer. Every forwarded request calls `on_activity`,
 """
 import hmac
 import json
+import logging
 import threading
 import urllib.error
 import urllib.request
@@ -13,6 +14,8 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 from .badge import BadgeToken, TokenRefused, TokenUnavailable
+
+_log = logging.getLogger(__name__)
 
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
               "transfer-encoding", "upgrade", "host", "authorization", "content-length", "accept-encoding"}
@@ -55,6 +58,15 @@ class McpProxy:
 
         class Handler(BaseHTTPRequestHandler):
             def _forward(self):
+                try:
+                    self._proxy()
+                except (BrokenPipeError, ConnectionResetError) as exc:
+                    # The agent went away mid-call, usually because burn run stopped it after a burn. There is no
+                    # one left to answer, and a traceback would bury burn run's own stop line.
+                    self.close_connection = True
+                    _log.debug("MCP client went away mid-request (%s)", type(exc).__name__)
+
+            def _proxy(self):
                 supplied = self.headers.get("authorization", "").removeprefix("Bearer ")
                 if not hmac.compare_digest(supplied.encode(), outer._local_token.encode()):
                     # Any local process can reach 127.0.0.1; only this instance's agent holds BURN_LOCAL_TOKEN.
