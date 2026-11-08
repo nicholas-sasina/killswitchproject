@@ -480,3 +480,18 @@ def test_sign_in_names():
     assert names.AUTOMATION_CLIENT_NAME == "burn-automation"
     assert names.AUTOMATION_CLIENT_ID_PARAM == "/burn/people/automation-client-id"
     assert names.AUTOMATION_PERSON_SECRET == "burn-system/automation-person"
+
+
+# --- replace on burn ---------------------------------------------------------------------------
+
+def test_roles_can_ask_for_a_replacement_when_an_instance_is_burned():
+    schema = json.loads((ROOT / "burn.schema.json").read_text())
+    prop = schema["$defs"]["role"]["properties"]["replace_on_burn"]
+    assert prop["type"] == "boolean" and prop["default"] is False  # off unless a role asks for it
+    assert "not when the whole role is burned" in prop["description"]
+    role = {"name": "worker", "tools": ["read_inbox"], "replace_on_burn": True}
+    jsonschema.validate({"version": 1, "roles": [role]}, schema)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"version": 1, "roles": [role | {"replace_on_burn": "yes"}]}, schema)
+    fields = _api()["components"]["schemas"]["RoleFields"]["properties"]
+    assert fields["replace_on_burn"] == {key: prop[key] for key in ("type", "default", "description")}

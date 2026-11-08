@@ -190,6 +190,8 @@ is returned once in the join reply and never stored; the supervisor never hands 
   other host, so a role that calls a model lists it.
 - Burn scopes (`POST /burns`): `instance`, `role`, `lineage` (an instance and every descendant),
   `token` (every instance that joined with it; the token is revoked too).
+- `replace_on_burn` (default false): when one of the role's instances is burned, Burn marks it for a clean
+  replacement (see "Replace on burn" below). Burning the whole role never replaces anything.
 
 ### Canaries and flag levels
 - **Canary incident**: the mock provider recognises a canary by its exact fingerprint, always answers 401

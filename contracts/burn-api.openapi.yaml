@@ -735,6 +735,10 @@ components:
           enum: [replace, report, off]
           default: replace
           description: "Credentials Burn recognizes in tool output: replace = the agent gets {{burn:ref:<secret_ref>}} instead; report = record only; off = neither. Canaries are never replaced."
+        replace_on_burn:
+          type: boolean
+          default: false
+          description: "Start a clean replacement when one of this role's instances is burned (not when the whole role is burned)."
     RoleSpec:
       description: Request body for creating or saving a role.
       allOf:
