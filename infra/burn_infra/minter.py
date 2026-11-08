@@ -85,6 +85,13 @@ class BurnMinterStack(cdk.Stack):
             actions=["dynamodb:PutItem"], resources=self._table_arns("burn-events")))
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"], resources=[self._fingerprint_key_arn()]))
+        role.add_to_policy(iam.PolicyStatement(  # canary counters; shared-credential flag lookups
+            actions=["dynamodb:GetItem", "dynamodb:UpdateItem"],
+            resources=[f"arn:aws:dynamodb:{region}:{acct}:table/{names.CREDENTIALS_TABLE}"]))
+        role.add_to_policy(iam.PolicyStatement(  # hand a canary incident to the Burn API; report to the minter
+            actions=["lambda:InvokeFunction"],
+            resources=[f"arn:aws:lambda:{region}:{acct}:function:{fn_name}"
+                       for fn_name in (names.BURN_API_FUNCTION, names.MINTER_FUNCTION)]))
         fn = lambda_.Function(
             self, "ProviderFn", function_name="burn-provider",
             runtime=lambda_.Runtime.PYTHON_3_12, handler="provider_app.handler",
@@ -130,6 +137,9 @@ class BurnMinterStack(cdk.Stack):
                      "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:BatchWriteItem"],
             resources=self._table_arns("burn-credentials", "burn-fingerprints"),
         ))
+        role.add_to_policy(iam.PolicyStatement(  # GET /flags lists flagged credentials
+            actions=["dynamodb:Scan"],
+            resources=[f"arn:aws:dynamodb:{region}:{acct}:table/{names.CREDENTIALS_TABLE}"]))
         role.add_to_policy(iam.PolicyStatement(  # CloudTrail LookupEvents has no resource-level
             actions=["cloudtrail:LookupEvents"], resources=["*"],  # permissions: "*" is unavoidable.
         ))
