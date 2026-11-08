@@ -343,3 +343,36 @@ def test_a_failed_event_write_does_not_undo_the_link(env, monkeypatch):
     status, linked = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]})
     assert status == 200 and linked["generation"] == 1
     assert session_row(env, old["session_id"])["replaced_by"] == new["session_id"]
+
+
+def test_the_link_events_name_who_linked_it(env):
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    assert call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]})[0] == 200
+    assert {e["actor"] for e in events(env, "replaced") + events(env, "resumed")} == {"admin"}
+
+
+def test_with_sign_in_on_a_person_links_and_an_instance_never_can(env, monkeypatch):
+    from test_people_auth import PERSON, as_person, bearer, request
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    monkeypatch.setenv("BURN_PEOPLE_AUTH", "1")
+    monkeypatch.delenv("BURN_LOCAL_DEV", raising=False)
+    path, body = f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]}
+    assert request(env, "POST", path, body, headers=bearer(new["secrets"]["session_token"]))[0] == 401
+    assert request(env, "POST", path, body, admin=True)[0] == 401  # the admin header is local development only
+    assert request(env, "GET", f"/instances/{new['session_id']}", headers=bearer(new["secrets"]["session_token"]))[
+        0] == 401
+    status, linked = as_person(env, "POST", path, body)
+    assert status == 200 and linked["generation"] == 1
+    assert {e["actor"] for e in events(env, "replaced") + events(env, "resumed")} == {PERSON}
+    status, beat_view = request(env, "POST", f"/instances/{new['session_id']}/heartbeat",
+                                {"progress": [{"item": "a", "state": "done"}]},
+                                headers=bearer(new["secrets"]["session_token"]))
+    assert status == 200 and beat_view["items_done"] == 1  # progress still rides on the exempt heartbeat
