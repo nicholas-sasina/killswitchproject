@@ -31,6 +31,13 @@ deploy-%: ## Deploy one stack, e.g. make deploy-BurnApi
 env: ## Write .env and dashboard/.env.local from the deployed stacks
 	cd burn_api && uv run python scripts/make_env.py
 
+person: ## Invite a person to sign in (EMAIL=...); Cognito emails them a temporary password
+	@test -n "$(EMAIL)" || (echo "usage: make person EMAIL=someone@example.com" && exit 1)
+	cd burn_api && uv run python scripts/people.py invite "$(EMAIL)"
+
+automation-person: ## Create or rotate the automation person scripts sign in as (password never printed)
+	cd burn_api && uv run python scripts/people.py automation
+
 test: ## Run every component's tests
 	@set -e; for d in $(PY_COMPONENTS); do \
 	  echo "== $$d"; \
@@ -89,3 +96,4 @@ teardown: ## Destroy every stack and force-delete the system secrets (asks first
 	cd infra && $(CDK) destroy --all --force
 	aws secretsmanager delete-secret --secret-id burn-system/fingerprint-key --force-delete-without-recovery || true
 	aws secretsmanager delete-secret --secret-id burn-system/demo-token --force-delete-without-recovery || true
+	aws secretsmanager delete-secret --secret-id burn-system/automation-person --force-delete-without-recovery || true
