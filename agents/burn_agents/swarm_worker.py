@@ -297,14 +297,26 @@ def own_aws_session(env: dict):
     return boto3.Session(aws_access_key_id=key_id, aws_secret_access_key=secret, region_name=REGION)
 
 
-def wait_for_key(session) -> str:
-    """Wait until AWS accepts the instance's fresh key (a few seconds after it is made); return its identity's name.
+STARTUP_RETRIES = (1, 2, 4, 5, 5, 5)  # seconds between tries of the key at start: about 20 s in all
 
-    Without this the first model call could fail as if the key had been burned.
+
+def wait_for_key(session, sleep: Callable[[float], None] = time.sleep) -> str:
+    """Wait until the instance's fresh key works; return its identity's name. Raises if it never does.
+
+    A new IAM key takes a few seconds before AWS accepts it, and the egress proxy, whose view of new keys refreshes
+    every couple of seconds, can refuse the first call that carries one (its refusal is JSON, which botocore reports
+    as a ParseError). Without this the first model call could fail as if the key had been burned.
     """
-    from .cloud import retry_while_key_activates
-    arn = retry_while_key_activates(lambda: session.client("sts").get_caller_identity()["Arn"])
-    return arn.rsplit("/", 1)[-1]
+    def identity() -> str:
+        return session.client("sts").get_caller_identity()["Arn"].rsplit("/", 1)[-1]
+
+    for delay in STARTUP_RETRIES:
+        try:
+            return identity()
+        except Exception as exc:  # noqa: BLE001 - any refusal at start is retried; Burn says if it was a burn
+            log.info("the instance's new key was not accepted yet (%s); trying again in %d s", type(exc).__name__, delay)
+            sleep(delay)
+    return identity()
 
 
 def bedrock_model(session):

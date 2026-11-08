@@ -364,3 +364,22 @@ def test_a_key_aws_does_not_accept_at_start_is_a_startup_error_not_a_burn(monkey
            "BURN_PROGRESS_URL": "http://127.0.0.1:1/progress"}
     assert asyncio.run(swarm_worker.main_async(env)) == 1  # Burn, not this worker, says whether it was burned
     assert "AWS did not accept this instance's own key" in caplog.text and "SignatureDoesNotMatch" in caplog.text
+
+
+def test_the_key_check_at_start_tries_again_while_a_new_key_is_refused():
+    from botocore.parsers import ResponseParserError  # what a JSON refusal from the proxy raises
+    answers = [ResponseParserError("not well-formed"), ClientError({"Error": {"Code": "InvalidClientTokenId"}}, "x"),
+               {"Arn": "arn:aws:iam::123456789012:user/burn-agent-agent-w-1"}]
+
+    class Sts:
+        def get_caller_identity(self):
+            out = answers.pop(0)
+            if isinstance(out, Exception):
+                raise out
+            return out
+
+    session, slept = SimpleNamespace(client=lambda name: Sts()), []
+    assert swarm_worker.wait_for_key(session, sleep=slept.append) == "burn-agent-agent-w-1" and slept == [1, 2]
+    answers[:] = [ResponseParserError("x")] * (len(swarm_worker.STARTUP_RETRIES) + 1)
+    with pytest.raises(ResponseParserError):
+        swarm_worker.wait_for_key(session, sleep=slept.append)
