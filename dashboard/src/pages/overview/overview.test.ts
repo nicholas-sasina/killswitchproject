@@ -153,7 +153,7 @@ function canaryBurn(extra: Partial<Instance> = {}) {
 }
 
 describe("words", () => {
-  it("writes small counts as words, as the board does", () => {
+  it("writes small counts as words", () => {
     expect(countWord(1)).toBe("one");
     expect(countWord(2)).toBe("two");
     expect(countWord(10)).toBe("ten");
@@ -249,7 +249,7 @@ describe("the last 24 hours strip", () => {
 });
 
 describe("the hero", () => {
-  it("tells one burn the board's way, from the burn's own events", () => {
+  it("tells one burn from the burn's own events", () => {
     const data = world(canaryBurn());
     const hero = heroCopy({ ...data, history: complete });
     expect(hero.incident).toBe(true);

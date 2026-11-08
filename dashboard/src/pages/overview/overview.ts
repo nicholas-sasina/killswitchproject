@@ -46,7 +46,7 @@ const WORDS = [
   "ten",
 ];
 
-/** "two" for small counts, digits from 11 up, as the board writes them. */
+/** "two" for small counts, digits from 11 up. */
 export function countWord(n: number): string {
   return WORDS[n] ?? String(n);
 }
