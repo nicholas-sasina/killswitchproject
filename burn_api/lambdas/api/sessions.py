@@ -135,13 +135,18 @@ def _store_badge(agent_id: str, badge: dict) -> str:
             return ref
         except client.exceptions.ResourceExistsException:
             continue  # a concurrent call created it; the next pass puts a value in
-        except client.exceptions.InvalidRequestException:
-            # Marked for deletion: a previous session's secret is still going.
-            # Both put_secret_value and create_secret report it this way.
-            if attempt == STORE_BADGE_ATTEMPTS - 1:
+        except client.exceptions.InvalidRequestException as err:
+            # Waiting only helps while the name is still being deleted, which put_secret_value and
+            # create_secret both report this way. Any other refusal fails now, not after the retries.
+            if not _being_deleted(err) or attempt == STORE_BADGE_ATTEMPTS - 1:
                 raise
             time.sleep(STORE_BADGE_WAIT_SECONDS)
     raise RuntimeError(f"could not store the badge secret for {agent_id}")
+
+
+def _being_deleted(err: ClientError) -> bool:
+    """An InvalidRequestException about a secret marked for deletion, matched as the minter's vault.put() does."""
+    return "deletion" in str(err) or "deleted" in str(err)
 
 
 def start_session(agent_id: str) -> dict:

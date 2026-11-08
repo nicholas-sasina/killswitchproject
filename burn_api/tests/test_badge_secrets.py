@@ -117,3 +117,64 @@ def test_restarting_a_scenario_agent_keeps_its_badge_secret_and_does_not_wait(en
     assert badge_secret("agent-a")[0] == arn
     assert badge_secret("agent-a")[1]["client_id"] == session_row(env, second["session_id"])["client_id"]
     assert second["badge_ref"] == "burn/agent-a/badge" and waits == []
+
+
+# --- storing a badge waits only for a name that is still being deleted --------------------------
+
+BADGE = {"client_id": "client-1", "client_secret": "not-a-secret", "token_url": "https://example.invalid/token",
+         "scope": "burn/tools"}
+# What Secrets Manager says while a deleted name is not free yet (put on the old secret, create of a new one).
+BEING_DELETED = {"put_secret_value": "You can't perform this operation on the secret because it was marked for "
+                                     "deletion.",
+                 "create_secret": "You can't create this secret because a secret with this name is already "
+                                  "scheduled for deletion."}
+OTHER_REFUSAL = "A previous rotation isn't complete. That rotation will be reattempted."
+
+
+def refusing(monkeypatch, op, message, times):
+    """_store_badge's client, with `op` refused (InvalidRequestException) `times` times before it works."""
+    import sessions
+    client = secrets_manager()
+    real, calls = getattr(client, op), []
+
+    def refuse(**kwargs):
+        calls.append(kwargs["SecretId" if op == "put_secret_value" else "Name"])
+        if len(calls) <= times:
+            raise client.exceptions.InvalidRequestException(
+                {"Error": {"Code": "InvalidRequestException", "Message": message}}, op)
+        return real(**kwargs)
+
+    setattr(client, op, refuse)
+    monkeypatch.setattr(sessions.boto3, "client", lambda *args, **kwargs: client)
+    return calls
+
+
+@pytest.mark.parametrize("op", ["put_secret_value", "create_secret"])
+def test_storing_a_badge_waits_out_a_name_that_is_still_being_deleted(env, monkeypatch, waits, op):
+    import sessions
+    if op == "put_secret_value":  # the old secret is there, but going
+        secrets_manager().create_secret(Name="burn/agent-a/badge", SecretString="{}")
+    calls = refusing(monkeypatch, op, BEING_DELETED[op], times=2)
+    assert sessions._store_badge("agent-a", BADGE) == "burn/agent-a/badge"
+    assert len(calls) == 3 and waits == [sessions.STORE_BADGE_WAIT_SECONDS] * 2
+    assert badge_secret("agent-a")[1] == BADGE
+
+
+def test_storing_a_badge_gives_up_on_a_name_that_never_frees(env, monkeypatch, waits):
+    import sessions
+    calls = refusing(monkeypatch, "create_secret", BEING_DELETED["create_secret"], times=1000)
+    with pytest.raises(secrets_manager().exceptions.InvalidRequestException):
+        sessions._store_badge("agent-a", BADGE)
+    assert len(calls) == sessions.STORE_BADGE_ATTEMPTS
+    assert waits == [sessions.STORE_BADGE_WAIT_SECONDS] * (sessions.STORE_BADGE_ATTEMPTS - 1)
+
+
+@pytest.mark.parametrize("op", ["put_secret_value", "create_secret"])
+def test_any_other_invalid_request_fails_at_once(env, monkeypatch, waits, op):
+    import sessions
+    if op == "put_secret_value":
+        secrets_manager().create_secret(Name="burn/agent-a/badge", SecretString="{}")
+    calls = refusing(monkeypatch, op, OTHER_REFUSAL, times=1000)
+    with pytest.raises(secrets_manager().exceptions.InvalidRequestException, match="rotation"):
+        sessions._store_badge("agent-a", BADGE)
+    assert len(calls) == 1 and waits == []
