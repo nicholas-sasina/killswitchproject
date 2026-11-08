@@ -627,3 +627,42 @@ def test_the_admin_and_join_tokens_this_burn_run_holds_are_refused_as_items(wher
         Instance(RecordingApi(), "worker", ["true"], gateway_url="http://gateway", host_env=host,
                  enroll_token=secret if where == "enroll" else "other-token")
     assert secret not in str(caught.value)
+
+
+class ProgressFailsApi(RecordingApi):
+    """Fails every heartbeat that carries progress with `status`; a bare one succeeds."""
+
+    def __init__(self, status, stop_after=None, done=None):
+        super().__init__()
+        self.status, self.stop_after, self.done = status, stop_after, done
+
+    def heartbeat(self, session_id, session_token, progress=None):
+        self.bodies.append(progress)
+        if self.stop_after and len(self.bodies) >= self.stop_after:
+            self.done.set()
+        if progress:
+            raise ApiError(f"POST /instances/{session_id}/heartbeat failed with HTTP {self.status}", self.status)
+        return {}
+
+
+@pytest.mark.parametrize("status", [429, 503, 0])
+def test_a_batch_that_keeps_failing_lets_a_bare_heartbeat_through_every_third_send(status):
+    api = ProgressFailsApi(status or None)
+    inst = supervisor(api)
+    inst._progress.add(ev("a"))
+    statuses = [inst._beat() for _ in range(6)]
+    assert api.bodies == [[ev("a")], [ev("a")], [], [ev("a")], [ev("a")], []]
+    assert statuses == [status, status, 200] * 2 and inst._progress.pending() == 1  # still kept, never dropped
+
+
+def test_the_heartbeat_loop_keeps_the_instance_alive_while_progress_keeps_failing():
+    api = ProgressFailsApi(503, stop_after=12)
+    inst = supervisor(api)
+    api.done = inst._done
+    inst.heartbeat_every, inst.min_gap = 0.01, 0.0
+    inst._progress.add(ev("a"))
+    loop = threading.Thread(target=inst._heartbeat_loop, daemon=True)
+    loop.start()
+    loop.join(20)
+    assert not loop.is_alive()
+    assert api.bodies.count([]) >= 3  # bare heartbeats got through between the failing ones

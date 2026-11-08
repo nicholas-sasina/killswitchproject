@@ -26,6 +26,7 @@ from .spawn_endpoint import SpawnEndpoint
 EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # how a supervisor receives the secrets of a session someone else started
 STOP_GRACE = 5.0  # seconds between SIGTERM and SIGKILL when stopping the agent
+BARE_AFTER = 2  # failed sends of a batch in a row before one heartbeat goes without it
 
 
 def log(message: str) -> None:
@@ -61,6 +62,7 @@ class Instance:
         self.progress_wait = progress_wait  # how long the agent's "started" may wait for Burn to record it
         self._beat_lock = threading.Lock()  # one heartbeat at a time, so a batch is never sent twice at once
         self._bare_next = False  # after a refused batch: the API recorded nothing, not even that we are alive
+        self._batch_failures = 0  # heartbeats in a row whose batch failed: past BARE_AFTER, liveness goes first
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -212,13 +214,15 @@ class Instance:
                 self._activity.set()  # the next beat goes after the minimum gap: a bare one, the next 50, or a retry
             # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
 
-    def _beat(self) -> int:
-        """One heartbeat with the oldest queued progress, at most 50 events, or none right after a refused batch.
+    def _beat(self, liveness_first: bool = True) -> int:
+        """One heartbeat with the oldest queued progress, at most 50 events, or none when liveness goes first
+        (after a refused batch, or a batch that keeps failing). The exit flush passes False: an exit follows.
 
         Returns 200, or the failed call's status (0 when the API was unreachable).
         """
         with self._beat_lock:
-            bare, self._bare_next = self._bare_next, False  # one bare try per refused batch, whatever its outcome
+            bare = self._bare_next and liveness_first
+            self._bare_next = False  # one bare try each time, whatever its outcome
             batch = [] if bare else self._progress.batch()
             try:
                 self.api.heartbeat(self.session["session_id"], self._token, batch)
@@ -227,7 +231,15 @@ class Instance:
                     self._progress.dropped(len(batch), str(exc))
                     self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
                     log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
+                elif batch and exc.status not in (404, 409):
+                    # The batch is kept. If only progress keeps failing, a bare beat in between keeps the
+                    # instance from being swept as idle; then the batch is tried again.
+                    self._batch_failures += 1
+                    if self._batch_failures >= BARE_AFTER:
+                        self._batch_failures, self._bare_next = 0, True
                 return exc.status or 0
+            if batch:
+                self._batch_failures = 0
             self._progress.sent(len(batch))
             return 200
 
@@ -239,7 +251,7 @@ class Instance:
         """
         failures = 0
         while self._progress.pending():
-            status = self._beat()
+            status = self._beat(liveness_first=False)
             failures = 0 if status in (200, 400) else failures + 1
             if status in (404, 409) or failures == 3:
                 log(f"{self._progress.pending()} progress events could not be sent before the exit")
