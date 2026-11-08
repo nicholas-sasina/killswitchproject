@@ -38,7 +38,9 @@ def is_refusal_text(text: str) -> bool:
 def is_proxy_refusal(exc: BaseException) -> bool:
     """The egress proxy refuses a burned agent's session (HTTP 403, or 407 for bad proxy auth)."""
     proxy_errors = (httpx.ProxyError, httpcore.ProxyError, ProxyConnectionError)
-    return isinstance(exc, proxy_errors) and any(code in str(exc) for code in ("403", "407"))
+    # botocore keeps the proxy's answer out of its message, in kwargs["error"]
+    text = f"{exc} {getattr(exc, 'kwargs', {}).get('error', '')}"
+    return isinstance(exc, proxy_errors) and any(code in text for code in ("403", "407"))
 
 
 def looks_revoked(exc: BaseException) -> bool:
