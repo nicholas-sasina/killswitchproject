@@ -35,6 +35,7 @@ class Outcome:
     status: str
     category: str | None = None
     retry_after: float | None = None
+    echo: str | None = field(default=None, repr=False)  # provider's stored copy (live check only)
 
 
 @dataclass
@@ -242,7 +243,9 @@ class Processor:
                          latency_ms=(self.clock() - started) * 1000)
             if inc.is_update and inc.aggregated_count == 1 and not inc.event_id.startswith("agg_"):
                 self._schedule_summary(dest, inc)
-            return self._finish(event, inc, dest, st.DELIVERED, None, provider_ref=ack.provider_ref)
+            outcome = self._finish(event, inc, dest, st.DELIVERED, None, provider_ref=ack.provider_ref)
+            outcome.echo = ack.echo
+            return outcome
 
     def _schedule_summary(self, dest: Destination, inc: Incident) -> None:
         """Containment results (rotated/flagged/failed) are written after the revoke event, so a

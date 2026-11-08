@@ -74,11 +74,14 @@ class DiscordProvider(Provider):
         resp = self._post_json(url, prepared.body)
         if resp.status in (200, 204):
             try:
-                message_id = json.loads(resp.body or b"{}").get("id")
-            except (ValueError, AttributeError):
-                message_id = None
+                created = json.loads(resp.body or b"{}")
+            except ValueError:
+                created = {}
+            created = created if isinstance(created, dict) else {}
+            message_id = created.get("id")
+            echo = json.dumps(created.get("embeds"), ensure_ascii=False) if created.get("embeds") else None
             return Ack(provider_ref=message_id if isinstance(message_id, str) and message_id.isdigit() else None,
-                       status=resp.status)
+                       status=resp.status, echo=echo)
         if resp.status == 429:
             try:
                 retry_after = json.loads(resp.body or b"{}").get("retry_after")

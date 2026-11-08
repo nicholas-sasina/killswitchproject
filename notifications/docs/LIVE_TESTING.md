@@ -6,17 +6,31 @@ real incident or credential. Nothing is sent unless you pass `--live` **and** se
 
 ## 0. Before you start
 - Work from `notifications/`, and run `uv sync --all-groups` once.
-- Secrets go in environment variables for local tests, or in Secrets Manager when deployed. Never put
-  them in a file in the repo. The tools never print secrets, and their reports hold statuses, message
-  ids and payload-check results only.
-- Keep shell history clean: type `read -rs NAME` and paste the value, which avoids echoing it.
+- Secrets live in **one file outside the repo, readable only by you**. The tools load it with
+  `--env-file` and print only the variable *names*. They refuse a file inside the repository, or one
+  that others can read.
+  ```bash
+  mkdir -p ~/.config/burn-notify && touch ~/.config/burn-notify/test.env
+  chmod 600 ~/.config/burn-notify/test.env
+  open -e ~/.config/burn-notify/test.env     # paste the lines below, with your values, in an editor
+  ```
+  ```
+  BURN_NOTIFY_SLACK_WEBHOOK=https://hooks.slack.com/services/...
+  BURN_NOTIFY_TELEGRAM_BOT_TOKEN=123456789:...
+  BURN_NOTIFY_DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
+  BURN_NOTIFY_TEAMS_WORKFLOW_URL=https://...logic.azure.com/workflows/...
+  ```
+  Leave out any line for a platform you have not set up, and remove it from the test config too.
+- The tools never print secrets. Reports hold statuses, safe message ids, timestamps and check results.
 
-```bash
-read -rs BURN_NOTIFY_SLACK_WEBHOOK; export BURN_NOTIFY_SLACK_WEBHOOK
-read -rs BURN_NOTIFY_TELEGRAM_BOT_TOKEN; export BURN_NOTIFY_TELEGRAM_BOT_TOKEN
-read -rs BURN_NOTIFY_DISCORD_WEBHOOK; export BURN_NOTIFY_DISCORD_WEBHOOK
-read -rs BURN_NOTIFY_TEAMS_WORKFLOW_URL; export BURN_NOTIFY_TEAMS_WORKFLOW_URL
-```
+### How delivery is confirmed (a 200 alone is not enough)
+| Platform | Automatic evidence | Visibility confirmation |
+|---|---|---|
+| Telegram | `sendMessage` returns the stored message: id, plus its text checked server-side (`server_copy=pass`) | the copy Telegram returns, plus a glance at the chat |
+| Discord | `?wait=true` returns the created message: id, plus its embed checked server-side | the same, plus a glance at the channel |
+| Slack | HTTP 200 `ok` only; webhooks cannot read back | read the channel through the Slack connector (authenticate it in Claude), or your confirmation |
+| Teams | `202 Accepted` (workflow queued) | the flow's run history, plus your confirmation in the channel |
+| SES | `MessageId` | if the recipient is a Gmail inbox connected to Claude, search it for the `[TEST]` subject; otherwise your confirmation |
 
 ## 1. Create the private test destinations
 
@@ -91,28 +105,28 @@ What SES confirms: a `MessageId` (`ref=`), which means SES accepted the mail. De
 confirmed in the mailbox, or through an SES configuration set with event publishing.
 
 ## 2. Write the test config (outside the repo)
-Copy [`../config.live.example.json`](../config.live.example.json) to somewhere outside the repo, for
-example `~/burn-notify-test.json`. Fill in your chat id, addresses and sender, and remove any
+Copy [`../config.live.example.json`](../config.live.example.json) to
+`~/.config/burn-notify/test.json`, outside the repo. Fill in your chat id, addresses and sender, and remove any
 destination you have not set up yet. Secrets stay in the environment (`env:` refs).
 
 ## 3. Run the checks, in order
 ```bash
 # a. Nothing sent: the same sequence against recording transports
-uv run python -m burn_notify live-check --dry-run --config ~/burn-notify-test.json
+uv run python -m burn_notify live-check --dry-run --config ~/.config/burn-notify/test.json
 
 # b. One message to one destination
-BURN_NOTIFY_LIVE=1 uv run python -m burn_notify send --config ~/burn-notify-test.json \
+BURN_NOTIFY_LIVE=1 uv run python -m burn_notify send --config ~/.config/burn-notify/test.json \
     --destination slack-test --fixture canary_used --live
 
 # c. Full step-4 sequence on every destination in the config, with a controlled failure and retry
-BURN_NOTIFY_LIVE=1 uv run python -m burn_notify live-check --config ~/burn-notify-test.json \
-    --live --inject-failure --report ~/burn-notify-live-report.json
+BURN_NOTIFY_LIVE=1 uv run python -m burn_notify live-check --config ~/.config/burn-notify/test.json \
+    --env-file ~/.config/burn-notify/test.env --live --inject-failure --report ~/burn-notify-live-report.json
 
 # d. Burn's real containment code (on emulated AWS) driving real delivery
-BURN_NOTIFY_LIVE=1 uv run python demo/backend_demo.py --live --config ~/burn-notify-test.json
+BURN_NOTIFY_LIVE=1 uv run python demo/backend_demo.py --live --config ~/.config/burn-notify/test.json
 
 # e. pytest form of (b), one alert per destination
-BURN_NOTIFY_LIVE=1 BURN_NOTIFY_CONFIG=~/burn-notify-test.json uv run pytest -m live tests/test_live.py
+BURN_NOTIFY_LIVE=1 BURN_NOTIFY_CONFIG=~/.config/burn-notify/test.json uv run pytest -m live tests/test_live.py
 ```
 
 `live-check` (c) does the following, and prints per step and per destination the status, attempts,

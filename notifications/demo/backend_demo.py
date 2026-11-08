@@ -101,7 +101,12 @@ def main(argv=None) -> int:
     parser.add_argument("--config", help="notifications config (default: built-in demo config, dry run)")
     parser.add_argument("--live", action="store_true", help="deliver to the config's AUTHORIZED test destinations")
     parser.add_argument("--json", action="store_true", help="print the full machine-readable record")
+    parser.add_argument("--env-file", help="chmod-600 KEY=VALUE file outside the repo holding the secrets")
     args = parser.parse_args(argv)
+    if args.env_file:
+        from burn_notify.cli import load_env_file
+        keys = load_env_file(args.env_file)
+        print(f"loaded {len(keys)} variable(s) from the env file: {', '.join(sorted(keys))}")
 
     from burn_notify import fixtures
     events, facts = burn_events(args.scenario, args.workers)

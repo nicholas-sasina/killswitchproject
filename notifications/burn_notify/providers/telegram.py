@@ -67,8 +67,10 @@ class TelegramProvider(Provider):
         except ValueError:
             data = {}
         if resp.status == 200 and data.get("ok") is True:
-            message_id = (data.get("result") or {}).get("message_id")
-            return Ack(provider_ref=str(message_id) if isinstance(message_id, int) else None, status=200)
+            result = data.get("result") or {}
+            message_id = result.get("message_id")
+            echo = result.get("text") if isinstance(result.get("text"), str) else None
+            return Ack(provider_ref=str(message_id) if isinstance(message_id, int) else None, status=200, echo=echo)
         retry_after = (data.get("parameters") or {}).get("retry_after")
         if resp.status == 429:
             raise classify_http(resp, retry_after=retry_after if isinstance(retry_after, (int, float)) else None)

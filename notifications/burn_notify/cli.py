@@ -41,6 +41,13 @@ DEMO_CONFIG = {
 }
 
 
+def _plain(html_text: str) -> str:
+    """Telegram returns message text without the HTML markup it rendered."""
+    import html as html_mod
+    import re
+    return html_mod.unescape(re.sub(r"<[^>]+>", "", html_text))
+
+
 class _RecordingTransport:
     """Pretends every provider accepted the message. Never opens a socket."""
 
@@ -48,10 +55,12 @@ class _RecordingTransport:
         self.provider = provider
 
     def post(self, url, body, headers, *, timeout):
+        sent = json.loads(body)  # answer like the real APIs: they return the message they stored
         if self.provider == "telegram":
-            return Response(200, {}, b'{"ok":true,"result":{"message_id":1}}')
+            return Response(200, {}, json.dumps({"ok": True, "result": {"message_id": 1, "text": _plain(
+                sent.get("text", ""))}}).encode())
         if self.provider == "discord":
-            return Response(200, {}, b'{"id":"1"}')
+            return Response(200, {}, json.dumps({"id": "1", "embeds": sent.get("embeds", [])}).encode())
         if self.provider == "teams":
             return Response(202, {}, b"")
         return Response(200, {}, b"ok")
@@ -142,6 +151,8 @@ def cmd_dry_run(args, out=sys.stdout) -> int:
 
 
 def cmd_send(args, out=sys.stdout) -> int:
+    if not _apply_env_file(args, out):
+        return 2
     if not args.live or os.environ.get("BURN_NOTIFY_LIVE") != "1":
         out.write("refusing to send: pass --live and set BURN_NOTIFY_LIVE=1 (authorized test channels only)\n")
         return 2
@@ -158,8 +169,59 @@ def cmd_send(args, out=sys.stdout) -> int:
     return 0 if all(o.status == "delivered" for o in result.outcomes) else 1
 
 
+REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+class EnvFileError(Exception):
+    pass
+
+
+def load_env_file(path: str) -> list[str]:
+    """Load KEY=VALUE lines (optional `export `) into os.environ. Returns the key names only.
+
+    Refuses a file inside the repository or readable by group/others (chmod 600), so secrets are
+    never committed or shared by accident. Values are never printed.
+    """
+    real = os.path.realpath(os.path.expanduser(path))
+    if real == REPO_ROOT or real.startswith(REPO_ROOT + os.sep):
+        raise EnvFileError("refusing an env file inside the repository; keep it in ~/.config/burn-notify/")
+    st = os.stat(real)
+    if st.st_mode & 0o077:
+        raise EnvFileError(f"refusing {path}: readable by others (run: chmod 600 {path})")
+    keys = []
+    with open(real, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            key, sep, value = line.partition("=")
+            if not sep or not key.replace("_", "").isalnum():
+                raise EnvFileError("env file lines must look like KEY=VALUE")
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            os.environ[key] = value
+            keys.append(key)
+    return keys
+
+
+def _apply_env_file(args, out) -> bool:
+    if getattr(args, "env_file", None):
+        try:
+            keys = load_env_file(args.env_file)
+        except (EnvFileError, OSError) as exc:
+            out.write(f"{exc}\n")
+            return False
+        out.write(f"loaded {len(keys)} variable(s) from the env file: {', '.join(sorted(keys))}\n")
+    return True
+
+
 def cmd_live_check(args, out=sys.stdout) -> int:
     from . import livecheck
+    if not _apply_env_file(args, out):
+        return 2
     if args.dry_run:
         cfg = config_mod.load({**os.environ, "BURN_NOTIFY_CONFIG": args.config}) if args.config \
             else config_mod.parse(DEMO_CONFIG, environ={})
@@ -211,12 +273,14 @@ def main(argv=None, out=None) -> int:
     send.add_argument("--destination", required=True)
     send.add_argument("--fixture", default="canary_used", choices=sorted(fixtures.ALL))
     send.add_argument("--live", action="store_true")
+    send.add_argument("--env-file", help="chmod-600 KEY=VALUE file outside the repo holding the secrets")
     live = sub.add_parser("live-check", help="step-by-step verification against authorized test destinations")
     live.add_argument("--config", help="config JSON naming ONLY authorized test destinations")
     live.add_argument("--live", action="store_true")
     live.add_argument("--dry-run", action="store_true", help="same sequence with recording transports, no network")
     live.add_argument("--inject-failure", action="store_true", help="also test retry after controlled failures")
     live.add_argument("--report", help="write the JSON report (no secrets) to this path")
+    live.add_argument("--env-file", help="chmod-600 KEY=VALUE file outside the repo holding the secrets")
     msg = sub.add_parser("test-message", help="print an SQS body that checks a deployed stack ([TEST] label)")
     msg.add_argument("--fixture", default="canary_used", choices=sorted(fixtures.ALL))
     args = parser.parse_args(argv)

@@ -54,6 +54,9 @@ class PreparedRequest:
 class Ack:
     provider_ref: str | None = None  # message id etc., only when it is safe to store
     status: int | None = None
+    # The message as the provider stored it, when its API returns it (Telegram sendMessage, Discord
+    # ?wait=true). In memory only, for the live check's server-side verification; never stored or logged.
+    echo: str | None = None
 
 
 class DeliveryError(Exception):
