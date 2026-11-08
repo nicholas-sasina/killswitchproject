@@ -523,7 +523,7 @@ describe("scoped containment", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(
         screen.getByRole("status", { name: "Scoped burn result" }).textContent,
-      ).toBe("1 sessions revoked.");
+      ).toBe("1 session revoked.");
       expect(
         within(screen.getByRole("region", { name: "Role worker" })).getByText(
           "revoked",
@@ -551,7 +551,7 @@ describe("scoped containment", () => {
     await click("Confirm Burn");
     expect(
       screen.getByRole("status", { name: "Scoped burn result" }).textContent,
-    ).toContain("1 sessions revoked. 1 burns failed");
+    ).toContain("1 session revoked. 1 burn failed");
     expect(
       (
         screen.getByRole("button", {

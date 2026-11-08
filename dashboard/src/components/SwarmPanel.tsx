@@ -78,7 +78,7 @@ export function SwarmPanel({
     const sessions = result.burned.flatMap((entry) => entry.sessions_revoked);
     setRevoked((current) => [...new Set([...current, ...sessions])]);
     setOutcome(
-      `${sessions.length} sessions revoked.${result.failed?.length ? ` ${result.failed.length} burns failed; check instance status before retrying.` : ""}`,
+      `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"} revoked.${result.failed?.length ? ` ${result.failed.length} ${result.failed.length === 1 ? "burn" : "burns"} failed; check instance status before retrying.` : ""}`,
     );
     setTarget(undefined);
   }

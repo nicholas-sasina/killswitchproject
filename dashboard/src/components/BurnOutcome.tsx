@@ -31,7 +31,11 @@ export function BurnOutcome({
           {result.agent_id} ·{" "}
           {result.revoked ? "revoked" : "revocation not confirmed"}
         </h2>
-        <p>{result.sessions_revoked.length} sessions revoked</p>
+        <p>
+          {result.sessions_revoked.length}{" "}
+          {result.sessions_revoked.length === 1 ? "session" : "sessions"}{" "}
+          revoked
+        </p>
       </div>
       <div>
         <h3>Rotated · {result.rotated.length}</h3>

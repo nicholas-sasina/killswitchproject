@@ -107,7 +107,7 @@ describe("containment dashboard", () => {
     });
     const outcome = screen.getByRole("status", { name: "Burn result" });
     expect(outcome.textContent).toContain(ref);
-    expect(outcome.textContent).toContain("1 sessions revoked");
+    expect(outcome.textContent).toContain("1 session revoked");
     expect(screen.getByText("MOCK DATA")).toBeTruthy();
     expect(
       fetcher.mock.calls.some((call) =>
