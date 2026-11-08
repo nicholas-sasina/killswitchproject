@@ -48,7 +48,7 @@ function Lede({
 
 /**
  * One role (#/roles/<name>): what it is, its agents by state, what it may
- * do, its protections and its join tokens. Built from the Roles board.
+ * do, its protections and its join tokens.
  */
 export function RolePage({ name }: { name: string }) {
   const { model, events, rolesLoaded, instancesLoaded, openAddAgents } =
