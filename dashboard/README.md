@@ -2,8 +2,18 @@
 
 ## What it does
 
-Shows live agent status, credential exposure and containment activity with agents and events side by side.
-Burn an agent and inspect its CloudTrail history alongside blocked events from real traffic.
+Two views, each a bookmarkable location.
+
+**Overview** (`#/overview`) shows live agent status, credential exposure and containment activity
+with agents and events side by side. Burn an agent and inspect its CloudTrail history alongside
+blocked events from real traffic.
+
+**Alerts** (`#/alerts`) shows only the events that need an operator, most serious first, with what
+each one proves and what to do about it beside every field recorded for it. Severity reflects what
+an event proves rather than how alarming it sounds: a canary credential being presented is `CRIT`,
+because nothing legitimate ever touches it, while a blocked egress attempt is `HIGH`, because it is
+proof the exit check worked. The severity tallies double as filters. The navigation marker counts
+everything above `INFO`, so you can stay on the overview and still see the queue filling.
 The **Instances by role** panel groups sessions under their roles, with parent/child lineage,
 status, last seen and exposure counts. Filter by role, status, agent, session or owner to inspect larger swarms.
 Code-managed roles are labelled read-only, and scenario roles retain their names.
@@ -21,7 +31,17 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
 ## How it works
 
 - Polls the Burn API every second with an incremental cursor; a reducer deduplicates events by `event_id`.
+- Alerts are derived from that same stream, so the alerts view issues no requests of its own.
 - Agent selection loads its exposure ledger, refreshed every five seconds.
+- The exposure ledger and the CloudTrail timeline are collapsible and start closed, both with
+  scrolling bodies. Closing means different things on purpose: the ledger keeps polling, because
+  its heading summarises what it found and that has to stay true, while CloudTrail stops entirely,
+  because a closed timeline says nothing and its query is the expensive one. CloudTrail opens
+  itself when a burned agent is selected.
+- CloudTrail groups calls by key so repetition collapses into one line with a count, and draws at
+  most eight rows per group behind a "show all" control.
+- Theme is paper, ink, or follow-the-system, persisted in `localStorage` under `burn.theme`. An
+  inline script in `index.html` resolves it before first paint so reloads do not flash.
 - One roles request and one instances request refresh the entire role panel every five seconds,
   including the waiting view, with cancellation and no overlapping requests.
 - Confirming Burn highlights the card with returned rotation/flag counts for ten seconds; full references remain below the ledger.
@@ -30,16 +50,21 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
 
 ## Key files
 
-| File                 | Purpose                                                               |
-| -------------------- | --------------------------------------------------------------------- |
-| `src/contracts.ts`   | TypeScript shapes matching the API and event contracts                |
-| `src/api.ts`         | Requests, demo-token header, timeouts and response-header observation |
-| `src/events.ts`      | Deduplication, cursor handling and newest-first ordering              |
-| `src/polling.ts`     | Polling with cancellation and no overlapping requests                 |
-| `src/App.tsx`        | Agent selection and containment state                                 |
-| `src/components/`    | Agent cards, confirmation, ledger, events and timeline                |
-| `src/MockBanner.tsx` | Persistent mock-data indication                                       |
-| `src/styles.css`     | Responsive dark presentation layout                                   |
+| File                             | Purpose                                                               |
+| -------------------------------- | --------------------------------------------------------------------- |
+| `src/contracts.ts`               | TypeScript shapes matching the API and event contracts                |
+| `src/api.ts`                     | Requests, demo-token header, timeouts and response-header observation |
+| `src/events.ts`                  | Deduplication, cursor handling and newest-first ordering              |
+| `src/polling.ts`                 | Polling with cancellation and no overlapping requests                 |
+| `src/App.tsx`                    | View switching, agent selection and containment state                 |
+| `src/alerts.ts`                  | Which events are alerts, their severity, and what each one means      |
+| `src/router.ts`                  | Hash routing for the two views                                        |
+| `src/theme.ts`                   | Paper/ink/system choice, persistence and live system tracking         |
+| `src/components/`                | Agent cards, confirmation, ledger, events, alerts and timeline        |
+| `src/components/Brand.tsx`       | The Burn mark, its tile variant and the wordmark                      |
+| `src/components/Collapsible.tsx` | Panel that collapses to its heading                                   |
+| `src/MockBanner.tsx`             | Persistent mock-data indication                                       |
+| `src/styles.css`                 | Design tokens for both themes, and the responsive layout              |
 
 ## How to test it
 
@@ -84,7 +109,16 @@ discards it; **Copy token** writes only the token to your clipboard. Blocked han
 stopped traffic without exposing agent credential values.
 
 **Why is the timeline empty after Burn?** CloudTrail history can lag several minutes.
-The dashboard keeps polling every ten seconds and shows the API's lag note while waiting.
+The dashboard keeps polling every ten seconds and shows the API's lag note while waiting. If you
+collapsed the panel it is not polling at all; reopen it to resume.
+
+**Why does the interface look like paper?** Burn is an audit ledger with a kill switch, so it is
+built like an incident sheet rather than a console: ruled columns, hairline rules, monospace for
+anything you would compare or quote, and one signal colour. Ember means severity or destruction
+and nothing else, so a filled ember control always deserves attention. Severity is written as
+well as coloured, which keeps it readable for colour-blind operators and on a washed-out
+projector. Both themes are audited to WCAG AA for text and 3:1 for control boundaries, so neither
+is the degraded one.
 
 **What does MOCK DATA mean, and where does the token live?** At least one API response declared itself a development mock.
 Switch URLs and reload to start a new connection. Vite embeds `VITE_` values in the browser bundle, including the demo token;

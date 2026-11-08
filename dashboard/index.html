@@ -1,15 +1,40 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0d0b0a" />
+    <meta name="theme-color" content="#f1ede4" />
     <meta
       name="description"
       content="Burn: contain a compromised AI agent and every credential it saw."
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Burn · Agent containment</title>
+    <script>
+      // Resolve the theme before first paint. Without this the page renders
+      // paper and then flips to ink once React mounts, which is a visible
+      // flash on every reload. Kept inline and tiny for that reason; the
+      // same logic lives in src/theme.ts for everything after mount.
+      (function () {
+        try {
+          var stored = localStorage.getItem("burn.theme");
+          var dark =
+            stored === "dark" ||
+            ((!stored || stored === "system") &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var theme = dark ? "dark" : "light";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute("content", dark ? "#0d0b0a" : "#f1ede4");
+        } catch (error) {
+          // Blocked storage or no matchMedia: the paper default already set
+          // on <html> stands.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

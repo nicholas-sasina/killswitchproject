@@ -6,6 +6,7 @@ import { newestEvents } from "./events";
 import { MockBanner, mockDataReducer } from "./MockBanner";
 import { useEventFeed } from "./polling";
 import { hrefFor, useView, VIEWS } from "./router";
+import { useTheme } from "./theme";
 import { ErrorMessage } from "./components/common";
 import { Brand } from "./components/Brand";
 import { AgentCard } from "./components/AgentCard";
@@ -16,6 +17,7 @@ import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
 import { SwarmPanel } from "./components/SwarmPanel";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 const VIEW_LABEL = { overview: "Overview", alerts: "Alerts" } as const;
 
@@ -34,6 +36,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const { state, error, updatedAt } = useEventFeed(api, configured);
   const events = useMemo(() => newestEvents(state), [state]);
   const view = useView();
+  const theme = useTheme();
   // The navigation marker counts anything above "noted", so the operator can
   // stay on the overview and still know the queue is filling.
   const pending = useMemo(() => attentionCount(toAlerts(events)), [events]);
@@ -144,6 +147,11 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                   ? "Connected · polling every second"
                   : "Waiting for connection"}
             </div>
+            <ThemeToggle
+              choice={theme.choice}
+              resolved={theme.resolved}
+              onChange={theme.set}
+            />
           </div>
         </header>
         <main>

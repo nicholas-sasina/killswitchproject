@@ -24,7 +24,14 @@
      7. Log rows carry a line number in a ruled gutter, like a printout.
    =========================================================================== */
 
-:root {
+/* --- Tokens --------------------------------------------------------------
+   Paper is the default. Ink is the same instrument at night: identical
+   structure, inverted stock. Both sets are audited to WCAG AA for text, and
+   3:1 for control boundaries, so neither theme is the degraded one.
+   ------------------------------------------------------------------------ */
+
+:root,
+[data-theme="light"] {
   /* Paper stock, warm rather than white. */
   --c-page: #f1ede4;
   --c-module: #faf8f3;
@@ -33,17 +40,17 @@
 
   /* Hairlines do the structural work. */
   --c-rule: #d3cbbb;
-  --c-rule-bright: #b0a593;
+  --c-rule-bright: #898173;
 
   /* Ink. */
   --c-ink: #1f1c18;
   --c-ink-2: #574f45;
-  --c-ink-3: #756d5f;
+  --c-ink-3: #6c6558;
 
   /* Signal: ember is severity and destruction, only. */
   --c-ember: #bf3a12;
   --c-ember-text: #9d2f0e;
-  --c-ember-edge: #d79e86;
+  --c-ember-edge: #c98a6e;
   --c-ember-deep: #f9e5dc;
 
   /* Supporting states. */
@@ -54,6 +61,46 @@
   --c-cool: #3a5571;
   --c-cool-deep: #e3eaf1;
 
+  --c-banner-fg: #ffffff;
+  --c-shadow: #2a201a33;
+  --c-backdrop: #2a211a66;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  /* Warm near-black rather than blue slate, so it reads as the same
+     instrument lit from behind rather than a different product. */
+  --c-page: #0d0b0a;
+  --c-module: #15120f;
+  --c-sunken: #0a0908;
+  --c-raised: #1e1a16;
+
+  --c-rule: #2d2823;
+  --c-rule-bright: #70655a;
+
+  --c-ink: #ece7de;
+  --c-ink-2: #b3aa9e;
+  --c-ink-3: #938a7d;
+
+  --c-ember: #e2552f;
+  --c-ember-text: #ff9a79;
+  --c-ember-edge: #8a3119;
+  --c-ember-deep: #2e140c;
+
+  --c-nominal: #9ec293;
+  --c-nominal-deep: #19210f;
+  --c-caution: #d4a353;
+  --c-caution-deep: #292009;
+  --c-cool: #94a7ba;
+  --c-cool-deep: #161c22;
+
+  --c-banner-fg: #1f0a04;
+  --c-shadow: #000000b3;
+  --c-backdrop: #060504cc;
+  color-scheme: dark;
+}
+
+:root {
   --f-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --f-sans: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
 
@@ -64,7 +111,6 @@
   line-height: 1.55;
   color: var(--c-ink);
   background: var(--c-page);
-  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -306,6 +352,33 @@ h3 {
 }
 .connection-error > span {
   background: var(--c-ember);
+}
+
+/* Theme control: three ruled segments sharing hairlines. */
+.theme-switch {
+  display: flex;
+  border: 1px solid var(--c-rule-bright);
+}
+.theme-option {
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--c-rule-bright);
+  padding: 5px 9px;
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--c-ink-3);
+}
+.theme-option:first-child {
+  border-left: 0;
+}
+.theme-option:hover {
+  color: var(--c-ink);
+}
+.theme-option[aria-pressed="true"] {
+  background: var(--c-ink);
+  color: var(--c-module);
 }
 
 main {
@@ -1404,7 +1477,7 @@ tbody tr:first-child td {
   align-items: center;
   gap: 16px;
   background: var(--c-ember);
-  color: #fff;
+  color: var(--c-banner-fg);
   padding: 8px 18px;
   position: sticky;
   top: 0;
@@ -1443,10 +1516,10 @@ dialog {
   background: var(--c-module);
   color: var(--c-ink);
   padding: 26px 28px 24px;
-  box-shadow: 0 30px 80px #2a201a33;
+  box-shadow: 0 30px 80px var(--c-shadow);
 }
 dialog::backdrop {
-  background: #2a211a66;
+  background: var(--c-backdrop);
   backdrop-filter: blur(2px);
 }
 dialog h2 {
