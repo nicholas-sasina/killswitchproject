@@ -5,6 +5,7 @@ its body (no auth header at all), and everything after that by the instance's ow
 is deliberately separate from `burn_cli.api.Api`, which is for people. The session token lives only in the
 supervisor: it is passed per call and never put in the agent's environment, argv or logs.
 """
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -33,7 +34,9 @@ class InstanceApi:
                 detail = ""
             raise ApiError(f"{method} {path} failed with HTTP {err.code}" + (f": {detail}" if detail else ""),
                            err.code) from None
-        except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        # OSError and HTTPException: urllib passes some through unwrapped, such as RemoteDisconnected when the
+        # connection drops before the status line, or IncompleteRead. Left uncaught, one would end the heartbeat.
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError, http.client.HTTPException) as exc:
             raise ApiError(f"cannot reach the Burn API ({getattr(exc, 'reason', exc)})") from None
 
     def join(self, role: str, enroll_token: str) -> dict:

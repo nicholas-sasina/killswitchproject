@@ -728,3 +728,22 @@ def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack):
     report("item-01", "done")"""
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == EXIT_STOPPED
     assert not stack.calls("POST", "/instances/" + next(iter(stack.instances)) + "/exit")
+
+
+def test_a_connection_dropped_mid_heartbeat_counts_as_unreachable():
+    import socket
+    from burn_cli.runner.instance_api import InstanceApi
+    server = socket.create_server(("127.0.0.1", 0))
+
+    def hang_up():
+        conn, _ = server.accept()
+        conn.recv(65536)
+        conn.close()  # no status line: http.client raises RemoteDisconnected, which urllib does not wrap
+
+    threading.Thread(target=hang_up, daemon=True).start()
+    try:
+        with pytest.raises(ApiError, match="cannot reach the Burn API") as caught:
+            InstanceApi(f"http://127.0.0.1:{server.getsockname()[1]}").heartbeat("sess_1", "token")
+        assert caught.value.status is None  # transient, like any unreachable API: the heartbeat thread lives on
+    finally:
+        server.close()
