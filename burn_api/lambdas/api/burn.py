@@ -5,6 +5,7 @@
    credentials and flag the shared ones (level `seen`).
 3. Raise credentials it tried to send out (blocked events) to `attempted`.
 4. Record each outcome as an event for the dashboard.
+5. For a burn of single instances, mark each for a clean replacement if its role asks (replace.py).
 
 canary.py reuses the outcome and flag helpers below for single-session containment.
 """
@@ -14,6 +15,7 @@ from burn_contracts import names
 
 import db
 import minter_client
+import replace
 import sessions
 
 # Event sources that mean "a check stopped this credential from leaving".
@@ -115,7 +117,10 @@ def flag_blocked_attempts(agent_id: str) -> list[dict]:
     return raised
 
 
-def burn_agent(agent_id: str, reason: str = "") -> dict:
+def burn_agent(agent_id: str, reason: str = "", replaceable: list[str] | None = None,
+               evidence_time: str | None = None) -> dict:
+    """replaceable and evidence_time are for a burn of single instances (replace.py): the sessions the caller
+    already revoked, and its earliest evidence of compromise. None for any other burn, which never replaces."""
     if db.get_agent(agent_id) is None:
         raise sessions.NotFound(agent_id)
 
@@ -132,6 +137,7 @@ def burn_agent(agent_id: str, reason: str = "") -> dict:
     )
     rotated, flagged = record_outcomes(agent_id, result)
     flag_blocked_attempts(agent_id)
+    replace.after_burn(agent_id, replaceable, revoked_ids, evidence_time)  # best effort, never raises
 
     return {
         "agent_id": agent_id,

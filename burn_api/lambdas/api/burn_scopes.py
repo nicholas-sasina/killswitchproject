@@ -77,7 +77,8 @@ def burn_scope(scope: str, ident: str, reason: str = "", budget: float = BURN_BU
     pool = ThreadPoolExecutor(max_workers=BURN_WORKERS)
     try:
         revoked, agent_ids, revoke_failed = _revoke_all(pool, scope, ident, found, deadline)
-        burned, failed = _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed)
+        burned, failed = _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed,
+                                   replaceable=scope == "instance")
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     return {"scope": scope, "id": ident, "burned": burned, "failed": failed}
@@ -118,10 +119,18 @@ def _revoke_all(pool, scope, ident, found, deadline):
     return revoked, list(agent_ids), revoke_failed
 
 
-def _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed):
-    """Burn each distinct agent once (exactly like POST /burn). Failures are collected, not raised."""
+def _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed, replaceable=False, evidence=None):
+    """Burn each distinct agent once (exactly like POST /burn). Failures are collected, not raised.
+
+    replaceable: a burn of single instances (scope instance, or by source), so what it revoked may be replaced;
+    evidence: agent id -> its earliest evidence of compromise. A role, lineage or token burn passes neither.
+    """
     burned, failed = [], []
-    futures = {_submit(pool, burn.burn_agent, agent_id, reason): agent_id for agent_id in agent_ids}
+
+    def args(agent_id):  # any other burn calls burn_agent exactly as before
+        return (agent_id, reason) + ((revoked.get(agent_id, []), (evidence or {}).get(agent_id)) if replaceable else ())
+
+    futures = {_submit(pool, burn.burn_agent, *args(agent_id)): agent_id for agent_id in agent_ids}
     _, pending = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
     for future, agent_id in futures.items():
         if future in pending:

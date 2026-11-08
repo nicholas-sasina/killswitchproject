@@ -86,7 +86,10 @@ def burn_by_source(body: dict) -> dict:
     try:
         # The scoped-burn steps: revoke every active session first, then burn each agent once.
         revoked, _, revoke_failed = burn_scopes._revoke_all(pool, "by_source", source_ref, sessions, deadline)
-        burned, failed = burn_scopes._burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed)
+        # Each instance's first read of the source (or the message that brought it) is its evidence.
+        first_seen = {r["agent_id"]: r["first_seen"] for r in found}
+        burned, failed = burn_scopes._burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed,
+                                               replaceable=True, evidence=first_seen)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     return {"source_ref": source_ref, "since": since, "readers": found, "burned": burned, "failed": failed}
