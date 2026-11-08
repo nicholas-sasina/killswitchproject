@@ -12,10 +12,11 @@ import time
 from typing import Callable
 
 from .. import retry
-from ..api import Api, ApiError
+from ..api import ApiError
 from .badge import BadgeToken
 from . import credentials as creds_mod
 from .env import child_env
+from .instance_api import InstanceApi
 from .mcp_proxy import McpProxy
 from . import privs
 from .privs import Drop
@@ -31,7 +32,7 @@ def log(message: str) -> None:
 
 
 class Instance:
-    def __init__(self, api: Api, role: str, command: list[str], *,
+    def __init__(self, api: InstanceApi, role: str, command: list[str], *,
                  gateway_url: str, host_env: dict | None = None, enroll_token: str = "", session: dict | None = None,
                  secrets: dict | None = None,
                  proxy_url: str = "", heartbeat_every: float = 15.0, min_heartbeat_gap: float = 3.0,
@@ -39,7 +40,9 @@ class Instance:
                  sleep: Callable[[float], None] = time.sleep):
         self.api, self.role, self.command = api, role, command
         self._secrets = secrets  # handed over by the parent supervisor or the launcher; never kept on self.session
+        self._token = ""  # this instance's session token: supervisor memory only, never in the agent's env or argv
         self.gateway_url, self.host_env = gateway_url, dict(os.environ if host_env is None else host_env)
+        self.host_env.pop("BURN_DEMO_TOKEN", None)  # an instance never uses the admin token, nor passes it on
         self.enroll_token, self.session, self.proxy_url = enroll_token, session, proxy_url
         self.heartbeat_every, self.min_gap, self.stop_grace, self._sleep = heartbeat_every, min_heartbeat_gap, stop_grace, sleep
         self._activity, self._done = threading.Event(), threading.Event()
@@ -52,8 +55,7 @@ class Instance:
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
         if self.session is None:
-            body = {"role": self.role, "enroll_token": self.enroll_token}
-            self.session = retry.call(lambda: self.api.request("POST", "/sessions", body), sleep=self._sleep)
+            self.session = retry.call(lambda: self.api.join(self.role, self.enroll_token), sleep=self._sleep)
         return self.session
 
     # -- child instances ----------------------------------------------------------------------
@@ -61,22 +63,23 @@ class Instance:
         """Start a child instance: its session is made here, then it runs under its own `burn run`."""
         if self._stopping.is_set():
             raise ApiError("this instance is stopping", 409)
-        body = {"role": role, "parent_session": self.session["session_id"]}
-        child = retry.call(lambda: self.api.request("POST", "/sessions", body), sleep=self._sleep)
-        secrets = child.pop("secrets", None)
-        if not secrets:
-            self._report_exit(child["session_id"])
-            raise ApiError(str(creds_mod.MissingSecrets()), 502)
+        child = retry.call(lambda: self.api.spawn(role, self.session["session_id"], self._token), sleep=self._sleep)
+        child_secrets = child.pop("secrets", None)
+        child_token = (child_secrets or {}).get("session_token", "")
+        if not child_secrets or not child_token:
+            if child_token:
+                self._report_exit(child["session_id"], child_token)
+            raise ApiError(str(creds_mod.MissingSecrets("session token" if child_secrets else "secrets")), 502)
         # argv is readable by every uid in the container (/proc/<pid>/cmdline): only non-secret session fields go
         # there. The child's own values go in its exec environment, which only its uid and root can read.
         argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(child),
                 *(["--user", self.user_arg] if self.user_arg else []), "--", *command]
         with self._spawn_lock:  # _stop_children takes the same lock, so no child starts after it ran
             if self._stopping.is_set():
-                self._report_exit(child["session_id"])
+                self._report_exit(child["session_id"], child_token)
                 raise ApiError("this instance is stopping", 409)
             # The child's supervisor gets this supervisor's host environment (API settings), never the agent's.
-            env = {**self.host_env, ADOPT_SECRETS: json.dumps(secrets)}
+            env = {**self.host_env, ADOPT_SECRETS: json.dumps(child_secrets)}
             self._children.append(subprocess.Popen(argv, env=env))
         return {"session_id": child["session_id"], "agent_id": child["agent_id"]}
 
@@ -101,9 +104,11 @@ class Instance:
 
     def _run_guarded(self) -> int:
         session = self.start_session()
+        own = self._secrets or session.pop("secrets", None)  # arrive once; nothing keeps a copy on the session
+        self._secrets, self._token = None, (own or {}).get("session_token", "")
         cleanups: list[Callable[[], None]] = []
         try:
-            return self._run(session, cleanups)
+            return self._run(session, own, cleanups)
         except BaseException:
             self._exit()  # the session started, so end it even if setup failed (credentials, HOME, ...)
             raise
@@ -113,10 +118,9 @@ class Instance:
             for cleanup in reversed(cleanups):
                 cleanup()
 
-    def _run(self, session: dict, cleanups: list) -> int:
-        # The values arrive once. Take them off the session so nothing keeps a copy beyond the credentials object.
-        creds = creds_mod.from_secrets(self._secrets or session.pop("secrets", None))
-        self._secrets = None
+    def _run(self, session: dict, own: dict | None, cleanups: list) -> int:
+        creds = creds_mod.from_secrets(own)  # the agent's values; the session token is not among them
+        creds_mod.session_token_of(own)  # an API that sends no session token cannot authenticate heartbeats
         badge = BadgeToken(creds.badge)
         local_token = secrets.token_urlsafe(32)  # per run: only this instance's agent is told it
         mcp = McpProxy(self.gateway_url, badge, self._activity.set, local_token).start()
@@ -157,17 +161,18 @@ class Instance:
         return home
 
     def _exit(self) -> None:
-        self._report_exit(self.session["session_id"])
+        if not self._token:
+            log("no session token, so the exit cannot be reported; the instance will time out")
+            return
+        self._report_exit(self.session["session_id"], self._token)
 
-    def _report_exit(self, session_id: str) -> None:
+    def _report_exit(self, session_id: str, session_token: str) -> None:
         try:
-            retry.call(lambda: self.api.request("POST", f"/instances/{session_id}/exit"),
-                       attempts=4, sleep=self._sleep)
+            retry.call(lambda: self.api.exit(session_id, session_token), attempts=4, sleep=self._sleep)
         except ApiError as exc:
             log(f"could not report the exit ({exc})")
 
     def _heartbeat_loop(self) -> None:
-        path = f"/instances/{self.session['session_id']}/heartbeat"
         last = 0.0
         while not self._done.is_set():
             woke = self._activity.wait(self.heartbeat_every)  # MCP activity wakes the loop early
@@ -179,7 +184,7 @@ class Instance:
                     continue
             last = time.monotonic()
             try:
-                self.api.request("POST", path)
+                self.api.heartbeat(self.session["session_id"], self._token)
             except ApiError as exc:
                 if exc.status in (404, 409):  # burned, exited or gone: the agent must not keep running
                     self._stopped_by_api = True

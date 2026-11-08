@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config, render, spec
 from .api import Api, ApiError
 from .runner.credentials import MissingSecrets
+from .runner.instance_api import InstanceApi
 
 CLOUDTRAIL_NOTE = "CloudTrail event history can lag 5-15 minutes behind real activity."
 
@@ -237,7 +238,7 @@ def cmd_token_create(api, args):
           f"  pbpaste | burn run --role {r['role']} --token-stdin -- <command>")
 
 
-def cmd_run(api, args):
+def cmd_run(args):
     from .runner import privs
     from .runner.run import ADOPT_SECRETS, Instance
     command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
@@ -265,7 +266,10 @@ def cmd_run(api, args):
         drop = privs.resolve(args.user)
     except ValueError as exc:
         raise UsageError(str(exc)) from None
-    return Instance(api, args.role, command, secrets=secrets, gateway_url=gateway.rstrip("/"), enroll_token=token,
+    api_url = config.get("BURN_API_URL", args.dotenv)
+    if not api_url:
+        raise UsageError("BURN_API_URL not set (run `make env`, or export it)")
+    return Instance(InstanceApi(api_url), args.role, command, secrets=secrets, gateway_url=gateway.rstrip("/"), enroll_token=token,
                     session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv), drop=drop, user_arg=args.user,
                     stdin_devnull=args.token_stdin).run()
 
@@ -296,7 +300,7 @@ def cmd_ps(api, args):
     print("\n\n".join(blocks))
 
 
-COMMANDS = {"agents": cmd_agents, "run": cmd_run, "apply": cmd_apply, "pull": cmd_pull, "ps": cmd_ps, "token": cmd_token_create, "kill": cmd_kill, "ledger": cmd_ledger,
+COMMANDS = {"agents": cmd_agents, "apply": cmd_apply, "pull": cmd_pull, "ps": cmd_ps, "token": cmd_token_create, "kill": cmd_kill, "ledger": cmd_ledger,
             "blast-radius": cmd_blast_radius, "events": cmd_events}
 
 
@@ -307,7 +311,9 @@ def run(argv: list[str] | None = None, dotenv=None) -> int:
     if args.command == "kill" and not (args.target or args.role or args.lineage or args.token):
         parser.error("name what to burn: a SESSION, an agent id, --role, --lineage or --token")
     try:
-        if args.command in ("login", "init", "env"):  # these need no API config
+        if args.command in ("login", "init", "env", "run"):  # these need no person credentials
+            if args.command == "run":  # an instance authenticates as itself: no admin or person token
+                return cmd_run(args)
             {"login": lambda: cmd_login(args, dotenv), "init": lambda: cmd_init(args), "env": lambda: cmd_env(args)}[args.command]()
             return 0
         url, token = config.load(dotenv)

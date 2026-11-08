@@ -129,7 +129,7 @@ def test_pagination_errors_cors_and_headers(client, scenario):
 
 def test_background_activity_starts_and_stops(scenario):
     app = create_app(scenario[0], activity_interval=0.01)
-    with TestClient(app) as client:
+    with TestClient(app, headers={"x-burn-demo-token": "mock"}) as client:
         start(client, scenario[1]["agents"][0]["id"])
         # Run on the server loop and allow the actual background task to fire.
         client.portal.call(asyncio.sleep, 0.05)

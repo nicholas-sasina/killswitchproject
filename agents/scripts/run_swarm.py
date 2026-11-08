@@ -18,7 +18,7 @@ import threading
 from urllib.parse import urlsplit
 
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
-from swarm_launch import IMAGE, NETWORK, Api, start_workers
+from swarm_launch import IMAGE, NETWORK, Api, InstanceApi, start_workers
 
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
@@ -81,7 +81,7 @@ def main() -> int:
     docker(["docker", "build", "-q", "-f", str(AGENTS_DIR / "Dockerfile.swarm"), "-t", IMAGE, str(REPO_ROOT)])
     names: list[str] = []
     try:
-        names = start_workers(Api(api_url, token), args.role, args.count, api_url=api_url, admin_token=token,
+        names = start_workers(Api(api_url, token), InstanceApi(api_url), args.role, args.count, api_url=api_url,
                               gateway_url=gateway, mock=args.mock, interval=args.interval,
                               certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker)
         print(f"started {len(names)} worker(s) of role {args.role}; Ctrl-C stops them")

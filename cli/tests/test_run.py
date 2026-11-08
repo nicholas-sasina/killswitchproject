@@ -11,7 +11,7 @@ import urllib.request
 import pytest
 
 import burn_cli.runner.run as runmod
-from burn_cli.api import Api
+from burn_cli.runner.instance_api import InstanceApi
 from burn_cli.main import run as cli
 from burn_cli.runner.badge import BadgeToken, TokenRefused
 from burn_cli.runner.credentials import Badge, MissingSecrets, from_secrets
@@ -55,7 +55,7 @@ def host_env(stack, **extra):
 
 def instance(stack, command, **kw):
     kw.setdefault("heartbeat_every", 30.0)
-    return Instance(Api(stack.url, API_TOKEN), "worker", command,
+    return Instance(InstanceApi(stack.url), "worker", command,
                     gateway_url=stack.gw.url + "/mcp", host_env=host_env(stack), enroll_token=stack.token,
                     sleep=lambda _: None, **kw)
 
@@ -75,7 +75,7 @@ def test_child_gets_its_own_values_and_none_of_the_hosts(stack):
     assert not [k for k in env if k.startswith("AWS_") and k not in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION")]
     assert env["AWS_ACCESS_KEY_ID"].startswith("AKIA") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
     assert env["AWS_SECRET_ACCESS_KEY"] != "host-secret" and env["BURN_API_KEY"].startswith("mpk_live_")
-    session = stack.calls("POST", "/sessions")[0]
+    session = stack.calls("POST", "/instances")[0]
     agent_id = next(iter(stack.instances.values()))["agent_id"]
     assert env["BURN_AGENT_ID"] == agent_id and env["BURN_ROLE"] == "worker"
     assert env["BURN_SESSION_ID"] in stack.instances
@@ -144,12 +144,12 @@ def test_describe_lists_removed_names_only():
 
 # -- retry ---------------------------------------------------------------------------------------
 def test_session_start_retries_429_then_succeeds_with_backoff(stack):
-    stack.fail[("POST", "/sessions")] = [429, 503]
+    stack.fail[("POST", "/instances")] = [429, 503]
     waits = []
     inst = instance(stack, py("pass"))
     inst._sleep = waits.append
     assert inst.run() == 0
-    assert len(stack.calls("POST", "/sessions")) == 3 and len(waits) == 2
+    assert len(stack.calls("POST", "/instances")) == 3 and len(waits) == 2
     assert waits[0] <= 0.5 and waits[1] <= 1.0  # jitter keeps each wait under its doubling ceiling
 
 
@@ -157,7 +157,7 @@ def test_session_start_does_not_retry_a_rejected_token(stack):
     stack.tokens.clear()
     with pytest.raises(Exception, match="HTTP 403"):
         instance(stack, py("pass")).run()
-    assert len(stack.calls("POST", "/sessions")) == 1
+    assert len(stack.calls("POST", "/instances")) == 1
 
 
 # -- lifecycle ---------------------------------------------------------------------------------
@@ -270,7 +270,7 @@ def test_mcp_endpoint_reports_a_refused_badge(stack):
             urllib.request.urlopen(urllib.request.Request(os.environ["BURN_MCP_URL"], data=b"{}", method="POST", headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]}))
         except urllib.error.HTTPError as e:
             open(sys.argv[1], "w").write(f"{e.code} {e.read().decode()}")"""
-    inst = Instance(Api(stack.url, API_TOKEN), "worker", py(code, str(out)),
+    inst = Instance(InstanceApi(stack.url), "worker", py(code, str(out)),
                     gateway_url=stack.gw.url + "/mcp", host_env=host_env(stack), enroll_token=stack.token, sleep=lambda _: None)
     inst.run()
     assert out.read_text().startswith("401") and "badge" in out.read_text() and not stack.gw.seen
@@ -323,7 +323,7 @@ def test_spawn_starts_a_child_with_its_own_credentials_and_endpoints(stack):
     parent_env = json.loads(parent_out.read_text())
     spawned, penv = parent_env["spawned"], parent_env["env"]
     time.sleep(0.5)
-    sessions = stack.calls("POST", "/sessions")
+    sessions = stack.calls("POST", "/instances")
     assert sessions[0][2]["enroll_token"] == stack.token
     assert sessions[1][2] == {"role": "worker", "parent_session": penv["BURN_SESSION_ID"]}
     cenv = json.loads(child_out.read_text())
@@ -358,7 +358,7 @@ def test_spawn_rejects_a_malformed_request(stack):
         except urllib.error.HTTPError as e:
             pathlib.Path({str(out)!r}).write_text(str(e.code))"""
     instance(stack, py(code)).run()
-    assert out.read_text() == "400" and len(stack.calls("POST", "/sessions")) == 1
+    assert out.read_text() == "400" and len(stack.calls("POST", "/instances")) == 1
 
 
 # -- credentials ---------------------------------------------------------------------------------
@@ -378,13 +378,13 @@ def test_a_reply_without_secrets_is_a_clear_error(reply):
         from_secrets(reply)
 
 
-def test_an_api_that_returns_no_secrets_fails_clearly_ends_the_session_and_never_asks_aws(stack, capsys, monkeypatch):
+def test_an_api_that_returns_no_secrets_fails_clearly_and_never_asks_aws(stack, capsys, monkeypatch):
     stack.omit_secrets = True
     monkeypatch.setitem(sys.modules, "boto3", None)  # importing boto3 would now fail: there is no AWS fallback
     code = cli(["run", "--role", "worker", "--", "true"])
-    assert code == 1 and "API too old: no secrets in the join reply" in capsys.readouterr().err
-    (row,) = stack.instances.values()
-    assert row["status"] == "exited"  # the session that was started is not left dangling
+    err = capsys.readouterr().err
+    assert code == 1 and "API too old: no secrets in the join reply" in err
+    assert "cannot be reported" in err  # no session token, so no authenticated exit; the instance times out
 
 
 def test_the_runner_does_not_depend_on_aws():
@@ -448,6 +448,7 @@ def test_root_starts_the_agent_as_an_unprivileged_user_but_not_child_supervisors
     stack.roles["worker"]["may_spawn"] = ["worker"]
     parent = stack.add_instance("sess_parent", "worker")
     inst.session = {"session_id": "sess_parent", "agent_id": parent["agent_id"]}
+    inst._token = stack.session_tokens["sess_parent"]
     inst._stopping.clear()
     FakePopen.calls.clear()
     inst.spawn_child("worker", ["true"])
@@ -622,7 +623,7 @@ def test_local_endpoints_refuse_callers_without_the_per_run_token(stack):
     assert [codes[k] for k in ("mcp_none", "mcp_wrong", "spawn_none", "spawn_wrong")] == [401] * 4
     assert codes["mcp_good"] == 200
     assert len(stack.gw.seen) == 1  # only the authorized call reached the Gateway
-    assert len(stack.calls("POST", "/sessions")) == 1  # no child was started by the refused spawn requests
+    assert len(stack.calls("POST", "/instances")) == 1  # no child was started by the refused spawn requests
     assert len(codes["token"]) >= 40
 
 
@@ -643,7 +644,7 @@ def test_token_stdin_reads_the_join_token_and_never_echoes_it(stack, capfd, monk
     monkeypatch.setattr(sys, "stdin", io.StringIO(token + "\nmore\n"))
     assert cli(["run", "--role", "worker", "--token-stdin", "--", sys.executable, "-c", "print('ok')"]) == 0
     out = capfd.readouterr()
-    assert token not in out.out + out.err and stack.calls("POST", "/sessions")[0][2]["enroll_token"] == token
+    assert token not in out.out + out.err and stack.calls("POST", "/instances")[0][2]["enroll_token"] == token
 
 
 def test_token_stdin_conflicts_with_token_and_needs_a_token(stack, capsys, monkeypatch):

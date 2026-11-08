@@ -1,4 +1,5 @@
 """The environment an agent process gets: an allow-list of the host's, plus its own values."""
+import re
 from urllib.parse import quote, urlsplit, urlunsplit
 
 # The agent's environment is an allow-list: a variable reaches it only if it is listed here. A deny-list has to
@@ -15,6 +16,11 @@ PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 LOOPBACK = "127.0.0.1,localhost"
 
 
+# A session token (bst_...) authenticates the supervisor's own calls. It must never be in the agent's environment,
+# whatever variable it is in, so this is checked by pattern on top of the allow-list.
+SESSION_TOKEN = re.compile(r"bst_[A-Za-z0-9_-]{43}")
+
+
 def is_scrubbed(name: str) -> bool:
     """True for every host variable the agent does not get."""
     return name not in ALLOWED_NAMES and not name.startswith(ALLOWED_PREFIXES)
@@ -22,7 +28,7 @@ def is_scrubbed(name: str) -> bool:
 
 def scrub(host_env: dict) -> dict:
     """Only the allow-listed part of the host environment."""
-    return {k: v for k, v in host_env.items() if not is_scrubbed(k)}
+    return {k: v for k, v in host_env.items() if not is_scrubbed(k) and not SESSION_TOKEN.search(str(v))}
 
 
 def proxy_url(base: str, agent_id: str, session_id: str) -> str:
@@ -60,6 +66,9 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
         # The local MCP and spawn endpoints are on 127.0.0.1; they must never be sent to the proxy.
         existing = host_env.get("NO_PROXY") or host_env.get("no_proxy") or ""
         env["NO_PROXY"] = env["no_proxy"] = ",".join(x for x in (existing, LOOPBACK) if x)
+    leaked = [k for k, v in env.items() if SESSION_TOKEN.search(str(v))]
+    if leaked:
+        raise ValueError(f"refusing to give the agent a session token (in {', '.join(sorted(leaked))})")
     return env
 
 
