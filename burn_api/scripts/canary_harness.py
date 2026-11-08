@@ -53,6 +53,7 @@ TABLES = {  # name: (pk, sk, [(index, pk, sk)]) as created by infra/burn_infra/d
     "burn-fingerprints": ("fingerprint", None, [("by_secret", "secret_ref", None)]),
     "burn-sessions": ("session_id", None, [("by_agent", "agent_id", None), ("by_client", "client_id", None)]),
     "burn-scenario": ("pk", None, []),
+    "burn-roles": ("name", None, []),
 }
 
 
@@ -103,7 +104,8 @@ class Stack:
         import minter_app, minter_client  # noqa: E401
         out = minter_app.handler({"method": method, "path": path, "body": body or {}, "query": query or {}})
         if out["statusCode"] != 200:
-            raise minter_client.MinterError(f"minter {method} {path} failed: {out['statusCode']}")
+            raise minter_client.MinterError(f"minter {method} {path} failed: {out['statusCode']}",
+                                            status=out["statusCode"], detail=out["body"].get("error"))
         return out["body"]
 
     def invoke(self, function_name, payload, wait):
@@ -170,11 +172,25 @@ class Stack:
         return self.secret(ref)
 
     # ---- the monitored provider -----------------------------------------------------------
-    def present(self, key: str, ip: str = "198.51.100.23") -> tuple[int, dict]:
+    def present(self, key: str, ip: str = "198.51.100.23", via_session: str | None = None) -> tuple[int, dict]:
+        """From outside Burn by default; via_session = sent through the egress proxy for that session."""
         import provider_app
-        resp = provider_app.handler({"rawPath": "/v1/whoami", "headers": {"authorization": f"Bearer {key}"},
+        import session_proof
+        from burn_contracts import fingerprint as fp
+        headers = {"authorization": f"Bearer {key}"}
+        if via_session:  # what the proxy adds (SIMULATED until the proxy owner ships it)
+            hmac_key = fp.key_from_hex(self.secret("burn-system/fingerprint-key"))
+            headers[session_proof.HEADER] = session_proof.make(via_session, hmac_key)
+        resp = provider_app.handler({"rawPath": "/v1/whoami", "headers": headers,
                                      "requestContext": {"http": {"sourceIp": ip}}})
         return resp["statusCode"], json.loads(resp["body"])
+
+    def set_role(self, session_id: str, role: str, **policy) -> None:
+        """Give a session a stored role (as role-based instances have) with the given policy."""
+        self.table("burn-roles").put_item(Item={"name": role, "tools": [], "managed_by": "ui", **policy})
+        self.table("burn-sessions").update_item(Key={"session_id": session_id}, UpdateExpression="SET #r = :r",
+                                                ExpressionAttributeNames={"#r": "role"},
+                                                ExpressionAttributeValues={":r": role})
 
     # ---- reads ----------------------------------------------------------------------------
     def table(self, name: str):

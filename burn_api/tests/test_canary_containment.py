@@ -293,3 +293,106 @@ def test_manual_burn_still_works_and_leaves_the_canary_alone(stack, fleet):  # 2
     others = statuses(stack, fleet)
     others.pop(VICTIM)
     assert set(others.values()) == {"active"}
+
+
+# ---- origin and role policy -----------------------------------------------------------------
+
+def test_use_through_its_own_session_is_an_alert_only(stack, fleet):
+    victim = fleet[VICTIM]
+    stolen = stack.read_canary(victim)
+    assert stack.present(stolen, via_session=victim["session_id"])[0] == 401
+    [used] = stack.events("canary_used")
+    assert "own session; alert only" in used["detail"]
+    assert stack.incidents == []
+    assert set(statuses(stack, fleet).values()) == {"active"}
+    assert int(stack.credential(f"burn/{VICTIM}/api_key")["version"]) == 1
+    stack.present(stolen)  # the same canary later used from outside Burn does burn
+    assert stack.incidents[0]["outcome"] == "contained"
+
+
+def test_report_only_role_alerts_and_flags_but_never_burns(stack, fleet):
+    victim = fleet[VICTIM]
+    stack.set_role(victim["session_id"], "worker", auto_burn=False)
+    stack.minter_call("POST", "/shared/credentials",
+                      {"name": "crm_db_url", "type": "other", "template": "postgres://svc:{random}@db/crm"})
+    stack.expose(VICTIM, "burn/shared/crm_db_url")
+    leak_and_present(stack, victim)
+    [result] = stack.incidents
+    assert result["outcome"] == "report_only" and "report-only" in result["reason"]
+    assert result["flagged"] == ["burn/shared/crm_db_url"]
+    assert stack.session_status(victim["session_id"]) == "active"
+    assert stack.events("revoked") == [] and stack.events("rotated") == []
+    assert stack.credential("burn/shared/crm_db_url")["flag_level"] == "seen"
+
+
+def test_auto_burn_role_still_burns(stack, fleet):
+    stack.set_role(fleet[VICTIM]["session_id"], "worker", auto_burn=True, canaries=True)
+    leak_and_present(stack, fleet[VICTIM])
+    assert stack.incidents[0]["outcome"] == "contained"
+
+
+def test_unreadable_role_policy_burns_nothing(stack, fleet, monkeypatch):
+    stack.table("burn-sessions").update_item(
+        Key={"session_id": fleet[VICTIM]["session_id"]}, UpdateExpression="SET #r = :r",
+        ExpressionAttributeNames={"#r": "role"}, ExpressionAttributeValues={":r": "worker"})
+    boto3.client("dynamodb").delete_table(TableName="burn-roles")
+    leak_and_present(stack, fleet[VICTIM])
+    assert stack.incidents[0]["outcome"] == "not_actionable" and "policy unavailable" in stack.incidents[0]["reason"]
+    _no_one_revoked(stack, fleet)
+
+
+def test_canary_issue_honours_the_role(stack):
+    stack.table("burn-roles").put_item(Item={"name": "quiet", "tools": [], "canaries": False})
+    assert canary.issue_for_session(WORKER_IDS[0], "sess_quiet000001", "quiet") is None
+    assert stack.credential(f"burn/{WORKER_IDS[0]}/canary_x") == {}
+    issued = canary.issue_for_session(WORKER_IDS[0], "sess_loud0000001", "unstored-role")
+    assert issued["session_id"] == "sess_loud0000001"  # no stored record: canaries default on
+    assert canary.issue_for_session(WORKER_IDS[1], "sess_scenario001")["status"] == "active"
+
+
+# ---- owner review of flags through the Burn API ---------------------------------------------
+
+def test_one_flag_per_credential_and_owner_decisions(stack, fleet):
+    stack.minter_call("POST", "/shared/credentials",
+                      {"name": "crm_db_url", "type": "other", "template": "postgres://svc:{random}@db/crm"})
+    shared_value = stack.secret("burn/shared/crm_db_url")
+    for agent in (WORKER_IDS[1], WORKER_IDS[2]):
+        stack.expose(agent, "burn/shared/crm_db_url")
+        leak_and_present(stack, fleet[agent])
+    status, body = stack.api("GET", "/flags")
+    [flag] = [f for f in body["flags"] if f["secret_ref"] == "burn/shared/crm_db_url"]
+    assert status == 200 and (flag["flag_level"], flag["instance_count"], flag["state"]) == ("seen", 2, "open")
+
+    assert stack.api("POST", "/flags/resolve", {"secret_ref": "burn/shared/crm_db_url", "action": "dismiss",
+                                                "reason": f"pasting {shared_value}"})[0] == 400
+    assert stack.api("POST", "/flags/resolve", {"secret_ref": "burn/shared/nope", "action": "dismiss",
+                                                "reason": "not flagged"})[0] == 404
+    status, body = stack.api("POST", "/flags/resolve", {"secret_ref": "burn/shared/crm_db_url",
+                                                        "action": "dismiss", "reason": "test fixture db",
+                                                        "by": "sec-team"})
+    assert status == 200 and body["flag"]["state"] == "dismissed"
+    [dismissed] = stack.events("dismissed")
+    assert "sec-team" in dismissed["detail"] and "2 instance(s)" in dismissed["detail"]
+    assert dismissed["flag_level"] == "seen" and shared_value not in json.dumps(stack.events(), default=str)
+
+    status, body = stack.api("POST", "/flags/resolve", {"secret_ref": "burn/shared/crm_db_url",
+                                                        "action": "rotate", "reason": "rotate it anyway"})
+    assert status == 200 and body["rotated_to_version"] == 2
+    assert stack.secret("burn/shared/crm_db_url") != shared_value
+    assert any(e["secret_ref"] == "burn/shared/crm_db_url" for e in stack.events("rotated"))
+    assert all(f["secret_ref"] != "burn/shared/crm_db_url" for f in stack.api("GET", "/flags")[1]["flags"])
+
+
+def test_minter_client_keeps_the_minters_status_and_message(monkeypatch):
+    import io
+    import minter_client
+
+    class FakeLambda:
+        def invoke(self, **kwargs):
+            payload = {"statusCode": 409, "body": {"error": "the flag changed while it was being reviewed"}}
+            return {"Payload": io.BytesIO(json.dumps(payload).encode())}
+
+    monkeypatch.setattr(minter_client, "_lambda", FakeLambda())
+    with pytest.raises(minter_client.MinterError) as err:
+        minter_client.call("POST", "/flags/resolve", {})
+    assert (err.value.status, err.value.detail) == (409, "the flag changed while it was being reviewed")

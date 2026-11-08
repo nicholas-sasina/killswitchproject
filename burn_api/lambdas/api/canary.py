@@ -12,6 +12,11 @@ Otherwise the incident is recorded and flagged for a human. Nothing broader than
 the one session is ever revoked, so a copied canary replayed on purpose can at
 worst contain the single session that canary was planted in.
 
+Only use from OUTSIDE Burn reaches this module (the provider keeps use through a Burn
+session as an alert). The role decides the rest: auto_burn false (report-only) means
+alert and flag, never burn. Roles without a stored record (scenario agents) default to
+canaries on, auto_burn on. If the role record cannot be read, nothing is burned.
+
 Containment:
   a. Revoke the session with a conditional update (active -> revoked). Only one
      caller can win it, so concurrent or repeated incidents contain once.
@@ -27,6 +32,7 @@ from datetime import datetime, timezone
 
 import badges  # bundled from the identity code at deploy time
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 from burn_contracts import names
 
 import burn
@@ -36,6 +42,25 @@ import minter_client
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+DEFAULT_POLICY = {"canaries": True, "auto_burn": True}
+
+
+def role_policy(role: str | None) -> dict:
+    """{"canaries", "auto_burn"} for a role name; defaults when the role has no stored record.
+    Raises ClientError if burn-roles cannot be read."""
+    if not role:
+        return dict(DEFAULT_POLICY)
+    item = db.table(names.ROLES_TABLE).get_item(Key={"name": role}).get("Item") or {}
+    return {key: item.get(key) is not False for key in DEFAULT_POLICY}
+
+
+def issue_for_session(agent_id: str, session_id: str, role: str | None = None) -> dict | None:
+    """The hook session creation calls: the session's canary, or None if the role turns canaries off."""
+    if not role_policy(role)["canaries"]:
+        return None
+    return minter_client.call("POST", f"/sessions/{session_id}/canary", {"agent_id": agent_id})
 
 
 def _ms(start: float) -> float:
@@ -127,6 +152,19 @@ def handle_incident(incident: dict) -> dict:
         return _not_contained(ref, row.get("owner_agent_id"), row.get("session_id"), checked)
     agent_id, session, exposure = checked
     session_id = session["session_id"]
+    try:
+        policy = role_policy(session.get("role"))
+    except ClientError as exc:
+        return _not_contained(ref, agent_id, session_id,
+                              f"role policy unavailable ({exc.response['Error']['Code']}), so nothing is burned")
+    if not policy["auto_burn"]:
+        # Report-only role: say what happened, flag what it saw, burn nothing.
+        result = _not_contained(ref, agent_id, session_id,
+                                f"canary used from outside Burn, but role {session.get('role')} is report-only "
+                                "(auto_burn off)")
+        evidence = {k: v for k, v in {"event_id": event_id, "session_id": session_id}.items() if v}
+        result["flagged"] = burn.flag_seen(agent_id, burn.exposed_refs(agent_id), evidence, session_id=session_id)
+        return result | {"outcome": "report_only"}
 
     if not _revoke_if_active(session_id, event_id):
         return {"outcome": "already_contained", "reason": "session is no longer active", "agent_id": agent_id,

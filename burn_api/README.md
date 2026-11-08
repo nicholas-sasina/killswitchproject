@@ -12,6 +12,8 @@ sessions (badge + credentials), burns an agent in one call, and feeds the dashbo
 - Every step writes an event to `burn-events`; `GET /events?since=` is what the dashboard polls.
 - **Canary incidents** arrive by direct invoke from the mock provider (`{"canary_incident": ...}`, never over HTTP). `canary.py` re-checks attribution and contains only that one session: a conditional revoke, then rotation only if no other live session uses the same credentials. See `minter/CANARIES.md`.
 - Burns flag shared credentials the agent saw as `seen`, and as `attempted` if one of its `blocked` events names them.
+- Canary incidents honour the role: `auto_burn: false` (report-only) alerts and flags, never burns; `canary.issue_for_session` skips roles with `canaries: false`.
+- `GET /flags` and `POST /flags/resolve` (`flag_review.py`): owners rotate or dismiss a flagged credential, with a reason.
 
 ## Key files
 | File | What |
@@ -19,7 +21,8 @@ sessions (badge + credentials), burns an agent in one call, and feeds the dashbo
 | `lambdas/api/handler.py` | Auth, routing, error mapping |
 | `lambdas/api/sessions.py` | Start a session, revoke sessions |
 | `lambdas/api/burn.py` | The burn sequence, outcome events, flag levels |
-| `lambdas/api/canary.py` | Canary incident: trusted-signal checks and single-session containment |
+| `lambdas/api/canary.py` | Canary incident: role policy, trusted-signal checks, single-session containment |
+| `lambdas/api/flag_review.py` | Owner review of flags: list, rotate, dismiss |
 | `lambdas/api/reads.py` | Events feed, ledger, badge status, blast radius |
 | `lambdas/api/minter_client.py` | Invokes the credential minter Lambda |
 | `scripts/make_env.py` | Writes `.env` and `dashboard/.env.local` from the deployed stacks |

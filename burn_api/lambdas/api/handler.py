@@ -11,6 +11,7 @@ import auth
 import burn
 import canary
 import db
+import flag_review
 import minter_client
 import reads
 import sessions
@@ -44,6 +45,10 @@ def route(method: str, path: str, query: dict, body: dict):
         if not agent_id:
             return 400, {"error": "agent_id is required (agent-xxx)"}
         return 200, burn.burn_agent(agent_id, str(body.get("reason") or ""))
+    if method == "GET" and path == "/flags":
+        return 200, flag_review.list_flags()
+    if method == "POST" and path == "/flags/resolve":
+        return flag_review.resolve(body)
     if method == "GET" and path == "/events":
         try:
             limit = int(query.get("limit", 200))
