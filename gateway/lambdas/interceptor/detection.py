@@ -1,35 +1,94 @@
-"""Credential detection for the interceptor, using the shared burn_detect library.
+"""Credential detection for the interceptor, backed by a short-lived fingerprint cache.
 
-The scanner compares HMAC fingerprints of what it sees against the rows the
-minter registered in burn-fingerprints. This module supplies the two things it
-needs: the HMAC key (read once per container) and a batched table lookup.
+The scanner compares HMAC fingerprints of observed text against rows registered
+by the minter in burn-fingerprints. The HMAC key is read once per Lambda
+container. Fingerprint rows are loaded into an in-memory snapshot and refreshed
+periodically, rather than issuing BatchGetItem calls for every candidate in
+every tool response.
+
+The snapshot contains fingerprints and metadata only; it never contains raw
+credential values.
 """
 import functools
+import threading
+import time
 
 import boto3
 from burn_contracts.fingerprint import key_from_hex
 from burn_contracts.names import FINGERPRINT_KEY_SECRET, FINGERPRINTS_TABLE, REGION
 from burn_detect import Finding, Scanner
 
-_BATCH = 100  # BatchGetItem limit per request
-
+# Keep this short so newly issued/rotated credentials become visible quickly.
+# A warm interceptor performs no fingerprint-table reads between refreshes.
+_CACHE_TTL_SECONDS = 5.0
 
 @functools.cache
 def _dynamodb():
     return boto3.resource("dynamodb", region_name=REGION)
 
 
+_cache_lock = threading.Lock()
+_fingerprint_rows: dict[str, dict] | None = None
+_fingerprint_rows_loaded_at = 0.0
+
+
+def refresh_cache(*, force: bool = True) -> int:
+    """Refresh the in-memory fingerprint snapshot from DynamoDB.
+
+    A strongly consistent paginated Scan makes each published snapshot
+    internally useful immediately after a minter write. This is intentionally
+    a periodic table read, not a per-output/per-candidate read.
+    Returns the number of fingerprint rows cached.
+    """
+    global _fingerprint_rows, _fingerprint_rows_loaded_at
+
+    with _cache_lock:
+        now = time.monotonic()
+        if (not force and _fingerprint_rows is not None
+                and now - _fingerprint_rows_loaded_at < _CACHE_TTL_SECONDS):
+            return len(_fingerprint_rows)
+
+        table = _dynamodb().Table(FINGERPRINTS_TABLE)
+        rows: dict[str, dict] = {}
+        kwargs = {"ConsistentRead": True}
+        while True:
+            response = table.scan(**kwargs)
+            for row in response.get("Items", []):
+                digest = row.get("fingerprint")
+                if isinstance(digest, str):
+                    rows[digest] = row
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            kwargs["ExclusiveStartKey"] = last_key
+
+        _fingerprint_rows = rows
+        _fingerprint_rows_loaded_at = time.monotonic()
+        return len(rows)
+
+
+def reset_cache() -> None:
+    """Clear the snapshot (tests and explicit lifecycle reset only)."""
+    global _fingerprint_rows, _fingerprint_rows_loaded_at
+    with _cache_lock:
+        _fingerprint_rows = None
+        _fingerprint_rows_loaded_at = 0.0
+
+
 def lookup(fingerprints: set[str]) -> dict[str, dict]:
-    """burn-fingerprints rows for the fingerprints that exist, keyed by fingerprint."""
-    rows, wanted = {}, sorted(fingerprints)
-    for start in range(0, len(wanted), _BATCH):
-        request = {FINGERPRINTS_TABLE: {"Keys": [{"fingerprint": f} for f in wanted[start:start + _BATCH]]}}
-        while request:
-            response = _dynamodb().batch_get_item(RequestItems=request)
-            for row in response["Responses"].get(FINGERPRINTS_TABLE, []):
-                rows[row["fingerprint"]] = row
-            request = response.get("UnprocessedKeys") or None
-    return rows
+    """Return cached rows for matching candidates; no DynamoDB read per call."""
+    if not fingerprints:
+        return {}
+
+    now = time.monotonic()
+    if (_fingerprint_rows is None
+            or now - _fingerprint_rows_loaded_at >= _CACHE_TTL_SECONDS):
+        refresh_cache(force=False)
+
+    # Snapshots are replaced atomically, so readers can safely retain this
+    # local reference while another invocation refreshes the module cache.
+    snapshot = _fingerprint_rows or {}
+    return {digest: snapshot[digest] for digest in fingerprints if digest in snapshot}
 
 
 @functools.cache
