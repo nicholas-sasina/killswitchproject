@@ -59,3 +59,34 @@ def test_real_stack_swarm_refuses_before_doing_anything(monkeypatch, capsys):
         run_swarm.main()
     assert "not available yet" in str(exc.value) and "MOCK=1" in str(exc.value)
     assert "\n" not in str(exc.value)  # one line
+
+
+def test_mock_swarm_ignores_the_environment_and_never_uses_a_real_token(monkeypatch, tmp_path):
+    import run_swarm
+    monkeypatch.setenv("BURN_API_URL", "https://real.example.com")
+    monkeypatch.setenv("BURN_DEMO_TOKEN", "real-admin-token")
+    monkeypatch.setenv("BURN_GATEWAY_URL", "https://gateway.example.com/mcp")
+    monkeypatch.setattr(run_swarm, "RUN_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", "--mock", "--dry-run"])
+    seen = []
+
+    def fake_burn(*args, env):
+        seen.append(env)
+        return '{"token": "bjt_x"}'
+
+    monkeypatch.setattr(run_swarm, "burn_cli", fake_burn)
+    assert run_swarm.main() == 0
+    assert seen[0]["BURN_API_URL"] == "http://localhost:8700" and seen[0]["BURN_DEMO_TOKEN"] == "mock"
+    written = (tmp_path / "swarm.env").read_text()
+    assert "real-admin-token" not in written and "real.example.com" not in written
+    assert "BURN_API_URL=http://host.docker.internal:8700" in written
+
+
+def test_mock_swarm_refuses_a_non_local_api_url(monkeypatch):
+    import pytest
+    import run_swarm
+    monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "w", "--count", "1", "--mock",
+                                      "--api-url", "https://api.example.com"])
+    monkeypatch.setattr(run_swarm, "burn_cli", lambda *a, **k: pytest.fail("no token may be created"))
+    with pytest.raises(SystemExit, match="only talks to servers on localhost"):
+        run_swarm.main()

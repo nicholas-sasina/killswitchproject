@@ -16,11 +16,18 @@ from pathlib import Path
 
 import yaml
 
-from common import AGENTS_DIR, REPO_ROOT, RUN_DIR, load_dotenv
+from urllib.parse import urlsplit
+
+from common import AGENTS_DIR, REPO_ROOT, RUN_DIR
 from swarm_compose import build_compose, swarm_env
 
 NOT_YET = "swarms on the real stack are not available yet: run `make swarm MOCK=1` against the mock servers"
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
+
+
+def require_local(url: str) -> None:
+    if urlsplit(url).hostname not in ("localhost", "127.0.0.1", "::1"):
+        sys.exit(f"refusing {url}: a mock swarm only talks to servers on localhost")
 
 
 def compose_command() -> list[str]:
@@ -51,6 +58,8 @@ def main() -> int:
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between a worker's tool calls")
     parser.add_argument("--mock", action="store_true", help="use the mock servers on the host (required for now)")
+    parser.add_argument("--api-url", default=MOCK_API, help="the mock Burn API (localhost only)")
+    parser.add_argument("--gateway-url", default=MOCK_GATEWAY, help="the mock MCP server (localhost only)")
     parser.add_argument("--dry-run", action="store_true", help="write the files and print the command, start nothing")
     args = parser.parse_args()
     if not args.mock:
@@ -58,12 +67,11 @@ def main() -> int:
     if args.count < 1:
         sys.exit("--count must be at least 1")
 
-    load_dotenv()
-    api_url = os.environ.get("BURN_API_URL") or (MOCK_API if args.mock else "")
-    token = os.environ.get("BURN_DEMO_TOKEN") or ("mock" if args.mock else "")
-    gateway = os.environ.get("BURN_GATEWAY_URL") or (MOCK_GATEWAY if args.mock else "")
-    if not (api_url and token and gateway):
-        sys.exit("BURN_API_URL, BURN_DEMO_TOKEN and BURN_GATEWAY_URL are required: run `make env` first")
+    # The mock servers only: the environment and .env (which `make env` points at the real stack) are ignored, so
+    # a mock swarm can never use the real admin token or create real sessions.
+    api_url, gateway, token = args.api_url, args.gateway_url, "mock"
+    for url in (api_url, gateway):
+        require_local(url)
     cli_env = {**os.environ, "BURN_API_URL": api_url, "BURN_DEMO_TOKEN": token}
 
     join_token = json.loads(burn_cli("--json", "token", "create", args.role, "--uses", str(args.count),
