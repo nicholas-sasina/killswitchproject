@@ -73,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--role", required=True)
     run_p.add_argument("--token", help="join token (prefer the BURN_JOIN_TOKEN environment variable: "
                                        "command lines are visible to other users)")
+    run_p.add_argument("--token-stdin", action="store_true",
+                       help="read the join token from the first line of stdin (keeps it out of shell history)")
     run_p.add_argument("--user", help="run the agent as this user when burn run is root "
                                       "(default: agent if it exists, else nobody)")
     run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
@@ -225,7 +227,12 @@ def cmd_token_create(api, args):
     print(f"token {r['token_id']} for role {r['role']}: {r['uses']} use(s), expires {r['expires_at']}")
     print("Shown once; it cannot be read again.\n")
     print(r["token"])
-    print(f"\nJoin with:\n  BURN_JOIN_TOKEN={r['token']} burn run --role {r['role']} -- <command>")
+    # The commands below do not contain the token, so copying them into a terminal keeps it out of shell history.
+    print(f"\nJoin without putting the token in your shell history:\n"
+          f"  read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN     # paste the token, press Enter\n"
+          f"  burn run --role {r['role']} -- <command>\n"
+          f"or, from the clipboard:\n"
+          f"  pbpaste | burn run --role {r['role']} --token-stdin -- <command>")
 
 
 def cmd_run(api, args):
@@ -234,7 +241,9 @@ def cmd_run(api, args):
     command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not command:
         raise UsageError("give the command to run after --, e.g. burn run --role worker -- python agent.py")
-    token = args.token or os.environ.get("BURN_JOIN_TOKEN", "")
+    if args.token_stdin and args.token:
+        raise UsageError("use either --token or --token-stdin")
+    token = (sys.stdin.readline().strip() if args.token_stdin else args.token) or os.environ.get("BURN_JOIN_TOKEN", "")
     session = json.loads(args.adopt) if args.adopt else None
     if not token and not session:
         raise UsageError("a join token is required: set BURN_JOIN_TOKEN or pass --token")

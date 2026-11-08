@@ -578,3 +578,23 @@ def test_each_run_gets_its_own_local_token(stack):
         instance(stack, py(DUMP_ENV, str(out))).run()
         tokens.append(json.loads(out.read_text())["BURN_LOCAL_TOKEN"])
     assert tokens[0] != tokens[1]
+
+
+def test_token_stdin_reads_the_join_token_and_never_echoes_it(stack, capfd, monkeypatch):
+    import io
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(sys.path))
+    token = stack.token
+    monkeypatch.delenv("BURN_JOIN_TOKEN")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(token + "\nmore\n"))
+    assert cli(["run", "--role", "worker", "--token-stdin", "--", sys.executable, "-c", "print('ok')"]) == 0
+    out = capfd.readouterr()
+    assert token not in out.out + out.err and stack.calls("POST", "/sessions")[0][2]["enroll_token"] == token
+
+
+def test_token_stdin_conflicts_with_token_and_needs_a_token(stack, capsys, monkeypatch):
+    import io
+    assert cli(["run", "--role", "worker", "--token", "x", "--token-stdin", "--", "true"]) == 2
+    monkeypatch.delenv("BURN_JOIN_TOKEN")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert cli(["run", "--role", "worker", "--token-stdin", "--", "true"]) == 2
+    assert "join token is required" in capsys.readouterr().err

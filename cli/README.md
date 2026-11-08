@@ -46,7 +46,9 @@ until `burn apply` takes it over; after that the dashboard shows it read-only.
 
 ### `burn run`
 ```bash
-BURN_JOIN_TOKEN=bjt_... burn run --role worker -- python agent.py
+read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN     # paste the token; nothing lands in shell history
+burn run --role worker -- python agent.py
+pbpaste | burn run --role worker --token-stdin -- python agent.py   # or read it from stdin
 burn env            # what an instance's environment would hold (values hidden; --show reveals the kept ones)
 ```
 `burn run` starts one instance:
