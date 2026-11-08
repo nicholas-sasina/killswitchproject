@@ -37,7 +37,6 @@ describe("App", () => {
       "From a leaked credential to selective containment.",
       "Why not just revoke it?",
       "Built for agents that come and go",
-      "What Burn won’t catch",
       "What each AWS service does",
       "Burn one agent, not the whole swarm.",
     ]);

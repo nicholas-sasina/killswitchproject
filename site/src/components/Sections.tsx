@@ -1,4 +1,4 @@
-import { REPO_URL, RESULTS_URL, SURVEY_URL } from "../env";
+import { REPO_URL, SURVEY_URL } from "../env";
 import { Mark } from "./Mark";
 import { SignInLink } from "./SignInLink";
 
@@ -32,39 +32,6 @@ export function Why() {
             44% reported having policies in place to secure them, and 23%
             reported their AI agents had been tricked into revealing access
             credentials. <a href={SURVEY_URL}>Read the report</a>
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-export function Limits() {
-  return (
-    <section className="block wrap" id="limits" aria-labelledby="limits-title">
-      <div className="split block-rule">
-        <h2 className="section-title" id="limits-title">
-          What Burn won&rsquo;t catch
-        </h2>
-        <div className="split-body">
-          <p className="body-lg body-first">
-            Burn can&rsquo;t tell a legitimate use of a key from a misuse while
-            the agent is allowed to hold it, and an agent that disguises a key
-            well enough can get it past the exit check. That is why most keys
-            never reach agents at all, and why canaries exist: a disguised key
-            still has to be used somewhere.
-          </p>
-          <p className="body-lg">
-            On our main offline test set, the exit check named the key in 76% of
-            leak attempts, across 31 disguises and four key types, with no false
-            alarms on 310 ordinary payloads. On a held-out set of eight more
-            disguises, it caught 31.2%. Keys gzipped or written in base32 got
-            through every time, and keys split across requests often did.{" "}
-            <a href={RESULTS_URL}>Read the results</a>
-          </p>
-          <p className="body-lg">
-            Keep the guardrails you already run. When they miss, Burn makes the
-            cleanup exact.
           </p>
         </div>
       </div>
