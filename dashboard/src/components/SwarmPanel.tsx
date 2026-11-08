@@ -161,7 +161,15 @@ export function SwarmPanel({
               >
                 <div className="swarm-heading">
                   <div>
-                    <h3>{role.name}</h3>
+                    <h3>
+                      {role.name}{" "}
+                      {role.auto_burn === false && (
+                        <span className="status">report-only</span>
+                      )}{" "}
+                      {role.canaries === false && (
+                        <span className="status">no canary</span>
+                      )}
+                    </h3>
                     <p className="muted">
                       {role.managed_by === "code"
                         ? "Code-managed · read-only"
