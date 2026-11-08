@@ -85,13 +85,19 @@ function setup(instances: Instance[] = []) {
   return { state, calls };
 }
 
-function Harness({ role }: { role?: string }) {
-  const [api] = useState(() => createApi(config, () => {}, fetch));
+function Harness({
+  role,
+  settings = config,
+}: {
+  role?: string;
+  settings?: ApiConfig;
+}) {
+  const [api] = useState(() => createApi(settings, () => {}, fetch));
   const [open, setOpen] = useState(true);
   return (
     <ConsoleDataProvider
       api={api}
-      config={config}
+      config={settings}
       configured
       openAddAgents={() => {}}
     >
@@ -100,9 +106,9 @@ function Harness({ role }: { role?: string }) {
   );
 }
 
-async function show(role?: string) {
+async function show(role?: string, settings?: ApiConfig) {
   await act(async () => {
-    render(<Harness role={role} />);
+    render(<Harness role={role} settings={settings} />);
   });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -160,6 +166,22 @@ describe("Connect an agent", () => {
         })
         .getAttribute("aria-expanded"),
     ).toBe("false");
+  });
+
+  it("sets the console's people sign-in before burn login", async () => {
+    setup();
+    await show(undefined, {
+      ...config,
+      peopleDomain: "burn-people.auth.us-east-1.amazoncognito.com",
+      peopleClientId: "4abc5def6ghi7jkl8mno9pqr0s",
+    });
+    expect(code("Setup commands")).toBe(
+      'uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"\n' +
+        `export BURN_API_URL=${API_URL}\n` +
+        "export BURN_PEOPLE_DOMAIN=burn-people.auth.us-east-1.amazoncognito.com\n" +
+        "export BURN_PEOPLE_CLIENT_ID=4abc5def6ghi7jkl8mno9pqr0s\n" +
+        "burn login",
+    );
   });
 
   it("gives each harness its command, and a role adds --role", async () => {

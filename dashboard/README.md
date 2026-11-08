@@ -40,7 +40,8 @@ Each page is a bookmarkable hash route. Old links still work: `#/burned` opens I
   **Rotate** them or **Dismiss** the flag with a reason.
 
 **Connect an agent** in the navigation connects an agent from the harness you already use. Once
-per machine: install the `burn` CLI, set the API and gateway URLs and run `burn login`. Then
+per machine: install the `burn` CLI, set the API and gateway URLs and the console's own sign-in
+(`BURN_PEOPLE_DOMAIN`, `BURN_PEOPLE_CLIENT_ID`), and run `burn login`. Then
 `burn run claude`, `burn run opencode`, `burn run codex` or `burn run python agent.py`; choosing a
 role adds `--role <name>`. The dialog says what the agent gets (its own identity, keys and canary;
 burning it also cuts off its model, except for Codex, which brings no model yet) and waits until

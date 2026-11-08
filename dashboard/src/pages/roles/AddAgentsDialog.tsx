@@ -64,7 +64,7 @@ function Command({ label, text }: { label: string; text: string }) {
  * swarms, a disclosure holds the join token flow.
  */
 export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
-  const { roles, model, instancesLoaded, joinUrls } = useConsole();
+  const { roles, model, instancesLoaded, joinUrls, config } = useConsole();
   const titleId = useId();
   const tokenSelect = useId();
   const roleSelect = useId();
@@ -132,7 +132,13 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
           <h3 id={`${titleId}-once`} className="add-label">
             Once per machine
           </h3>
-          <Command label="Setup commands" text={setupCommands(joinUrls)} />
+          <Command
+            label="Setup commands"
+            text={setupCommands(joinUrls, {
+              domain: config.peopleDomain,
+              clientId: config.peopleClientId,
+            })}
+          />
         </section>
         <section className="connect-step" aria-labelledby={`${titleId}-run`}>
           <h3 id={`${titleId}-run`} className="add-label">

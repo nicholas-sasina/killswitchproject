@@ -53,6 +53,43 @@ describe("the Connect dialog's commands", () => {
     expect(setupCommands({})).not.toContain("export");
   });
 
+  it("sets the people sign-in burn login needs, from the console's own", () => {
+    expect(
+      setupCommands(
+        { api: "https://api.example.test" },
+        {
+          domain: "burn-people.auth.us-east-1.amazoncognito.com",
+          clientId: "4abc5def6ghi7jkl8mno9pqr0s",
+        },
+      ),
+    ).toBe(
+      'uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"\n' +
+        "export BURN_API_URL=https://api.example.test\n" +
+        "export BURN_PEOPLE_DOMAIN=burn-people.auth.us-east-1.amazoncognito.com\n" +
+        "export BURN_PEOPLE_CLIENT_ID=4abc5def6ghi7jkl8mno9pqr0s\n" +
+        "burn login",
+    );
+    expect(
+      setupCommands({}, { domain: "https://login.example.test/" }),
+    ).toContain("export BURN_PEOPLE_DOMAIN=https://login.example.test\n");
+  });
+
+  it("leaves a sign-in line out when its value is missing or would not paste", () => {
+    const lines = (domain?: string, clientId?: string) =>
+      setupCommands({}, { domain, clientId })
+        .split("\n")
+        .filter((line) => line.startsWith("export"));
+    expect(lines()).toEqual([]);
+    expect(lines("login.example.test")).toEqual([
+      "export BURN_PEOPLE_DOMAIN=login.example.test",
+    ]);
+    expect(lines(undefined, "abc123")).toEqual([
+      "export BURN_PEOPLE_CLIENT_ID=abc123",
+    ]);
+    expect(lines("login.example.test; rm -rf ~", "abc $(id)")).toEqual([]);
+    expect(lines("http://login.example.test")).toEqual([]);
+  });
+
   it("runs each harness, adding --role only when one is chosen", () => {
     expect(runCommand("claude")).toBe("burn run claude");
     expect(runCommand("opencode")).toBe("burn run opencode");

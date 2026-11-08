@@ -43,9 +43,42 @@ export function harnessOf(value: Harness): HarnessChoice {
 export const INSTALL_LINE =
   'uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"';
 
-/** Once per machine: install burn, point it at this Burn, sign in. */
-export function setupCommands(urls: JoinUrls): string {
-  return `${INSTALL_LINE}\n${joinExports(urls)}burn login`;
+/** The console's own people sign-in, which burn login uses too. Public values. */
+export interface PeopleSignIn {
+  /** The managed-login host or https origin. */
+  domain?: string;
+  clientId?: string;
+}
+
+// A host or an https origin, and an app client id: nothing a shell reads as
+// anything but text, so each pastes unquoted. Anything else is left out.
+const PASTEABLE_DOMAIN = /^(https:\/\/)?[A-Za-z0-9.-]+$/;
+const PASTEABLE_CLIENT_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function signInExports({ domain, clientId }: PeopleSignIn): string {
+  const host = (domain ?? "").trim().replace(/\/+$/, "");
+  const client = (clientId ?? "").trim();
+  return (
+    [
+      ["BURN_PEOPLE_DOMAIN", PASTEABLE_DOMAIN.test(host) ? host : ""],
+      ["BURN_PEOPLE_CLIENT_ID", PASTEABLE_CLIENT_ID.test(client) ? client : ""],
+    ] as const
+  )
+    .filter(([, value]) => value)
+    .map(([name, value]) => `export ${name}=${value}\n`)
+    .join("");
+}
+
+/**
+ * Once per machine: install burn, point it at this Burn and its sign-in,
+ * then sign in. burn login needs the people domain and client id; a value
+ * the console does not have leaves its line out.
+ */
+export function setupCommands(
+  urls: JoinUrls,
+  people: PeopleSignIn = {},
+): string {
+  return `${INSTALL_LINE}\n${joinExports(urls)}${signInExports(people)}burn login`;
 }
 
 /** `burn run claude`, or `burn run --role reviewer claude` with a role. */
