@@ -14,6 +14,7 @@ from .badge import BadgeToken
 from .credentials import CredentialSource
 from .env import child_env
 from .mcp_proxy import McpProxy
+from .privs import Drop
 from .spawn_endpoint import SpawnEndpoint
 
 EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
@@ -28,7 +29,8 @@ class Instance:
     def __init__(self, api: Api, source: CredentialSource, role: str, command: list[str], *,
                  gateway_url: str, host_env: dict | None = None, enroll_token: str = "", session: dict | None = None,
                  proxy_url: str = "", heartbeat_every: float = 15.0, min_heartbeat_gap: float = 3.0,
-                 stop_grace: float = STOP_GRACE, sleep: Callable[[float], None] = time.sleep):
+                 stop_grace: float = STOP_GRACE, drop: Drop | None = None, user_arg: str | None = None,
+                 sleep: Callable[[float], None] = time.sleep):
         self.api, self.source, self.role, self.command = api, source, role, command
         self.gateway_url, self.host_env = gateway_url, dict(os.environ if host_env is None else host_env)
         self.enroll_token, self.session, self.proxy_url = enroll_token, session, proxy_url
@@ -37,6 +39,7 @@ class Instance:
         self._proc: subprocess.Popen | None = None
         self._children: list[subprocess.Popen] = []
         self._stopped_by_api = False
+        self.drop, self.user_arg = drop, user_arg
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -50,7 +53,8 @@ class Instance:
         """Start a child instance: its session is made here, then it runs under its own `burn run`."""
         body = {"role": role, "parent_session": self.session["session_id"]}
         child = retry.call(lambda: self.api.request("POST", "/sessions", body), sleep=self._sleep)
-        argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(child), "--", *command]
+        argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(child),
+                *(["--user", self.user_arg] if self.user_arg else []), "--", *command]
         # The child's supervisor gets this supervisor's host environment (API settings), never the agent's.
         proc = subprocess.Popen(argv, env=self.host_env)
         self._children.append(proc)
@@ -67,7 +71,8 @@ class Instance:
                         spawn_url=spawn.url, proxy_base=self.proxy_url)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
-            self._proc = subprocess.Popen(self.command, env=env, start_new_session=True)
+            self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,
+                                          **(self.drop.popen_args() if self.drop else {}))
         except OSError as exc:
             log(f"cannot start {self.command[0]!r}: {exc.strerror}")
             self._exit()

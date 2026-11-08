@@ -410,3 +410,89 @@ def test_burn_run_needs_a_command_and_a_token(stack, capsys, monkeypatch):
 def test_burn_run_needs_a_gateway(stack, capsys, monkeypatch):
     monkeypatch.delenv("BURN_GATEWAY_URL")
     assert cli(["run", "--role", "worker", "--", "true"], dotenv=stack.tmp / "none") == 2
+
+
+# -- who the agent runs as -----------------------------------------------------------------------
+REAL_POPEN = subprocess.Popen
+
+
+class FakePopen:
+    """Records how a process was started, then starts it for real without the user switch."""
+    calls: list[tuple[list, dict]] = []
+
+    def __new__(cls, argv, **kw):
+        cls.calls.append((list(argv), dict(kw)))
+        for k in ("user", "group", "extra_groups"):
+            kw.pop(k, None)
+        if "burn_cli" in argv:  # a child supervisor: do not really start one
+            return REAL_POPEN(["true"])
+        return REAL_POPEN(argv, **kw)
+
+
+def test_root_starts_the_agent_as_an_unprivileged_user_but_not_child_supervisors(stack, monkeypatch):
+    from burn_cli.runner import privs
+    drop = privs.Drop("agent", 4242, 4343)
+    monkeypatch.setattr(runmod.subprocess, "Popen", FakePopen)
+    FakePopen.calls.clear()
+    inst = instance(stack, py("pass"), drop=drop, user_arg="agent")
+    assert inst.run() == 0
+    (_, kw), = FakePopen.calls
+    assert kw["user"] == 4242 and kw["group"] == 4343
+    assert kw["extra_groups"] == []  # no supplementary groups, root's included
+    # a child supervisor is not the agent: it stays root, is told the user, and drops privileges for its own agent
+    stack.roles["worker"]["may_spawn"] = ["worker"]
+    parent = stack.add_instance("sess_parent", "worker")
+    inst.session = {"session_id": "sess_parent", "agent_id": parent["agent_id"]}
+    FakePopen.calls.clear()
+    inst.spawn_child("worker", ["true"])
+    argv, kw = FakePopen.calls[0]
+    assert "user" not in kw and argv[argv.index("--user") + 1] == "agent"
+    inst._stop_children()
+
+
+def test_default_user_is_agent_else_nobody_and_never_root(monkeypatch):
+    from burn_cli.runner import privs
+    monkeypatch.setattr(privs.os, "geteuid", lambda: 0)
+    users = {"nobody": 65534}
+    entry = lambda n: type("E", (), {"pw_uid": users[n], "pw_gid": users[n]})() if n in users else (_ for _ in ()).throw(KeyError(n))  # noqa: E731
+    monkeypatch.setattr(privs.pwd, "getpwnam", entry)
+    assert privs.resolve(None).name == "nobody"
+    users["agent"] = 999
+    assert privs.resolve(None).name == "agent" and privs.resolve("nobody").name == "nobody"
+    users["toor"] = 0
+    with pytest.raises(ValueError, match="root"):
+        privs.resolve("toor")
+    with pytest.raises(ValueError, match="does not exist"):
+        privs.resolve("ghost")
+
+
+def test_not_root_runs_the_agent_as_the_same_user(monkeypatch):
+    from burn_cli.runner import privs
+    monkeypatch.setattr(privs.os, "geteuid", lambda: 1000)
+    assert privs.resolve(None) is None
+    with pytest.raises(ValueError, match="needs burn run to be root"):
+        privs.resolve("agent")
+
+
+def test_the_help_says_what_a_non_root_agent_can_read(capsys):
+    with pytest.raises(SystemExit):
+        cli(["run", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "not containment" in out and "can read your files and burn run's environment" in out
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to switch users")
+def test_real_process_the_agent_cannot_read_the_supervisors_environment(stack):
+    out = stack.tmp / "probe.json"
+    stack.tmp.chmod(0o777)
+    from burn_cli.runner import privs
+    code = f"""
+        import json, os
+        try:
+            open(f"/proc/{os.getppid()}/environ", "rb").read(); readable = True
+        except OSError:
+            readable = False
+        json.dump({{"uid": os.getuid(), "gid": os.getgid(), "supervisor_environ_readable": readable}}, open({str(out)!r}, "w"))"""
+    assert instance(stack, py(code), drop=privs.resolve(None)).run() == 0
+    result = json.loads(out.read_text())
+    assert result["uid"] != 0 and result["gid"] != 0 and result["supervisor_environ_readable"] is False

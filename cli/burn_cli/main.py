@@ -24,6 +24,11 @@ It sends heartbeats, stops the agent if the instance is burned, and reports a cl
 HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved clients route through the
 egress proxy. They are not containment: a process can ignore them. Containment is the network rule in the
 demo stack, which gives the agent no route except the proxy.
+
+Who the agent runs as: when burn run is root (a container's PID 1) the agent runs as --user (default: agent,
+else nobody), so it cannot read burn run's environment or files. When burn run is not root, the agent runs as
+you: it can read your files and burn run's environment (/proc/<pid>/environ). Containment against a hostile
+agent then needs a container or a separate user.
 """
 
 
@@ -68,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--role", required=True)
     run_p.add_argument("--token", help="join token (prefer the BURN_JOIN_TOKEN environment variable: "
                                        "command lines are visible to other users)")
+    run_p.add_argument("--user", help="run the agent as this user when burn run is root "
+                                      "(default: agent if it exists, else nobody)")
     run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
     run_p.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
     env_p = sub.add_parser("env", help="show the environment `burn run` gives an instance")
@@ -222,7 +229,7 @@ def cmd_token_create(api, args):
 
 
 def cmd_run(api, args):
-    from .runner import credentials
+    from .runner import credentials, privs
     from .runner.run import Instance
     command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not command:
@@ -238,8 +245,12 @@ def cmd_run(api, args):
         source = credentials.from_name(os.environ.get("BURN_CREDENTIAL_SOURCE", ""))
     except ValueError as exc:
         raise UsageError(str(exc)) from None
+    try:
+        drop = privs.resolve(args.user)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from None
     return Instance(api, source, args.role, command, gateway_url=gateway.rstrip("/"), enroll_token=token,
-                    session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv)).run()
+                    session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv), drop=drop, user_arg=args.user).run()
 
 
 def cmd_env(args):

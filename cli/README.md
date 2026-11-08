@@ -72,6 +72,12 @@ burn env            # what an instance's environment would hold (values hidden; 
 
 `HTTPS_PROXY` is a convenience so well-behaved clients use the egress proxy. It is **not containment**: a process
 can ignore it. Containment is the network rule in the demo stack, which gives agents no route except the proxy.
+**Who the agent runs as.** When `burn run` is root (a container's PID 1), the agent runs as `--user` (default `agent`
+if it exists, else `nobody`), so it cannot read `burn run`'s environment (`/proc/1/environ`), which holds the API
+token and the join token. Child supervisors stay root; only the agent command is dropped. When `burn run` is **not**
+root (directly on a laptop), the agent runs as you: it can read your files and `burn run`'s environment. Containment
+against a hostile agent then needs a container or a separate user.
+
 `burn run` also needs `BURN_GATEWAY_URL` (written by `make env`) and, optionally, `BURN_PROXY_URL`.
 
 ### SDK
