@@ -28,6 +28,7 @@ ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # how a supervisor receives the secrets of
 STOP_GRACE = 5.0  # seconds between SIGTERM and SIGKILL when stopping the agent
 BARE_AFTER = 2  # failed sends of a batch in a row before one heartbeat goes without it
 FLUSH_DEADLINE = 10.0  # seconds the exit may wait for the progress still queued
+UNCONFIRMED = 1  # _beat's result when the API took a heartbeat but its reply does not show the progress
 
 
 def log(message: str) -> None:
@@ -65,6 +66,7 @@ class Instance:
         self._bare_next = False  # after a refused batch: the API recorded nothing, not even that we are alive
         self._batch_failures = 0  # heartbeats in a row whose batch failed: past BARE_AFTER, liveness goes first
         self._clock, self._last_beat = time.monotonic, 0.0  # when the last heartbeat began
+        self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -221,7 +223,8 @@ class Instance:
         """One heartbeat with the oldest queued progress, at most 50 events, or none when liveness goes first
         (after a refused batch, or a batch that keeps failing). The exit flush passes False: an exit follows.
 
-        Returns 200, or the failed call's status (0 when the API was unreachable).
+        Returns 200, the failed call's status (0 when the API was unreachable), or UNCONFIRMED when the reply
+        does not show the progress it carried, which is kept and sent again like after any failure.
         """
         with self._beat_lock:
             bare = self._bare_next and liveness_first
@@ -229,23 +232,33 @@ class Instance:
             batch = [] if bare else self._progress.batch()
             self._last_beat = self._clock()
             try:
-                self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
+                reply = self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
             except ApiError as exc:
                 if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
                     self._progress.dropped(len(batch), str(exc))
                     self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
                     log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
                 elif batch and exc.status not in (404, 409):
-                    # The batch is kept. If only progress keeps failing, a bare beat in between keeps the
-                    # instance from being swept as idle; then the batch is tried again.
-                    self._batch_failures += 1
-                    if self._batch_failures >= BARE_AFTER:
-                        self._batch_failures, self._bare_next = 0, True
+                    self._batch_failed()
                 return exc.status or 0
+            if batch and not self._progress.confirmed_by(len(batch), reply):
+                if not self._told_unconfirmed:
+                    self._told_unconfirmed = True
+                    log("the Burn API took a heartbeat but did not confirm its progress (an older API?); "
+                        "the progress is kept and sent again, and starts are not confirmed to the agent")
+                self._batch_failed()
+                return UNCONFIRMED
             if batch:
                 self._batch_failures = 0
             self._progress.sent(len(batch))
             return 200
+
+    def _batch_failed(self) -> None:
+        """The batch is kept. If only progress keeps failing, a bare beat in between keeps the instance from
+        being swept as idle; then the batch is tried again."""
+        self._batch_failures += 1
+        if self._batch_failures >= BARE_AFTER:
+            self._batch_failures, self._bare_next = 0, True
 
     def _flush_progress(self) -> None:
         """Send the progress still queued when the agent exits, so the instance's record is complete.

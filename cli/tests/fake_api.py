@@ -9,6 +9,8 @@ import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from burn_contracts import progress as task_progress
+
 API_TOKEN = secrets.token_hex(12)  # fresh each run; tests assert it never reaches any output
 
 
@@ -87,12 +89,26 @@ class FakeApi:
         if (method, path) in (("POST", "/sessions"), ("POST", "/instances")):
             return self._session(body)
         if method == "POST" and parts[0] == "instances" and parts[-1] == "heartbeat":
-            return self.heartbeat_status, {"error": "instance is not active"} if self.heartbeat_status == 409 else {}
+            if self.heartbeat_status != 200:
+                return self.heartbeat_status, {"error": "instance is not active"} if self.heartbeat_status == 409 else {}
+            return self._heartbeat(parts[1], body)
         if method == "POST" and parts[0] == "instances" and parts[-1] == "exit":
             if parts[1] in self.instances:
                 self.instances[parts[1]]["status"] = "exited"
             return 200, {}
         return 404, {"error": "not found"}
+
+    def _heartbeat(self, session_id, body):
+        """Like the API: record the progress, then answer with the instance and its progress counts."""
+        inst = self.instances.get(session_id)
+        if inst is None:
+            return 404, {"error": "Unknown session"}
+        try:
+            events = task_progress.check_events(body.get("progress", []))
+            inst["progress"] = task_progress.apply(inst.get("progress"), events, "2026-01-01T00:00:02Z")
+        except task_progress.ProgressError as exc:
+            return 400, {"error": str(exc)}
+        return 200, {**inst, **task_progress.counts(inst.get("progress"))}
 
     def add_instance(self, session_id, role, parent=None, token_id=None, status="active"):
         self.instances[session_id] = {

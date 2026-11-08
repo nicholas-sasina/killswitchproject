@@ -55,6 +55,17 @@ class ProgressQueue:
         with self._lock:
             return self._waiting > 0
 
+    def confirmed_by(self, n: int, reply) -> bool:
+        """True when a heartbeat reply's progress counts show the API holds the first n events.
+
+        An API that took the heartbeat but ignored its progress (one from before progress existed) must not
+        count as having recorded it, or a waiting start would be told to go ahead on a start Burn never saw.
+        """
+        with self._lock:
+            expected = rules.counts(rules.apply(self._accepted, self._queue[:n], _UNSTAMPED))
+        return isinstance(reply, dict) and all(
+            isinstance(reply.get(key), int) and reply[key] >= count for key, count in expected.items())
+
     def sent(self, n: int) -> None:
         """The API took the first n events."""
         with self._lock:

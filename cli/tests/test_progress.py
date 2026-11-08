@@ -8,6 +8,7 @@ import urllib.request
 
 import pytest
 
+from burn_contracts import progress as rules
 from burn_contracts.progress import ProgressError
 import burn_cli.runner.run as runmod
 from burn_cli.api import ApiError
@@ -225,17 +226,23 @@ def test_without_a_queue_there_is_no_progress_endpoint():
 
 # -- progress on the heartbeat --------------------------------------------------------------------
 class RecordingApi:
-    """Heartbeats only; `statuses` are the replies in turn (200 or an error status, 0 for unreachable)."""
+    """Heartbeats only; `statuses` are the replies in turn (200 or an error status, 0 for unreachable).
 
-    def __init__(self, *statuses):
-        self.bodies, self.statuses = [], list(statuses)
+    A 200 answers like the API: the instance with its progress counts. `old_style` answers without them.
+    """
+
+    def __init__(self, *statuses, old_style=False):
+        self.bodies, self.statuses, self.old_style, self.progress = [], list(statuses), old_style, {}
 
     def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
         self.bodies.append(progress)
         status = self.statuses.pop(0) if self.statuses else 200
         if status != 200:
             raise ApiError(f"POST /instances/{session_id}/heartbeat failed with HTTP {status}", status or None)
-        return {}
+        if self.old_style:
+            return {"session_id": session_id, "status": "active"}
+        self.progress = rules.apply(self.progress, rules.check_events(progress or []), "2026-11-08T00:00:00Z")
+        return {"session_id": session_id, "status": "active", **rules.counts(self.progress)}
 
 
 def supervisor(api):
@@ -747,3 +754,49 @@ def test_a_connection_dropped_mid_heartbeat_counts_as_unreachable():
         assert caught.value.status is None  # transient, like any unreachable API: the heartbeat thread lives on
     finally:
         server.close()
+
+
+
+# -- an API that took the heartbeat but not the progress ------------------------------------------------
+@pytest.mark.parametrize("reply", [
+    {"session_id": "sess_1", "status": "active"},  # an API from before progress: no counts at all
+    {"session_id": "sess_1", "status": "active", "items_started": 0, "items_done": 0},  # counts that miss it
+    {"session_id": "sess_1", "status": "active", "items_started": 1, "items_done": 0},  # the start, not the done
+])
+def test_progress_counts_as_recorded_only_when_the_reply_shows_it(reply, capsys):
+    class Api(RecordingApi):
+        def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+            self.bodies.append(progress)
+            return reply
+
+    inst = supervisor(Api())
+    inst._progress.add(ev("a"))
+    inst._progress.add(ev("a", "done"))
+    assert inst._beat() not in (200, 400)
+    assert inst._progress.pending() == 2  # kept, and sent again
+    assert inst._progress.wait_recorded("a", 0.01) == ("timeout", "")  # a waiting start is not told to go ahead
+    inst._beat()
+    assert capsys.readouterr().err.count("did not confirm") == 1  # said once, not on every beat
+
+
+def test_a_reply_that_shows_the_progress_records_it():
+    inst = supervisor(RecordingApi())
+    inst._progress.add(ev("a"))
+    assert inst._beat() == 200 and inst._progress.wait_recorded("a", 0.01) == ("recorded", "")
+
+
+def test_a_start_against_an_api_that_ignores_progress_is_a_503(stack):
+    original = stack.handle
+
+    def old_api(method, path, query, body):
+        if path.endswith("/heartbeat"):
+            return 200, {}  # took the heartbeat, said nothing about progress
+        return original(method, path, query, body)
+
+    stack.handle = old_api
+    out = stack.tmp / "reply.json"
+    code = REPORT + f"""
+    json.dump(report("item-01", "started")[:2], open({str(out)!r}, "w"))"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1, progress_wait=1.0).run() == 0
+    status, reply = json.loads(out.read_text())
+    assert status == 503 and "not recorded" in reply["error"]
