@@ -173,6 +173,45 @@ def test_canary_that_reached_two_agents_is_ambiguous(stack, fleet):  # 15
     _no_one_revoked(stack, fleet)
 
 
+def test_canary_that_reached_a_swarm_instance_is_ambiguous(stack, fleet):  # 15
+    """A swarm instance's agent id is in no scenario list; the ledger alone must reveal it."""
+    from burn_contracts.names import instance_agent_id
+    helper = instance_agent_id("helper", "c0ffee")
+    ref = fleet[VICTIM]["canary"]["canary_ref"]
+    stolen = stack.read_canary(fleet[VICTIM])
+    stack.expose(helper, ref)  # e.g. the victim sent it to a helper instance via send_message
+    assert helper not in stack.table("burn-scenario").get_item(Key={"pk": "meta"})["Item"]["data"]["agent_ids"]
+    stack.present(stolen)
+    assert stack.incidents[0]["outcome"] == "not_actionable" and helper in stack.incidents[0]["reason"]
+    _no_one_revoked(stack, fleet)
+
+
+def test_many_ledger_rows_do_not_hide_another_holder(stack, fleet, monkeypatch):
+    """The holder scan follows pagination."""
+    import db as dbmod
+    real_table = dbmod.table
+
+    class Paged:
+        def __init__(self, tbl):
+            self.tbl = tbl
+
+        def __getattr__(self, name):
+            return getattr(self.tbl, name)
+
+        def scan(self, **kwargs):
+            return self.tbl.scan(**{**kwargs, "Limit": 1})  # one item per page
+
+    monkeypatch.setattr(dbmod, "table", lambda name: Paged(real_table(name)) if name == "burn-exposures"
+                        else real_table(name))
+    ref = fleet[VICTIM]["canary"]["canary_ref"]
+    stolen = stack.read_canary(fleet[VICTIM])
+    for agent in WORKER_IDS[10:15]:
+        stack.expose(agent, f"burn/{agent}/api_key")  # unrelated rows to page through
+    stack.expose(WORKER_IDS[15], ref)
+    stack.present(stolen)
+    assert stack.incidents[0]["outcome"] == "not_actionable" and WORKER_IDS[15] in stack.incidents[0]["reason"]
+
+
 def test_session_mismatch_never_contains(stack, fleet):  # 15
     stolen = stack.read_canary(fleet[VICTIM])
     stack.table("burn-sessions").update_item(

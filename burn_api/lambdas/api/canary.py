@@ -31,7 +31,7 @@ import time
 from datetime import datetime, timezone
 
 import badges  # bundled from the identity code at deploy time
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 from burn_contracts import names
 
@@ -81,10 +81,18 @@ def _ledger_row(agent_id: str, secret_ref: str) -> dict | None:
 
 
 def _other_holders(agent_id: str, secret_ref: str) -> list[str]:
-    """Other scenario agents whose ledger has this canary (e.g. inherited via send_message)."""
-    meta = db.table(names.SCENARIO_TABLE).get_item(Key={"pk": "meta"}).get("Item")
-    agent_ids = meta["data"].get("agent_ids", []) if meta else []
-    return [a for a in agent_ids if a != agent_id and _ledger_row(a, secret_ref)]
+    """Every other agent whose ledger has this canary (e.g. inherited via send_message), scenario
+    agents and swarm instances alike: read from the exposure ledger itself, not from a list of agents.
+    A filtered scan is fine at this table's size; the canary ref is the ledger's sort key."""
+    kwargs = {"FilterExpression": Attr("secret_ref_or_fp").eq(secret_ref),
+              "ProjectionExpression": "agent_id", "ConsistentRead": True}
+    holders = set()
+    while True:
+        page = db.table(names.EXPOSURES_TABLE).scan(**kwargs)
+        holders.update(item["agent_id"] for item in page["Items"])
+        if "LastEvaluatedKey" not in page:
+            return sorted(holders - {agent_id})
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
 def _revoke_if_active(session_id: str, event_id: str | None) -> bool:
