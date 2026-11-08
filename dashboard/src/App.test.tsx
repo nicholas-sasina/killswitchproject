@@ -113,7 +113,9 @@ describe("the console shell", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.getAttribute("aria-label") ?? link.textContent),
-    ).toEqual(["Overview", "Roles", "Incidents, 0 open", "Credentials"]);
+    ).toEqual(["Overview", "Roles", "Incidents", "Credentials"]);
+    // With nothing open there is no count at all, not a grey zero.
+    expect(nav.querySelector(".topbar-count")).toBeNull();
     expect(
       within(nav)
         .getByRole("link", { name: "Overview" })
