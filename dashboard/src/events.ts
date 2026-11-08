@@ -23,12 +23,29 @@ export function nextCursor(
 }
 
 /**
- * Merge one poll into the state. A poll that brings nothing new returns the
- * same state object, so nothing downstream re-renders every second.
+ * The most events kept. A day's history (at most 20,000 events) fits with
+ * room to spare; past that the oldest are dropped, so a console left open
+ * for days on a busy swarm stays the same size.
+ */
+export const MAX_EVENTS = 25_000;
+
+/**
+ * Merge one poll into the state, keeping at most `MAX_EVENTS`. A poll that
+ * brings nothing new returns the same state object, so nothing downstream
+ * re-renders every second.
  */
 export function eventsReducer(
   state: EventsState,
   response: EventsResponse,
+): EventsState {
+  return mergeEvents(state, response, MAX_EVENTS);
+}
+
+/** `eventsReducer` with a chosen limit on how many events are kept. */
+export function mergeEvents(
+  state: EventsState,
+  response: EventsResponse,
+  limit: number,
 ): EventsState {
   const cursor = nextCursor(state.cursor, response);
   const changed = response.events.some(
@@ -42,8 +59,12 @@ export function eventsReducer(
   )
     return state;
   const byId = changed ? { ...state.byId } : state.byId;
-  if (changed)
+  if (changed) {
     for (const event of response.events) byId[event.event_id] = event;
+    const ids = Object.keys(byId);
+    if (ids.length > limit)
+      for (const id of ids.sort().slice(0, ids.length - limit)) delete byId[id];
+  }
   return { byId, agents: response.agents, cursor };
 }
 

@@ -3,9 +3,12 @@ import {
   eventIdAt,
   eventsReducer,
   initialEventsState,
+  MAX_EVENTS,
+  mergeEvents,
   newestEvents,
 } from "./events";
 import type { LedgerEvent } from "./contracts";
+import { HISTORY_MAX_PAGES, HISTORY_PAGE } from "./polling";
 
 function event(sequence: number): LedgerEvent {
   return {
@@ -103,5 +106,27 @@ describe("event history", () => {
     expect(eventIdAt(1469922850259)).toBe("evt_01ARZ3NDEK0000000000000000");
     expect(eventIdAt(0)).toBe(`evt_${"0".repeat(26)}`);
     expect(eventIdAt(1_000) < eventIdAt(1_001)).toBe(true);
+  });
+
+  it("keeps only the newest events once the list is full", () => {
+    const state = mergeEvents(
+      initialEventsState,
+      { events: [event(1), event(2), event(3)], agents: [] },
+      2,
+    );
+    const next = mergeEvents(
+      state,
+      { events: [event(5), event(4)], agents: [] },
+      2,
+    );
+    expect(newestEvents(state).map((item) => item.event_id)).toEqual([
+      event(3).event_id,
+      event(2).event_id,
+    ]);
+    expect(newestEvents(next).map((item) => item.event_id)).toEqual([
+      event(5).event_id,
+      event(4).event_id,
+    ]);
+    expect(MAX_EVENTS).toBeGreaterThan(HISTORY_PAGE * HISTORY_MAX_PAGES);
   });
 });
