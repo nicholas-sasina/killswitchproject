@@ -7,8 +7,8 @@ The launcher joins from the host once per container with one join token, and han
 through `docker run -e NAME` (the values live in the launcher's environment, never in argv or a file). The
 containers need no AWS access of the host's: each worker is an AI agent (Claude Haiku 4.5 on Bedrock) whose model
 runs on its instance's own AWS key. Model calls cost money, so they are capped, per worker (--worker-model-calls) and
-for the whole run (--max-model-calls, replacements included); a ticket takes three to five calls, about one to two
-cents of Haiku.
+for the whole run (--max-model-calls, replacements included); a ticket takes three to five calls, about one cent
+of Haiku.
 
 Without --mock the workers run on the demo stack's internal network, whose one way out is the egress proxy
 (start the stack first); the Burn API and Gateway come from the environment or .env (`make env`). The role is used

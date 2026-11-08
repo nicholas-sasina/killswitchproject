@@ -19,10 +19,10 @@ a Strands agent on Claude Haiku 4.5 (Bedrock, temperature 0), built the same way
 away. Its tools are Burn's MCP tools through `BURN_MCP_URL`. Workers start offset by a hash of their agent id so 20 do
 not all call at once, and they stop when the Gateway refuses their badge.
 
-**It costs money.** A ticket is one turn of three to five Haiku calls, about 5,000 to 15,000 tokens in and a few
-hundred out, roughly one to two cents (Haiku 4.5 is $1 per million input tokens and $5 per million output).
+**It costs money.** A ticket is one turn of three to five Haiku calls. Measured on support-desk: 4 calls, about
+6,000 tokens in and 370 out, just under one cent (Haiku 4.5 is $1 per million input tokens and $5 per million output).
 Model calls are capped: 10 per turn, 40 per worker (`--worker-model-calls`), and 400 for the whole run with
-replacements included (`MAX_CALLS=`, `--max-model-calls`), about $1.50. Each worker is started with its share
+replacements included (`MAX_CALLS=`, `--max-model-calls`), well under $1 at that rate. Each worker is started with its share
 and never makes more calls than that. When it exits, the launcher reads its last line (`model calls used: N of M`)
 and adds the unused part back to the run's budget.
 

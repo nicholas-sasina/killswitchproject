@@ -6,7 +6,7 @@ The model is called with the instance's own AWS key (AWS_ACCESS_KEY_ID / AWS_SEC
 gives an instance whose role has credentials ["aws_key"]), never with any other credentials, so a burn, which kills
 that key, also takes the worker's model away. Its tools are Burn's MCP tools through BURN_MCP_URL (the local
 endpoint that adds the instance's badge), as many as its role allows. Every turn is a real model call that costs
-money: a turn on one ticket is a few Haiku calls, about one to two cents.
+money: a turn on one ticket is a few Haiku calls, about one cent.
 
 With a task (BURN_TASK, a JSON list of item ids, from the launcher) each item is one model turn on one ticket of the
 loaded scenario ("Handle ticket T-1001: ..."). Items map to the tickets list_tickets returns by their place in the
