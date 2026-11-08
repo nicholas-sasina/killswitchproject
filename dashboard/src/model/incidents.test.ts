@@ -118,4 +118,30 @@ describe("incidents", () => {
       "burned",
     );
   });
+
+  it("keeps a canary burn open when its rotation failed without naming a key", () => {
+    // The canary path reports a failed or deferred rotation for the whole
+    // agent: a flagged event with no key.
+    const canary = [
+      ...events,
+      burnEvent(
+        "c",
+        11,
+        "flagged",
+        undefined,
+        "rotation failed: session stays revoked, credentials NOT rotated",
+      ),
+    ];
+    const status = (list: LedgerEvent[]) =>
+      incidents(model, list, []).find((incident) => incident.agent.key === "c")
+        ?.status;
+    expect(status(canary)).toBe("rotation-failed");
+    // Burning it again by hand rotates its keys and closes it.
+    expect(
+      status([
+        ...canary,
+        burnEvent("c", 20, "rotated", "burn/agent-worker-c/api_key"),
+      ]),
+    ).toBe("burned");
+  });
 });

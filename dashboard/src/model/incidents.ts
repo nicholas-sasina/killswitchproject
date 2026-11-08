@@ -25,6 +25,9 @@ export interface Incident {
   flagged: string[];
 }
 
+/** A rotation that failed for all of an agent's keys at once. */
+const EVERY_KEY = "*";
+
 /** The open flags, by reference. */
 export function openFlagRefs(flags: Flag[] | undefined): Set<string> {
   return new Set(
@@ -55,19 +58,21 @@ export function incidentFor(
       (event) =>
         event.agent_id === agent.agentId &&
         event.source === "burn" &&
-        event.secret_ref &&
         (!after || event.ts >= after),
     )
     .sort((a, b) => a.event_id.localeCompare(b.event_id));
   for (const event of own) {
-    const ref = event.secret_ref as string;
-    if (event.action === "rotated") {
+    const ref = event.secret_ref ?? undefined;
+    if (event.action === "rotated" && ref) {
       rotated.push(ref);
       failed.delete(ref);
+      failed.delete(EVERY_KEY);
     } else if (event.action === "flagged") {
+      // The canary path reports a failed or deferred rotation for the whole
+      // agent, naming no key; a later rotation means it was burned again.
       if (/^rotation (failed|deferred)/.test(event.detail ?? ""))
-        failed.add(ref);
-      else flagged.push(ref);
+        failed.add(ref ?? EVERY_KEY);
+      else if (ref) flagged.push(ref);
     }
   }
   const openKeys = [...new Set(flagged)].filter((ref) => open.has(ref));
