@@ -48,10 +48,13 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
   is queued on the minter with an asynchronous invoke, not awaited. If queuing fails, calling
   `POST /instances/{id}/exit` again deletes them. Scenario sessions never heartbeat and are never swept.
   Clients that keep an instance alive call heartbeat more often than the idle window.
-- **Scoped burns.** Every target session is revoked first, so they are stopped even if the rest is slow.
-  Then each distinct agent id goes through `POST /burn` in a pool of 10 threads. One failing burn lands in
-  `failed` and does not stop the others. A failed instance is already revoked; finish it with
-  `POST /burn {agent_id}`.
+- **Scoped burns.** Every target session is revoked first, in the pool, so they are stopped even if the
+  rest is slow. A lineage is rescanned after each pass until nothing new turns up, and a child that is
+  still starting re-checks its parent (or token) after its row is written, so a spawn or join cannot
+  slip past a burn. Then each distinct agent goes through `POST /burn` in a pool of 10 threads. A failed
+  revoke does not drop the agent (the burn revokes its sessions again), and a failed burn lands in
+  `failed` without stopping the others. Agents that were already revoked are not burned again, since a
+  second rotation would move `AWSPREVIOUS`. Finish a failed one with `POST /burn {agent_id}`.
 - **The 29 s API limit.** A burn is a few DynamoDB calls plus one minter call (IAM key rotation). With 10
   workers, 20 instances run as two waves, so the call fits if one rotation takes under about 10 s. This is
   not measured against real AWS. To stay inside the limit regardless, the call stops waiting after 24 s
