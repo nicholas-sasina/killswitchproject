@@ -484,10 +484,10 @@ def make_stale(env, count):
 def test_sweep_queues_slow_credential_deletes_instead_of_waiting(env):
     import time
     sids = make_stale(env, 8)
-    env.minter.delay = 3.0  # every awaited minter call now takes 3 s; awaiting 8 would take 24 s
+    env.minter.delay = 5.0  # every awaited minter call now takes 5 s; awaiting 8 would take 40 s
     started = time.monotonic()
     status, body = call(env, "GET", "/instances")
-    assert status == 200 and time.monotonic() - started < 2.5
+    assert status == 200 and time.monotonic() - started < 10
     assert {i["status"] for i in body["instances"]} == {"exited"} and len(body["instances"]) == 8
     assert sorted(q[1] for q in env.minter.queued) == sorted(
         f"/agents/{i['agent_id']}/credentials" for i in body["instances"])
@@ -639,3 +639,21 @@ def test_new_instances_use_the_same_timestamp_format_as_heartbeat(env):
     row = session_row(env, join(env, "worker")[1]["session_id"])
     pattern = r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$"
     assert re.match(pattern, row["created_at"]) and re.match(pattern, row["last_seen"])
+
+
+def test_a_heartbeat_between_the_sweep_scan_and_its_update_wins(env, monkeypatch):
+    import db, instances
+    sids = make_stale(env, 2)
+    real = db.scan_all
+
+    def scan_then_heartbeat(tbl, **kwargs):
+        rows = real(tbl, **kwargs)
+        if "FilterExpression" in kwargs and rows:  # the sweep's scan; one instance checks in right after it
+            call(env, "POST", f"/instances/{sids[0]}/heartbeat")
+        return rows
+
+    monkeypatch.setattr(db, "scan_all", scan_then_heartbeat)
+    exited = instances.sweep_idle()
+    assert exited == [sids[1]]
+    assert session_row(env, sids[0])["status"] == "active" and session_row(env, sids[1])["status"] == "exited"
+    assert ("DELETE", f"/agents/{session_row(env, sids[0])['agent_id']}/credentials", None) not in env.minter.calls

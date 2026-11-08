@@ -28,21 +28,24 @@ def _now() -> str:
     return utc_now_iso()
 
 
-def end_session(session: dict, status: str = "revoked") -> bool:
+def end_session(session: dict, status: str = "revoked", idle_before: str | None = None) -> bool:
     """Flip an active session to `revoked` (burned) or `exited` and delete its Cognito client.
 
     The status flip is the real kill switch (the gateway checks it on every call).
     Deleting the client only stops new tokens being issued. Returns False if the session
     was no longer active (someone else ended it first), so an end is never recorded twice.
+    With `idle_before`, the session also has to still be unseen since then (`last_seen` older), so
+    a heartbeat that lands first wins over the idle sweep.
     """
     stamp = "revoked_at" if status == "revoked" else "exited_at"
     try:
         db.table(names.SESSIONS_TABLE).update_item(
             Key={"session_id": session["session_id"]},
             UpdateExpression=f"SET #s = :new, {stamp} = :t",
-            ConditionExpression="#s = :active",
+            ConditionExpression="#s = :active" + (" AND last_seen < :cutoff" if idle_before else ""),
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":new": status, ":active": "active", ":t": _now()},
+            ExpressionAttributeValues={":new": status, ":active": "active", ":t": _now(),
+                                       **({":cutoff": idle_before} if idle_before else {})},
         )
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":

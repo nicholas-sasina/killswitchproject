@@ -131,15 +131,16 @@ def _delete_credentials(session: dict, wait: bool):
         send("DELETE", f"/agents/{session['agent_id']}/credentials")
 
 
-def exit_instance(session_id: str, wait_for_credentials: bool = True) -> dict:
+def exit_instance(session_id: str, wait_for_credentials: bool = True, idle_before: str | None = None) -> dict:
     """Clean exit: end the session, then delete the instance's own credentials.
 
     The badge goes first (it is the kill switch). If the minter then fails, the error is raised
     after the session is already exited; calling exit again retries the credential deletion,
     which is idempotent. With wait_for_credentials=False the deletion is queued, not awaited.
+    With idle_before (the sweep), the instance exits only if it was still unseen since then.
     """
     session = get_session(session_id)
-    if session["status"] == "active" and sessions.end_session(session, "exited"):
+    if session["status"] == "active" and sessions.end_session(session, "exited", idle_before):
         session = get_session(session_id)
         db.write_event(agent_id=session["agent_id"], source="instance", action="exited",
                        session_id=session_id, role=role_of(session),
@@ -161,8 +162,9 @@ def sweep_idle(limit: int = SWEEP_LIMIT, budget: float = SWEEP_BUDGET_SECONDS) -
         if time.monotonic() >= deadline:
             break
         try:
-            exit_instance(session["session_id"], wait_for_credentials=False)
-            exited.append(session["session_id"])
+            result = exit_instance(session["session_id"], wait_for_credentials=False, idle_before=cutoff)
+            if result["status"] == "exited":  # a heartbeat that landed first keeps it alive
+                exited.append(session["session_id"])
         except Exception as exc:  # one stuck instance must not stop the listing or the sweep
             print(f"idle sweep: exit failed for {session['session_id']}: {type(exc).__name__}")
     return exited
