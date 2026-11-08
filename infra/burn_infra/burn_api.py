@@ -148,6 +148,9 @@ class BurnApiStack(cdk.Stack):
                 api.add_routes(path=path, methods=[apigw.HttpMethod(method)], integration=integration,
                                authorizer=apigw.HttpNoneAuthorizer())
         ssm.StringParameter(self, "UrlParam", parameter_name="/burn/api/url", string_value=api.api_endpoint)
+        # The internet-facing mock provider may invoke only this alias, which serves canary incidents and
+        # nothing else (handler.py); API Gateway keeps invoking the unqualified function.
+        lambda_.Alias(self, "CanaryAlias", alias_name=names.BURN_API_CANARY_ALIAS, version=fn.current_version)
         # make_env reads this to decide whether the dashboard still gets the local admin token.
         ssm.StringParameter(self, "PeopleEnabledParam", parameter_name=names.PEOPLE_ENABLED_PARAM,
                             string_value="on" if people_auth else "off")
