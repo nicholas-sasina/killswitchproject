@@ -10,7 +10,8 @@
 import { useMemo, useState } from "react";
 import {
   TIERS,
-  TIER_LABEL,
+  TIER_MEANING,
+  TIER_NAME,
   bySeverity,
   countByTier,
   toAlerts,
@@ -19,13 +20,6 @@ import {
 } from "../alerts";
 import type { LedgerEvent } from "../contracts";
 import { Timestamp } from "./common";
-
-const TALLY_LABEL: Record<Tier, string> = {
-  crit: "Critical",
-  high: "High",
-  warn: "Review",
-  info: "Noted",
-};
 
 /** One row of the facts table, rendered only when the field is present. */
 function Fact({
@@ -46,6 +40,16 @@ function Fact({
   );
 }
 
+/** Severity as a colour chip and a word, matching how status is shown. */
+function Severity({ tier }: { tier: Tier }) {
+  return (
+    <span className={`sev sev-${tier}`}>
+      <span aria-hidden="true" />
+      {TIER_NAME[tier]}
+    </span>
+  );
+}
+
 function AlertDetail({ alert }: { alert: Alert }) {
   const { event } = alert;
   return (
@@ -55,19 +59,14 @@ function AlertDetail({ alert }: { alert: Alert }) {
     >
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">
-            <span className={`sev sev-${alert.tier}`}>
-              [{TIER_LABEL[alert.tier]}]
-            </span>{" "}
-            Alert detail
-          </p>
+          <Severity tier={alert.tier} />
           <h2 id="alert-detail-title">{alert.title}</h2>
         </div>
       </div>
 
       <div className="explain">
         <p>
-          <strong>What this proves.</strong> {alert.why}
+          <strong>What this means.</strong> {alert.why}
         </p>
       </div>
       <div className="explain">
@@ -78,9 +77,11 @@ function AlertDetail({ alert }: { alert: Alert }) {
 
       {event.detail && (
         <div className="reported">
-          <span className="eyebrow">Reported by</span>
+          <span className="eyebrow">
+            Reported by the {event.source.replaceAll("_", " ")}
+          </span>
           <p>
-            {event.source.replaceAll("_", " ")}: <code>{event.detail}</code>
+            <code>{event.detail}</code>
           </p>
         </div>
       )}
@@ -89,25 +90,22 @@ function AlertDetail({ alert }: { alert: Alert }) {
         <Fact label="Agent" value={event.agent_id} mono />
         <Fact label="Role" value={event.role} />
         <Fact label="Seen at" value={new Date(event.ts).toLocaleString()} />
-        <Fact label="Source" value={event.source.replaceAll("_", " ")} />
-        <Fact label="Action" value={event.action.replaceAll("_", " ")} />
+        <Fact label="Credential" value={event.secret_ref} mono />
+        <Fact label="Type" value={event.secret_type?.replaceAll("_", " ")} />
+        <Fact label="Owner" value={event.owner_agent_id || event.owner} mono />
         <Fact label="Tool" value={event.tool} mono />
         <Fact label="Destination" value={event.destination} mono />
         <Fact label="Encoding" value={event.encoding} />
         <Fact label="Passed to" value={event.target_agent_id} mono />
-        <Fact label="Credential" value={event.secret_ref} mono />
-        <Fact label="Fingerprint" value={event.fingerprint} mono />
-        <Fact label="Type" value={event.secret_type?.replaceAll("_", " ")} />
-        <Fact label="Owner" value={event.owner_agent_id || event.owner} mono />
         <Fact label="Flag level" value={event.flag_level} />
         <Fact label="Session" value={event.session_id} mono />
-        <Fact label="Parent" value={event.parent_session} mono />
-        <Fact label="Event" value={event.event_id} mono />
+        <Fact label="Fingerprint" value={event.fingerprint} mono />
+        <Fact label="Event id" value={event.event_id} mono />
       </dl>
 
       <p className="panel-footnote">
         Credential references and fingerprints only. Raw credential values are
-        never returned to the browser.
+        never sent to the browser.
       </p>
     </section>
   );
@@ -136,6 +134,7 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
   // Keep a selection valid as the stream moves underneath it.
   const selected =
     shown.find((alert) => alert.event.event_id === selectedId) ?? shown[0];
+  const filtering = hidden.length > 0 || agentFilter !== "";
 
   function toggleTier(tier: Tier) {
     setHidden((current) =>
@@ -147,78 +146,72 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
 
   return (
     <>
-      <div className="section-heading">
-        <h2 id="alerts-title">Alerts</h2>
-        <span className="muted">
-          {alerts.length
-            ? `${alerts.length} in the current stream`
-            : "Nothing needs attention"}
-        </span>
-      </div>
-
-      {/* Tallies double as filters: the readout you look at is the control
-          you use, so there is no separate filter bar for severity. */}
+      {/* The tallies are the filter. The readout you look at is the control
+          you use, so there is no separate severity filter bar. */}
       <div className="alert-ribbon">
-        {TIERS.map((tier) => (
-          <button
-            key={tier}
-            type="button"
-            className="alert-tally"
-            data-tier={tier}
-            data-zero={counts[tier] === 0}
-            aria-pressed={!hidden.includes(tier)}
-            onClick={() => toggleTier(tier)}
-            aria-label={`${TALLY_LABEL[tier]} alerts: ${counts[tier]}. ${
-              hidden.includes(tier) ? "Hidden" : "Shown"
-            }`}
-          >
-            <span className="count">{counts[tier]}</span>
-            <span className="label">{TALLY_LABEL[tier]}</span>
-          </button>
-        ))}
+        {TIERS.map((tier) => {
+          const on = !hidden.includes(tier);
+          return (
+            <button
+              key={tier}
+              type="button"
+              className="alert-tally"
+              data-tier={tier}
+              data-zero={counts[tier] === 0}
+              aria-pressed={on}
+              onClick={() => toggleTier(tier)}
+              aria-label={`${TIER_NAME[tier]}: ${counts[tier]}. ${
+                on ? "Showing. Select to hide." : "Hidden. Select to show."
+              }`}
+            >
+              <span className="count">{counts[tier]}</span>
+              <span className="label">{TIER_NAME[tier]}</span>
+              <span className="meaning">{TIER_MEANING[tier]}</span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="alert-layout">
         <section className="panel" aria-labelledby="queue-title">
           <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Needs attention</p>
-              <h2 id="queue-title">Alert queue</h2>
-            </div>
-            <span className="meta">
-              Most serious first · {shown.length} shown
-            </span>
+            <h2 id="queue-title">
+              {shown.length} {shown.length === 1 ? "alert" : "alerts"}
+              {filtering ? " shown" : ""}
+            </h2>
+            <span className="meta">Most serious first</span>
           </div>
 
-          <div className="alert-filters">
-            <span className="eyebrow">Agent</span>
-            <button
-              type="button"
-              className="chip"
-              aria-pressed={agentFilter === ""}
-              onClick={() => setAgentFilter("")}
-            >
-              All
-            </button>
-            {agents.map((agent) => (
+          {agents.length > 1 && (
+            <div className="alert-filters">
               <button
-                key={agent}
                 type="button"
                 className="chip"
-                aria-pressed={agentFilter === agent}
-                onClick={() => setAgentFilter(agent)}
+                aria-pressed={agentFilter === ""}
+                onClick={() => setAgentFilter("")}
               >
-                {agent}
+                All agents
               </button>
-            ))}
-          </div>
+              {agents.map((agent) => (
+                <button
+                  key={agent}
+                  type="button"
+                  className="chip"
+                  aria-pressed={agentFilter === agent}
+                  onClick={() => setAgentFilter(agent)}
+                >
+                  {agent}
+                </button>
+              ))}
+            </div>
+          )}
 
           {!shown.length ? (
             <div className="empty">
               <p>
                 {alerts.length
-                  ? "No alerts match these filters. Re-enable a severity above, or clear the agent filter."
-                  : "No alerts yet. Blocked handoffs, blocked egress, canary use and replayed credentials appear here as they happen."}
+                  ? "Nothing matches the current filters. Select a severity above to bring it back."
+                  : "Nothing needs attention. Blocked credentials, canary use and replayed keys will show up here as they happen."}
               </p>
             </div>
           ) : (
@@ -235,13 +228,11 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
                     onClick={() => setSelectedId(alert.event.event_id)}
                   >
                     <span className="alert-index" aria-hidden="true">
-                      {String(index + 1).padStart(3, "0")}
+                      {index + 1}
                     </span>
                     <span className="alert-main">
                       <span className="alert-head">
-                        <span className={`sev sev-${alert.tier}`}>
-                          [{TIER_LABEL[alert.tier]}]
-                        </span>
+                        <Severity tier={alert.tier} />
                         <span className="alert-title">{alert.title}</span>
                         <span className="alert-when">
                           <Timestamp value={alert.event.ts} />
@@ -249,8 +240,6 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
                       </span>
                       <span className="alert-sub">
                         {alert.event.agent_id}
-                        <span className="sep">·</span>
-                        {alert.event.source.replaceAll("_", " ")}
                         {alert.event.secret_ref && (
                           <>
                             <span className="sep">·</span>
@@ -271,14 +260,11 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
         ) : (
           <section className="panel" aria-label="Alert detail">
             <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Alert detail</p>
-                <h2>Nothing selected</h2>
-              </div>
+              <h2>No alert selected</h2>
             </div>
             <p className="empty">
-              Select an alert to see every field recorded for it, what it
-              proves, and what to do about it.
+              Select an alert to see what it means, what to do about it, and
+              every detail recorded for it.
             </p>
           </section>
         )}

@@ -51,7 +51,7 @@ export function Collapsible({
         onClick={() => setOpen((current) => !current)}
       >
         <span className="chevron" aria-hidden="true">
-          {open ? "–" : "+"}
+          {open ? "▾" : "▸"}
         </span>
         <h2>{label}</h2>
         {summary && <span className="toggle-meta">{summary}</span>}

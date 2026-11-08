@@ -25,13 +25,14 @@ export function Ledger({
   const entries = data && data.agent_id === agentId ? data.entries : undefined;
   const flagged = entries?.filter((entry) => entry.status === "flagged").length;
 
+  // Plain language, because this line is all you see while collapsed.
   const summary = !agentId
     ? "No agent selected"
     : !entries
-      ? "Loading"
+      ? "Loading…"
       : entries.length
-        ? `${agentId} · ${entries.length} seen${flagged ? ` · ${flagged} flagged` : ""}`
-        : `${agentId} · none seen`;
+        ? `${entries.length} credential${entries.length === 1 ? "" : "s"}${flagged ? `, ${flagged} to review` : ""}`
+        : "None seen yet";
 
   return (
     <Collapsible
@@ -40,6 +41,10 @@ export function Ledger({
       summary={summary}
     >
       <ErrorMessage message={error} />
+      <p className="panel-intro">
+        Every credential this agent has seen, whether or not the credential is
+        its own.
+      </p>
       {!agentId ? (
         <p className="empty">
           Select an agent above to inspect the credentials it has seen.
@@ -86,8 +91,8 @@ export function Ledger({
         </div>
       )}
       <p className="panel-footnote">
-        Credential references only. Raw credential values are never returned.
-        Refreshes every five seconds.
+        References only; raw credential values are never sent to the browser.
+        Updates every five seconds.
       </p>
     </Collapsible>
   );

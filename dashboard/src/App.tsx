@@ -165,7 +165,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
               <>
                 <PageHead
                   title="Alerts"
-                  description="Only the events that need an operator, most serious first. Each one explains what it proves and what to do about it."
+                  description="Only the things that need you, most serious first. Each one says what it means and what to do about it."
                   attention={pending > 0}
                 />
                 <AlertsView events={events} />

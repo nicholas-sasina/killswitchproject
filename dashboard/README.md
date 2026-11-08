@@ -13,9 +13,10 @@ does not share a page with watching containment.
 
 **Alerts** (`#/alerts`) shows only the events that need an operator, most serious first, with what
 each one proves and what to do about it beside every field recorded for it. Severity reflects what
-an event proves rather than how alarming it sounds: a canary credential being presented is `CRIT`,
-because nothing legitimate ever touches it, while a blocked egress attempt is `HIGH`, because it is
-proof the exit check worked. The severity tallies double as filters. The navigation marker counts
+an event actually shows rather than how alarming it sounds: a canary credential being presented is
+**Critical**, because nothing legitimate ever touches it, while a blocked egress attempt is
+**High**, because it means the exit check worked. Each tally states what its tier means, so the
+scheme does not have to be learned from here, and the tallies double as filters. The navigation marker counts
 everything above `INFO`, so you can stay on the overview and still see the queue filling.
 The **Instances by role** panel groups sessions under their roles, with parent/child lineage,
 status, last seen and exposure counts. Filter by role, status, agent, session or owner to inspect larger swarms.
@@ -131,3 +132,28 @@ is the degraded one.
 **What does MOCK DATA mean, and where does the token live?** At least one API response declared itself a development mock.
 Switch URLs and reload to start a new connection. Vite embeds `VITE_` values in the browser bundle, including the demo token;
 this is a demo access control, so serve the dashboard only to the intended audience and keep builds containing it out of git.
+
+## Integrating this with the rest of the repo
+
+Points worth knowing before merging, and when changing the API alongside it.
+
+**`src/contracts.ts` is a hand-maintained mirror.** It tracks
+`contracts/ledger-event.schema.json`, `contracts/burn-api.openapi.yaml` and
+`contracts/burn.schema.json`. Change either side and change both. As of this branch the event
+`action` and `source` unions match the schema exactly.
+
+**A merge in either order is safe.** If the API ships a new event action before this file mirrors
+it, nothing breaks: `EventFeed` falls back to readable prose for an action it does not recognise
+instead of crashing the stream, and `alerts.ts` treats an unrecognised action as "not an alert"
+rather than inventing a severity for it. Both degrade quietly, so the dashboard does not have to
+be deployed in lockstep with the API.
+
+**New endpoints are additive.** `src/api.ts` is the only place that knows about routes. A view that
+is not mounted issues no requests, so adding a view costs nothing on the others.
+
+**Views are independent.** `Overview`, `Fleet` and `Alerts` share only the event poll in `App.tsx`.
+If `/roles` or `/instances` are unavailable, only `Fleet` shows an error; the overview and alerts
+are unaffected.
+
+**`components/common.tsx` still exports `Flame`** as an alias of `BurnMark`, kept so any code that
+imports the old name keeps compiling. Prefer `BurnMark` in new code.

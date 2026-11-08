@@ -5,8 +5,8 @@
  * Derived entirely from the event stream the dashboard already polls, so the
  * alerts view costs no extra requests.
  *
- * Severity is assigned by what the event proves, not by how alarming it
- * sounds. A canary credential being presented is proof that a credential left
+ * Severity is assigned by what the event actually shows, not by how alarming
+ * it sounds. A canary credential being presented is proof that a credential left
  * and was used by someone, so it outranks a blocked egress attempt, which is
  * proof the exit check did its job.
  */
@@ -16,11 +16,20 @@ export type Tier = "crit" | "high" | "warn" | "info";
 
 export const TIERS: Tier[] = ["crit", "high", "warn", "info"];
 
-export const TIER_LABEL: Record<Tier, string> = {
-  crit: "CRIT",
-  high: "HIGH",
-  warn: "WARN",
-  info: "INFO",
+/** One name per severity, used in the list, the tallies and the detail. */
+export const TIER_NAME: Record<Tier, string> = {
+  crit: "Critical",
+  high: "High",
+  warn: "Review",
+  info: "Noted",
+};
+
+/** A plain sentence for each severity, shown beside the tallies. */
+export const TIER_MEANING: Record<Tier, string> = {
+  crit: "Evidence a credential was used by someone else",
+  high: "Stopped at the boundary, or a dead credential reused",
+  warn: "Contained inside the system; worth a look",
+  info: "Recorded for the audit trail; no action needed",
 };
 
 /** Ordering for "most serious first". */
@@ -30,7 +39,7 @@ export interface Alert {
   event: LedgerEvent;
   tier: Tier;
   title: string;
-  /** What the event proves. */
+  /** What the event means. */
   why: string;
   /** What the operator should do about it. */
   next: string;
@@ -126,6 +135,11 @@ function classify(event: LedgerEvent): Rule | undefined {
     default:
       // recorded, inherited, rotated, issued, started, exited: normal
       // bookkeeping, and not alerts.
+      //
+      // Also the landing place for an action added to the contract that this
+      // build has not mirrored yet. Treating it as "not an alert" is the
+      // deliberate choice: inventing a severity for an unknown event would
+      // be worse than leaving it in the live stream, where it still shows.
       return undefined;
   }
 }

@@ -105,21 +105,25 @@ export function BlastTimeline({
 
   const total = blast?.events.length ?? 0;
   const summary = !agentId
-    ? "No burned agent"
+    ? "Nothing burned yet"
     : !blast
       ? open
-        ? "Querying CloudTrail"
-        : "Closed · not querying"
-      : `${agentId} · ${total} ${total === 1 ? "call" : "calls"}`;
+        ? "Checking…"
+        : "Closed, not checking"
+      : `${total} AWS call${total === 1 ? "" : "s"} recorded`;
 
   return (
     <Collapsible
-      label="Blast radius · CloudTrail"
+      label="Blast radius"
       summary={summary}
       openWhen={Boolean(agentId)}
       onOpenChange={setOpen}
     >
       <ErrorMessage message={error} />
+      <p className="panel-intro">
+        Every AWS call made with this agent's keys, from CloudTrail, before and
+        after the burn.
+      </p>
       {!agentId ? (
         <p className="empty">
           Burn an agent, or select a revoked agent, to review activity from its
@@ -160,7 +164,7 @@ export function BlastTimeline({
             <p className="panel-footnote">{blast.note}</p>
           )}
           <p className="panel-footnote">
-            Refreshes every ten seconds while open. Collapsing stops the query.
+            Updates every ten seconds while open. Collapsing stops the check.
           </p>
         </>
       )}
