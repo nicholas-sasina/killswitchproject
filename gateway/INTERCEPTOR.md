@@ -70,9 +70,11 @@ so the receiver inherits the sender's whole ledger: each entry is copied with `s
 so a conversation announces each credential once, not on every message. Burning either agent
 then covers everything both may have seen.
 
-A forwarded `tools/call` is edited in two ways:
-- `burn_caller_agent_id` is set to the session's agent id, overwriting any value the agent sent.
-  Tools get no caller identity from the gateway, so this is the only one they trust.
+A forwarded `tools/call` is edited before the tool runs:
+- `burn_caller_agent_id` and `burn_caller_session_id` are set to the agent id and session id of the
+  session behind the token, overwriting any value the agent sent. Tools get no caller identity from the
+  gateway, so these are the only ones they trust. The session id is used only to fill `{{canary}}`
+  with that session's own canary.
 - The tool name gets the gateway target prefix (`list_tickets` -> `burn-tools___list_tickets`).
   Agents only ever see the plain names from `contracts/mcp-tools.json`.
 - In arguments the tool declares in `accepts_secret_refs` (never `send_message` or `notify`),

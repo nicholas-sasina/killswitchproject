@@ -67,4 +67,5 @@ Deploy BurnIdentity before BurnGateway: the gateway reads `/burn/identity/discov
   encodings and matches fragments, so base64, hex, reversed or split copies are still blocked. A
   novel transformation can slip past, which is why the receiver inherits the sender's ledger anyway.
 - **Can an agent pretend to be another agent?** No. Tools never trust an id from the agent: the
-  interceptor overwrites `burn_caller_agent_id` with the id of the session behind the token.
+  interceptor overwrites `burn_caller_agent_id` and `burn_caller_session_id` with the ids of the session
+  behind the token. The session id is used only to fill `{{canary}}` with that session's own canary.

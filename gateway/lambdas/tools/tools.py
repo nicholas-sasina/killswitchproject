@@ -4,8 +4,9 @@ The gateway invokes this Lambda with only the tool arguments as the event;
 the tool name comes in the Lambda client context. Each tool returns one JSON
 object, which the gateway hands to the agent as a single text content item
 (agents parse it, so the shapes below are part of the contract). The interceptor adds
-burn_caller_agent_id, the real caller, so tools that act "as" an agent
-(messages) never trust an id the agent typed.
+burn_caller_agent_id and burn_caller_session_id, the real caller and its session, so tools
+that act "as" an agent (messages) never trust an id the agent typed, and {{canary}} is filled
+with the calling session's own canary.
 """
 import contextvars
 import logging

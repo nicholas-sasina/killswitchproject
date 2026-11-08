@@ -5,8 +5,9 @@ REQUEST (before the tool runs):
   2. Unknown or revoked session -> refuse (a "refused" event, tool never runs).
   3. tools/call: the tool must be on the agent's allowlist, and send_message
      may only go to the agent's allowed recipients.
-  4. Inject the real caller id as burn_caller_agent_id (tools get no identity
-     from the gateway, and an agent-supplied value must not be trusted).
+  4. Inject the real caller as burn_caller_agent_id and its session as
+     burn_caller_session_id (tools get no identity from the gateway, and an
+     agent-supplied value must not be trusted; the session fills {{canary}}).
   5. send_message / notify: block known credentials; a message that passes
      hands the sender's ledger to the receiver (exit_check.py).
   6. Arguments a tool declares in accepts_secret_refs: swap permitted
