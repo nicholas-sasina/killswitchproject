@@ -800,3 +800,31 @@ def test_a_start_against_an_api_that_ignores_progress_is_a_503(stack):
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1, progress_wait=1.0).run() == 0
     status, reply = json.loads(out.read_text())
     assert status == 503 and "not recorded" in reply["error"]
+
+
+def test_a_hanging_heartbeat_in_flight_cannot_hold_the_flush_past_its_deadline(monkeypatch):
+    class HangingApi(RecordingApi):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.release = threading.Event(), threading.Event()
+
+        def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+            if not self.entered.is_set():
+                self.entered.set()
+                self.release.wait(30)  # the loop's beat, stuck on a silent API
+            return super().heartbeat(session_id, session_token, progress, timeout)
+
+    api = HangingApi()
+    inst = supervisor(api)
+    inst.min_gap = 0.0
+    inst._progress.add(ev("a", "done"))
+    in_flight = threading.Thread(target=inst._beat, daemon=True)
+    in_flight.start()
+    assert api.entered.wait(5)
+    monkeypatch.setattr(runmod, "FLUSH_DEADLINE", 1.0)
+    started = time.monotonic()
+    inst._flush_progress()
+    took = time.monotonic() - started
+    api.release.set()
+    in_flight.join(5)
+    assert took < 3.0  # one second's deadline; without the bound it waited for the stuck beat

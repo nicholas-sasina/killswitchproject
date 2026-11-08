@@ -219,39 +219,52 @@ class Instance:
                 self._activity.set()  # the next beat goes after the minimum gap: a bare one, the next 50, or a retry
             # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
 
-    def _beat(self, liveness_first: bool = True, timeout: float = 60.0) -> int:
+    def _beat(self, liveness_first: bool = True, deadline: float | None = None) -> int:
         """One heartbeat with the oldest queued progress, at most 50 events, or none when liveness goes first
         (after a refused batch, or a batch that keeps failing). The exit flush passes False: an exit follows.
 
         Returns 200, the failed call's status (0 when the API was unreachable), or UNCONFIRMED when the reply
         does not show the progress it carried, which is kept and sent again like after any failure.
+        With a deadline (the exit flush's), neither waiting for a beat still in flight nor the call itself may
+        outlast it; running out counts as unreachable.
         """
-        with self._beat_lock:
-            bare = self._bare_next and liveness_first
-            self._bare_next = False  # one bare try each time, whatever its outcome
-            batch = [] if bare else self._progress.batch()
-            self._last_beat = self._clock()
-            try:
-                reply = self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
-            except ApiError as exc:
-                if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
-                    self._progress.dropped(len(batch), str(exc))
-                    self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
-                    log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
-                elif batch and exc.status not in (404, 409):
-                    self._batch_failed()
-                return exc.status or 0
-            if batch and not self._progress.confirmed_by(len(batch), reply):
-                if not self._told_unconfirmed:
-                    self._told_unconfirmed = True
-                    log("the Burn API took a heartbeat but did not confirm its progress (an older API?); "
-                        "the progress is kept and sent again, and starts are not confirmed to the agent")
+        if deadline is None:
+            self._beat_lock.acquire()
+        elif not self._beat_lock.acquire(timeout=max(0.0, deadline - self._clock())):
+            return 0  # the loop's beat is still in flight past the deadline
+        try:
+            return self._beat_locked(liveness_first, 60.0 if deadline is None else deadline - self._clock())
+        finally:
+            self._beat_lock.release()
+
+    def _beat_locked(self, liveness_first: bool, timeout: float) -> int:
+        if timeout <= 0:
+            return 0  # nothing left of the deadline for the call itself
+        bare = self._bare_next and liveness_first
+        self._bare_next = False  # one bare try each time, whatever its outcome
+        batch = [] if bare else self._progress.batch()
+        self._last_beat = self._clock()
+        try:
+            reply = self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
+        except ApiError as exc:
+            if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
+                self._progress.dropped(len(batch), str(exc))
+                self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
+                log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
+            elif batch and exc.status not in (404, 409):
                 self._batch_failed()
-                return UNCONFIRMED
-            if batch:
-                self._batch_failures = 0
-            self._progress.sent(len(batch))
-            return 200
+            return exc.status or 0
+        if batch and not self._progress.confirmed_by(len(batch), reply):
+            if not self._told_unconfirmed:
+                self._told_unconfirmed = True
+                log("the Burn API took a heartbeat but did not confirm its progress (an older API?); "
+                    "the progress is kept and sent again, and starts are not confirmed to the agent")
+            self._batch_failed()
+            return UNCONFIRMED
+        if batch:
+            self._batch_failures = 0
+        self._progress.sent(len(batch))
+        return 200
 
     def _batch_failed(self) -> None:
         """The batch is kept. If only progress keeps failing, a bare beat in between keeps the instance from
@@ -276,7 +289,7 @@ class Instance:
                 break
             if wait > 0:
                 self._sleep(wait)
-            status = self._beat(liveness_first=False, timeout=deadline - self._clock())
+            status = self._beat(liveness_first=False, deadline=deadline)
             if status in (404, 409):  # burned (or gone) after all: burn run exits as it does for any burn
                 self._stopped_by_api = True
                 self._progress.gone()
