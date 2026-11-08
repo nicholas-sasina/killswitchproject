@@ -19,6 +19,12 @@ MESSAGES_TABLE = "burn-messages"
 ROLES_TABLE = "burn-roles"
 ENROLL_TOKENS_TABLE = "burn-enroll-tokens"
 
+# burn-fingerprints item the minter bumps whenever it registers, rotates or deletes fingerprints.
+# Not 64 hex chars, so it can never collide with an HMAC.
+FINGERPRINTS_VERSION_KEY = "_version"
+# burn-exposures index for "who read this source": PK source_ref, SK first_seen.
+EXPOSURES_BY_SOURCE_INDEX = "by_source"
+
 # Partition key value for the single global event stream in burn-events.
 EVENTS_STREAM = "all"
 
@@ -40,12 +46,20 @@ SHARED_OWNER = "shared"
 
 # Roles. A role name plus "-" and a 6-hex suffix must still fit an agent id, hence 32 chars.
 ROLE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+# `eval` and `eval-*` are reserved: an instance of such a role would be agent-eval-*, which reset
+# and the badge cleanup treat as the eval harness's load-test agents and never touch.
+RESERVED_ROLE_PREFIX = "eval"
 INSTANCE_SUFFIX_RE = re.compile(r"^[0-9a-f]{6}$")
 ROLE_SOURCES = ("code", "ui", "scenario")  # managed_by: burn.yaml, dashboard, scenario file
 
 # Enrollment (join) tokens: "bjt_<token_id>.<secret>". Only sha256(secret) is stored.
 JOIN_TOKEN_PREFIX = "bjt_"
 JOIN_TOKEN_RE = re.compile(r"^bjt_(?P<token_id>[0-9a-f]{16})\.(?P<secret>[A-Za-z0-9_-]{43})$")
+
+# Session tokens: "bst_<secret>", issued once to a role instance's supervisor in its join reply. They authenticate
+# that instance's own calls (heartbeat, exit, spawning a child). Only sha256(token) is stored.
+SESSION_TOKEN_PREFIX = "bst_"
+SESSION_TOKEN_RE = re.compile(r"^bst_[A-Za-z0-9_-]{43}$")
 
 
 def is_agent_id(value: str) -> bool:
@@ -54,6 +68,10 @@ def is_agent_id(value: str) -> bool:
 
 def is_role_name(value: str) -> bool:
     return bool(ROLE_NAME_RE.match(value or ""))
+
+
+def is_reserved_role_name(value: str) -> bool:
+    return value == RESERVED_ROLE_PREFIX or (value or "").startswith(RESERVED_ROLE_PREFIX + "-")
 
 
 def instance_agent_id(role: str, suffix: str) -> str:
@@ -78,6 +96,11 @@ def parse_join_token(value: str) -> tuple[str, str] | None:
     """(token_id, secret) for a well-formed join token, else None."""
     match = JOIN_TOKEN_RE.match(value or "")
     return (match["token_id"], match["secret"]) if match else None
+
+
+def is_session_token(value) -> bool:
+    # fullmatch: "$" alone would also accept a trailing newline.
+    return isinstance(value, str) and bool(SESSION_TOKEN_RE.fullmatch(value))
 
 
 def agent_secret_ref(agent_id: str, name: str) -> str:

@@ -104,7 +104,10 @@ class BurnGatewayStack(cdk.Stack):
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:UpdateItem", "dynamodb:Query"], resources=[table("burn-exposures")]))
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
-            actions=["dynamodb:BatchGetItem"], resources=[table("burn-fingerprints")]))
+            # BatchGetItem: per-call fallback. GetItem + Scan: the in-memory fingerprint cache
+            # (one version item per call, a full reload only when the minter bumped it).
+            actions=["dynamodb:BatchGetItem", "dynamodb:GetItem", "dynamodb:Scan"],
+            resources=[table("burn-fingerprints")]))
         interceptor_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[arn("secretsmanager", "secret:burn-system/fingerprint-key-*")]))

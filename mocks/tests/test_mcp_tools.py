@@ -68,8 +68,9 @@ async def test_all_contract_tools_round_trip(running_mcp, scenario):
     async with connect(url, first) as reader, connect(url, second) as notifier:
         tools = (await reader.list_tools()).tools
         definitions = json.loads((CONTRACTS / "mcp-tools.json").read_text())["tools"]
+        public = [{k: d[k] for k in ("name", "description", "inputSchema")} for d in definitions]
         assert [{"name": tool.name, "description": tool.description, "inputSchema": tool.inputSchema}
-                for tool in tools] == definitions
+                for tool in tools] == public  # resource_arg / accepts_secret_refs stay with the Gateway
         listing = await call(reader, "list_tickets")
         assert set(listing) == {"tickets"}
         tickets = listing["tickets"]

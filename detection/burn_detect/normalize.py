@@ -26,21 +26,23 @@ def _printable(raw: bytes) -> str | None:
     return None
 
 
-def _decoded(text: str):
+def _decoded_spans(text: str):
+    """Each decoding of `text` with where it came from: (value, encoding, (start, end)) for a
+    segment-level decode, or span None when the whole text was transformed."""
     decoded = unquote_plus(text)
     if decoded != text:
-        yield decoded, "url"
+        yield decoded, "url", None
     for match in _URL.finditer(text) if "://" in text else ():
         try:
             for _, value in parse_qsl(urlsplit(match[0]).query, keep_blank_values=True):
-                yield value, "url"
+                yield value, "url", match.span()
         except ValueError:
             continue
     if "\\" in text:
         try:
             value = json.loads(text)
             if isinstance(value, str):
-                yield value, "json"
+                yield value, "json", None
         except (ValueError, RecursionError):
             pass
         def unescape(match):
@@ -51,12 +53,12 @@ def _decoded(text: str):
                 return match[0]
         value = _ESCAPE.sub(unescape, text)
         if value != text:
-            yield value, "unicode"
+            yield value, "unicode", None
     for match in _HEX.finditer(text):
         if len(match[0]) % 2 == 0:
             value = _printable(bytes.fromhex(match[0]))
             if value:
-                yield value, "hex"
+                yield value, "hex", match.span()
     for match in _ENCODED.finditer(text):
         token = match[0]
         if len(token) % 4 == 1:
@@ -67,7 +69,12 @@ def _decoded(text: str):
             continue
         value = _printable(raw)
         if value:
-            yield value, "base64"
+            yield value, "base64", match.span()
+
+
+def _decoded(text: str):
+    for value, encoding, _ in _decoded_spans(text):
+        yield value, encoding
 
 
 def variants(text: str) -> list[tuple[str, str]]:
@@ -106,3 +113,24 @@ def variants(text: str) -> list[tuple[str, str]]:
 def candidates(text: str) -> set[str]:
     urls = (m[0] for m in _URL.finditer(text)) if "://" in text else ()
     return {text.strip(), *(match[0] for match in TOKENS.finditer(text)), *urls} - {""}
+
+
+def segments(text: str) -> list[tuple[str, tuple[int, int]]]:
+    """Decoded values that came from one known segment of `text`, with that segment's span.
+
+    Same decoders and depth as variants(). A value decoded inside a segment keeps the outer
+    segment's span (the whole encoded segment is what carries it). Whole-text transforms
+    (url-decoding everything, unicode escapes, separators, reversal) have no span and are
+    left out, so a caller knows those matches cannot be located.
+    """
+    if len(text) > MAX_TEXT:
+        raise ValueError("payload exceeds scanner size limit")
+    found = []
+    for value, _, span in _decoded_spans(text):
+        if span is None:
+            continue
+        found.append((value, span))
+        found.extend((inner, span) for inner, _, _ in _decoded_spans(value))
+        if len(found) >= MAX_VARIANTS:
+            break
+    return found[:MAX_VARIANTS]

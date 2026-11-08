@@ -86,6 +86,25 @@ replays the pre-rotation key without anyone having stored a copy.
 - Registered rows go to `burn-fingerprints`. Rows are never deleted on rotation: they are marked
   `status=rotated`, so a leak of an old key is still caught and attributed.
 
+### Secret references
+- In tool output the Gateway replaces every located credential it recognizes with
+  `{{burn:ref:<secret_ref>}}` (role field `references`: `replace` default, `report`, `off`), so the agent
+  never holds the value and nothing it sends can leak it. In a connection string only the password is
+  replaced, so host and database stay readable. Canaries are never replaced.
+- If a recognized, non-canary credential cannot be located exactly (a fragment, an unknown span, or a copy
+  still found after replacing), the whole tool response is withheld with a `refused` event.
+- Ledger rows (`burn-exposures`) get `status`: `referenced` when the agent only got the reference, `seen`
+  when the plaintext reached it (`seen` wins once it happens). A burn never flags a credential whose
+  exposures are all `referenced`.
+- Tools that may take a reference as an argument list it in `accepts_secret_refs` (`mcp-tools.json`); the
+  Gateway swaps it for the value only there, only for a secret the session owns or has in its ledger, and
+  never for `send_message` or `notify`.
+- Ledger rows record `source_ref` = `<tool>:<resource>` from the tool's `resource_arg`
+  (`burn_contracts.tools.source_ref`), so `POST /burn/by-source` can find everyone who read a source.
+- `burn-fingerprints` holds one extra item, `fingerprint = "_version"` (`names.FINGERPRINTS_VERSION_KEY`),
+  which the minter bumps on every register, rotate and delete. The Gateway keeps all fingerprints in
+  memory and reloads them only when that number changes.
+
 ### Placeholders in scenario files
 Scenario `files[].content` and `customers[].notes` may contain:
 - `{{cred:<agent_id>:api_key}}`
@@ -106,7 +125,7 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 | Table | Keys | GSIs | Writers |
 |---|---|---|---|
 | `burn-events` | PK `stream` (= `"all"`), SK `event_id` | `by_agent` (PK `agent_id`, SK `event_id`) | gateway, proxy, burn_api, minter (provider) |
-| `burn-exposures` (the ledger) | PK `agent_id`, SK `secret_ref_or_fp` | none | gateway (recorded, inherited) |
+| `burn-exposures` (the ledger) | PK `agent_id`, SK `secret_ref_or_fp` | `by_source` (PK `source_ref`, SK `first_seen`) | gateway (recorded, inherited) |
 | `burn-credentials` | PK `secret_ref` | `by_owner` (PK `owner_agent_id`) | minter |
 | `burn-fingerprints` | PK `fingerprint` | `by_secret` (PK `secret_ref`) | minter |
 | `burn-sessions` | PK `session_id` | `by_agent` (PK `agent_id`), `by_client` (PK `client_id`) | burn_api |
@@ -121,7 +140,8 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 `burn-sessions` rows keep their existing fields (`session_id`, `agent_id`, `client_id`, `status`,
 `tools`, `send_to`, `created_at`). Instances add optional fields, never renaming or removing one:
 `role`, `parent_session`, `token_id`, `owner`, `egress`, `credentials` (the narrowed credential types
-minted for the instance), `last_seen`, `exited_at`.
+minted for the instance), `last_seen`, `exited_at`, `session_token_sha256` (the session token itself
+is returned once in the join reply and never stored; the supervisor never hands it to the agent).
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
 `burn-enroll-tokens` rows: `token_id`, `role`, `secret_sha256`, `uses`, `uses_left`, `expires_at`,
@@ -137,8 +157,11 @@ minted for the instance), `last_seen`, `exited_at`.
   intersected with the parent's (null on one side means take the other side's list).
 - The session row's `tools` comes from the role, so the Gateway enforces it as before.
 - A role instance's `POST /sessions` reply carries its own secret values once (`secrets`: badge, api_key,
-  aws_key), so the host needs only the token. A join token is therefore a credential (it yields
+  aws_key, session_token), so the host needs only the token. A join token is therefore a credential (it yields
   credentials once): keep it out of shell history, logs and files.
+- Auth: a join (`{role, enroll_token}` and nothing else) needs no admin token. An instance's own calls,
+  heartbeat, exit and `{role, parent_session}` spawning a child of it, accept its session token
+  (`bst_...`) as `Authorization: Bearer`. Every other route needs the admin token.
 - A role's `egress` list narrows every outbound destination except Burn's own Gateway, which it never
   blocks: the Gateway already checks tools per role. Model endpoints such as Bedrock are narrowed like any
   other host, so a role that calls a model lists it.

@@ -10,6 +10,7 @@ from burn_contracts import names
 import auth
 import burn
 import burn_scopes
+import by_source
 import canary
 import db
 import errors
@@ -75,6 +76,8 @@ def route(method: str, path: str, query: dict, body: dict):
     swarm = _swarm_route(method, path, query, body)
     if swarm is not None:
         return swarm
+    if method == "POST" and path == "/burn/by-source":
+        return 200, by_source.burn_by_source(body)
     return 404, {"error": "no such route"}
 
 
@@ -130,11 +133,14 @@ def handler(event, context=None):
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     if http["method"] == "OPTIONS":
         return _preflight(headers)
-    if not auth.is_authorized(headers):
-        return _resp(401, {"error": "missing or invalid x-burn-demo-token"})
+    # Parsed once: auth decides on the same body the route then acts on.
+    request_body = _json_body(event)
+    if not auth.allows(http["method"], http["path"], headers, request_body):
+        return _resp(401, {"error": "missing or invalid x-burn-demo-token (an instance's own calls may send "
+                                    "its session token as Authorization: Bearer instead)"})
     try:
         status, body = route(http["method"], http["path"], event.get("queryStringParameters") or {},
-                             _json_body(event))
+                             request_body)
     except sessions.NotFound as exc:
         return _resp(404, {"error": f"not found: {exc}"})
     except errors.ApiError as exc:

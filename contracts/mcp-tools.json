@@ -1,38 +1,72 @@
 {
-  "description": "MCP tools exposed through the AgentCore Gateway (real: /gateway tool Lambda; mock: /mocks/mcp_tools_mock.py). Both load this file so names and input schemas cannot drift. Tool data comes from the loaded scenario (contracts/scenario.schema.json), never from code. The pre-call interceptor injects the caller's identity as the argument `burn_caller_agent_id`; it is NOT part of the public input schemas below, and a value sent by the agent is overwritten.",
-  "injected_arguments": ["burn_caller_agent_id"],
+  "description": "MCP tools exposed through the AgentCore Gateway (real: /gateway tool Lambda; mock: /mocks/mcp_tools_mock.py). Both load this file so names and input schemas cannot drift. Tool data comes from the loaded scenario (contracts/scenario.schema.json), never from code. The pre-call interceptor injects the caller's identity as the argument `burn_caller_agent_id`; it is NOT part of the public input schemas below, and a value sent by the agent is overwritten. `resource_arg` names the argument that identifies what the tool read (null = none); the Gateway records it on ledger rows as source_ref = '<tool>:<value>'. `accepts_secret_refs` lists the arguments in which the Gateway may swap a {{burn:ref:<secret_ref>}} reference for the real value (never for send_message or notify).",
+  "injected_arguments": [
+    "burn_caller_agent_id"
+  ],
   "tools": [
     {
       "name": "list_tickets",
       "description": "List open support tickets (id and subject).",
-      "inputSchema": { "type": "object", "properties": {}, "required": [] }
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "resource_arg": null,
+      "accepts_secret_refs": []
     },
     {
       "name": "read_ticket",
       "description": "Read one support ticket by id.",
       "inputSchema": {
         "type": "object",
-        "properties": { "ticket_id": { "type": "string", "description": "Ticket id, e.g. from list_tickets." } },
-        "required": ["ticket_id"]
-      }
+        "properties": {
+          "ticket_id": {
+            "type": "string",
+            "description": "Ticket id, e.g. from list_tickets."
+          }
+        },
+        "required": [
+          "ticket_id"
+        ]
+      },
+      "resource_arg": "ticket_id",
+      "accepts_secret_refs": []
     },
     {
       "name": "read_config",
       "description": "Read a configuration or log file by path.",
       "inputSchema": {
         "type": "object",
-        "properties": { "path": { "type": "string", "description": "File path, e.g. from a ticket." } },
-        "required": ["path"]
-      }
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path, e.g. from a ticket."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "resource_arg": "path",
+      "accepts_secret_refs": []
     },
     {
       "name": "query_customers",
       "description": "Look up customer records by name, email or customer id.",
       "inputSchema": {
         "type": "object",
-        "properties": { "query": { "type": "string" } },
-        "required": ["query"]
-      }
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "resource_arg": null,
+      "accepts_secret_refs": []
     },
     {
       "name": "send_message",
@@ -40,16 +74,32 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "to": { "type": "string", "description": "Recipient agent id." },
-          "text": { "type": "string" }
+          "to": {
+            "type": "string",
+            "description": "Recipient agent id."
+          },
+          "text": {
+            "type": "string"
+          }
         },
-        "required": ["to", "text"]
-      }
+        "required": [
+          "to",
+          "text"
+        ]
+      },
+      "resource_arg": null,
+      "accepts_secret_refs": []
     },
     {
       "name": "read_inbox",
       "description": "Read and clear messages other agents sent to you.",
-      "inputSchema": { "type": "object", "properties": {}, "required": [] }
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "resource_arg": null,
+      "accepts_secret_refs": []
     },
     {
       "name": "notify",
@@ -57,11 +107,21 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "channel": { "type": "string", "description": "e.g. email:<customer email> or slack:#support" },
-          "text": { "type": "string" }
+          "channel": {
+            "type": "string",
+            "description": "e.g. email:<customer email> or slack:#support"
+          },
+          "text": {
+            "type": "string"
+          }
         },
-        "required": ["channel", "text"]
-      }
+        "required": [
+          "channel",
+          "text"
+        ]
+      },
+      "resource_arg": null,
+      "accepts_secret_refs": []
     }
   ]
 }

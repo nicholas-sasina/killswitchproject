@@ -3,6 +3,7 @@
 Order matters: credentials first (idempotent, safe to repeat), then the badge, then
 the session row. A session row only exists once everything it needs exists.
 """
+import hashlib
 import json
 import secrets
 import time
@@ -193,7 +194,7 @@ def start_instance(role_name: str, enroll_token: str | None = None, parent_sessi
 
 def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
     agent_id = _new_instance_agent_id(role_name)
-    minted, badge = False, None
+    minted, badge, session_id = False, None, None
     try:
         credentials = []
         if limits["credentials"]:
@@ -208,6 +209,8 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         # Read inside the try: if the values cannot be read the instance has nothing to run with,
         # so the join fails and is cleaned up like any other failed join.
         own_secrets = _own_secrets(badge, credentials)
+        # The supervisor's credential for this instance's own calls (heartbeat, exit, spawn). Only its hash is kept.
+        own_secrets["session_token"] = names.SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
         now = _now()
         db.table(names.SESSIONS_TABLE).put_item(Item={
@@ -216,9 +219,12 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
             "role": role_name, "parent_session": parent_session, "token_id": token_id,
             "owner": role.get("owner"), "egress": limits["egress"], "credentials": limits["credentials"],
             "last_seen": now, "exited_at": None,
+            "session_token_sha256": session_token_hash(own_secrets["session_token"]),
+            # Only when the role sets it: an absent field means the Gateway's default mode applies.
+            **({"references": role["references"]} if role.get("references") else {}),
         })
     except BaseException:
-        _discard_partial_instance(agent_id, minted, badge)
+        _discard_partial_instance(agent_id, minted, badge, session_id)
         raise
     _recheck_after_write(agent_id, session_id, badge, token_id, parent_session)
     # The row exists and the token use is spent. A failed event write must not look like a failed
@@ -236,6 +242,10 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         "tools": limits["tools"], "egress": limits["egress"],
         "secrets": own_secrets,  # returned once; never logged, stored or sent again
     }
+
+
+def session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 SECRET_READ_ATTEMPTS = 4
@@ -296,17 +306,29 @@ def _recheck_after_write(agent_id, session_id, badge, token_id, parent_session):
     raise errors.ApiError(403, "Parent session is not active" if parent_session else "Join token revoked")
 
 
-def _discard_partial_instance(agent_id: str, minted: bool, badge: dict | None):
+def _discard_partial_instance(agent_id: str, minted: bool, badge: dict | None, session_id: str | None = None):
     """A join failed before its session row existed: remove what it created, best effort.
 
-    Without this every client retry (for example after a Cognito throttle) would leave another
-    IAM user, key and secret behind with no session pointing at them.
+    No session row means reset can never find this agent (instance ids are unique), so everything
+    created for it goes now: the badge client and secret, the canary (issued once the session id
+    exists) and the credentials. Without this every client retry, for example after a Cognito
+    throttle, would leave another IAM user, key, secret and canary behind.
     """
     if badge:
         try:
             badges.delete_badge(badge["client_id"])
         except Exception as exc:
             print(f"cleanup: delete_badge failed for {agent_id}: {type(exc).__name__}")
+        try:  # it may not have been written yet (a no-op then); a missing permission is not fatal
+            boto3.client("secretsmanager", region_name=names.REGION).delete_secret(
+                SecretId=names.agent_secret_ref(agent_id, "badge"), ForceDeleteWithoutRecovery=True)
+        except Exception as exc:
+            print(f"cleanup: badge secret delete failed for {agent_id}: {type(exc).__name__}")
+    if session_id:
+        try:
+            minter_client.call("DELETE", f"/agents/{agent_id}/canaries")
+        except Exception as exc:
+            print(f"cleanup: canary delete failed for {agent_id}: {type(exc).__name__}")
     if minted:
         try:
             minter_client.call("DELETE", f"/agents/{agent_id}/credentials")

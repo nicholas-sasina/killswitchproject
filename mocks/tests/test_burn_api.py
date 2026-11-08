@@ -177,3 +177,34 @@ def test_roles_carry_canaries_and_auto_burn(client):
     body = {"name": "helper", "tools": ["read_ticket"], "auto_burn": False}
     role = check(client.post("/roles", json=body), "/roles", "post", 201)
     assert (role["canaries"], role["auto_burn"]) == (True, False)
+
+
+def test_ledger_entries_carry_exposure_and_source(client, scenario):
+    agent_id = scenario[1]["agents"][0]["id"]
+    start(client, agent_id)
+    client.app.state.mock.tick()
+    entries = check(client.get(f"/agents/{agent_id}/ledger"), "/agents/{agent_id}/ledger")["entries"]
+    assert entries and all(e["exposure"] == "seen" and "source_ref" in e for e in entries)
+
+
+def test_burn_by_source_burns_readers_and_who_they_messaged(client, scenario):
+    agents = [agent["id"] for agent in scenario[1]["agents"]]
+    shared = shared_secret_ref(scenario[1]["shared_credentials"][0]["name"])
+    state = client.app.state.mock
+    for agent_id in agents[:2]:
+        start(client, agent_id)
+    state.record(agents[0], shared, tool="read_ticket")
+    state.ledgers[agents[0]][shared]["source_ref"] = "read_ticket:T-42"
+    state.record(agents[1], shared, sender=agents[0], tool="send_message")
+    body = check(client.post("/burn/by-source", json={"source_ref": "read_ticket:T-42"}), "/burn/by-source", "post")
+    assert {(r["agent_id"], r["via"]) for r in body["readers"]} == {(agents[0], "read"), (agents[1], "handoff")}
+    assert {b["agent_id"] for b in body["burned"]} == {agents[0], agents[1]}
+    assert client.post("/burn/by-source", json={"source_ref": "read_ticket:nobody"}).status_code == 404
+
+
+def test_roles_default_references_to_replace(client):
+    role = check(client.post("/roles", json={"name": "reader2", "tools": ["read_ticket"]}), "/roles", "post", 201)
+    assert role["references"] == "replace"
+    role = check(client.post("/roles", json={"name": "auditor", "tools": ["read_ticket"], "references": "report"}),
+                 "/roles", "post", 201)
+    assert role["references"] == "report"

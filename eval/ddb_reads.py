@@ -38,7 +38,8 @@ def measure(start: str, end: str, calls: int, tool: str, output_bytes: int) -> d
             Namespace="AWS/DynamoDB", MetricName=metric, Dimensions=[{"Name": "TableName", "Value": table}],
             StartTime=start, EndTime=end, Period=60, Statistics=["Sum"])["Datapoints"]
         total = sum(p["Sum"] for p in points)
-        per_table[table] = {"metric": metric, "sum_units": total, "units_per_call": round(total / calls, 3)}
+        per_table[table] = {"metric": metric, "sum_units": total, "units_per_call": round(total / calls, 3),
+                            "data_points": len(points)}
     return {"window": [start, end], "calls": calls, "tool": tool, "output_bytes": output_bytes,
             "tables": per_table,
             "read_units_per_call": round(sum(v["units_per_call"] for v in per_table.values() if "Read" in v["metric"]), 2),
