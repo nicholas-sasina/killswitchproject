@@ -1,6 +1,8 @@
 import base64
 from dataclasses import dataclass, field
 import json
+import hashlib
+import hmac
 import secrets
 import socket
 from unittest.mock import patch
@@ -15,6 +17,7 @@ from burn_contracts.fingerprint import fingerprint
 from burn_detect import Scanner, SessionWindow
 from proxy.addon import BurnProxy
 from proxy.policy import ExitCheck, Settings, public_ip
+from proxy.proof import HEADER as PROOF_HEADER, make_session_proof
 from test_scanner import Generated, registered
 
 
@@ -117,6 +120,131 @@ def test_private_addresses_and_multicast_are_rejected():
     assert not public_ip("::ffff:169.254.169.254")
 
 
+@pytest.mark.parametrize("egress,allowed", [
+    (None, True), (["sink"], True), (["SINK."], True), ([], False),
+    (["s3.amazonaws.com"], False), ("sink", False), (["*"], False),
+    ([None], False), (["https://sink"], False), (["sink:8081"], False),
+    ([""], False), ([".."], False), (["-sink"], False), (["sink.."], False),
+])
+@pytest.mark.parametrize("connect", [False, True])
+def test_session_egress_narrows_global_allowlist(setup, egress, allowed, connect):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    state.session = lambda *_: {"status": "active", "egress": egress}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.22.0.5", 8081))]):
+        proxy._process(flow, connect=connect)
+    assert (flow.response is None) == allowed
+
+
+def test_role_cannot_expand_global_destinations(setup):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    state.session = lambda *_: {"status": "active", "egress": ["outsider.example.test"]}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = "https://outsider.example.test/"
+    proxy._process(flow)
+    assert json.loads(flow.response.content)["reason"] == "destination_not_allowed"
+
+
+def test_sdk_list_buckets_request_remains_allowed_without_sending_it(setup):
+    import boto3
+    scanner, _, agent, _, checker = setup
+    client = boto3.client("s3", region_name="us-east-1", aws_access_key_id="testing", aws_secret_access_key="testing")
+    class Captured(Exception):
+        pass
+    captured = []
+    def stop(request, **kwargs):
+        captured.append(request)
+        raise Captured()
+    client.meta.events.register("before-send.s3.ListBuckets", stop)
+    with pytest.raises(Captured):
+        client.list_buckets()
+    req = captured[0]
+    assert checker.check(url=req.url, method=req.method, body="", headers=[],
+                         agent_id=agent, window=SessionWindow()).reason is None
+
+
+@pytest.mark.parametrize("host", ["s3.amazonaws.com", "s3.us-east-1.amazonaws.com"])
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/", ""), ("PUT", "/bucket/key", "data"),
+    ("GET", "/bucket/key", ""), ("DELETE", "/bucket/key", ""),
+    ("POST", "/", ""), ("HEAD", "/", ""),
+    ("GET", "/?list-type=2", ""), ("GET", "/", "data"),
+    ("GET", "/%2f", ""), ("GET", "//", ""),
+])
+def test_s3_only_allows_list_buckets(setup, host, method, path, body):
+    _, _, agent, _, checker = setup
+    result = checker.check(url=f"https://{host}{path}", headers=[], body=body,
+                           method=method, agent_id=agent, window=SessionWindow())
+    assert result.reason == (None if (method, path, body) == ("GET", "/", "") else "s3_operation_not_allowed")
+
+
+@pytest.mark.parametrize("method,path,headers", [
+    ("PUT", "/bucket/key", {}), ("GET", "/", {"Content-Length": "1"}),
+    ("GET", "/", {"Transfer-Encoding": "chunked"}),
+])
+def test_s3_is_refused_before_forwarding_body(setup, method, path, headers):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = "https://s3.amazonaws.com" + path
+    flow.request.method = method
+    flow.request.headers.pop("content-length", None)
+    flow.request.headers.update(headers)
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.231.1.1", 443))]):
+        proxy._process(flow, headers_only=True)
+    assert flow.response.status_code == 403
+    assert json.loads(flow.response.content)["reason"] == "s3_operation_not_allowed"
+
+
+@pytest.mark.parametrize("headers", [
+    [("Host", "bucket.s3.amazonaws.com")],
+    [("Host", "s3.amazonaws.com:80")],
+    [("Host", "s3.amazonaws.com:0")],
+    [("Host", "user@s3.amazonaws.com")],
+    [("Host", "s3.amazonaws.com/path")],
+    [("Host", "s3.amazonaws.com\t")],
+    [("Host", "s3.amazonaws.com"), ("HOST", "s3.amazonaws.com")],
+])
+def test_http_authority_cannot_select_another_upstream_route(setup, headers):
+    _, _, agent, _, checker = setup
+    result = request(checker, agent, url="https://s3.amazonaws.com/", headers=headers)
+    assert result.reason == "destination_authority_mismatch"
+
+
+@pytest.mark.parametrize("host", ["s3.amazonaws.com", "S3.AMAZONAWS.COM.", "s3.amazonaws.com:443"])
+def test_equivalent_s3_authorities_remain_allowed(setup, host):
+    _, _, agent, _, checker = setup
+    assert request(checker, agent, url="https://s3.amazonaws.com/", headers=[("Host", host)]).reason is None
+
+
+@pytest.mark.parametrize("url,reason", [
+    ("https://s3.amazonaws.com:0/", "destination_port_not_allowed"),
+    ("http://sts.amazonaws.com:443/", "destination_scheme_not_allowed"),
+    ("https://user@s3.amazonaws.com/", "destination_authority_mismatch"),
+])
+def test_url_transport_and_authority_are_unambiguous(setup, url, reason):
+    _, _, agent, _, checker = setup
+    assert request(checker, agent, url=url).reason == reason
+
+
+def test_s3_host_header_bypass_is_refused_at_request_headers(setup):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state, body=b"")
+    flow.request.url = "https://s3.amazonaws.com/"
+    flow.request.method = "GET"
+    flow.request.headers["Host"] = "bucket.s3.amazonaws.com"
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("54.231.1.1", 443))]):
+        proxy._process(flow, headers_only=True)
+    assert json.loads(flow.response.content)["reason"] == "destination_authority_mismatch"
+
+
 def flow_for(state, body=b"hello"):
     flow = tflow.tflow()
     flow.request = http.Request.make("POST", "http://sink:8081/webhook", body,
@@ -171,7 +299,16 @@ def test_host_header_cannot_skip_sink_body_check(setup):
     flow.request.headers["Host"] = "gateway.example.test"
     with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.22.0.5", 8081))]):
         proxy._process(flow)
-    assert json.loads(flow.response.content)["reason"] == "credential_detected"
+    assert json.loads(flow.response.content)["reason"] == "destination_authority_mismatch"
+    assert state.events[-1]["action"] == "blocked"
+    assert value not in json.dumps(state.events)
+
+
+def test_tls_sink_cannot_be_downgraded_to_http(setup):
+    scanner, _, agent, _, _ = setup
+    checker = ExitCheck(scanner, Settings(sink_url="https://sink:8443"))
+    assert request(checker, agent, url="http://sink:8443/webhook").reason == "destination_scheme_not_allowed"
+    assert request(checker, agent, url="https://sink:8443/webhook").reason is None
 
 
 def test_private_dns_destination_produces_blocked_event(setup):
@@ -184,3 +321,73 @@ def test_private_dns_destination_produces_blocked_event(setup):
         proxy._process(flow)
     assert json.loads(flow.response.content)["reason"] == "private_destination"
     assert state.events[-1]["action"] == "blocked"
+
+
+def test_provider_proof_binds_session_and_timestamp_to_hmac_key():
+    key = secrets.token_bytes(32)
+    session = "sess.with.dots:and-dashes"
+    proof = make_session_proof(session, key, now=1000.9)
+    expected = hmac.new(key, f"burn-session-proof:v1:{session}:1000".encode(), hashlib.sha256).hexdigest()
+    assert proof == f"v1.{session}.1000.{expected}"
+    assert make_session_proof(session + "x", key, now=1000) != proof
+
+
+@pytest.mark.parametrize("egress", [[], ["provider.example.test"], None])
+@pytest.mark.parametrize("connect", [False, True])
+def test_valid_role_policy_preserves_gateway_access(setup, egress, connect):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    state.session = lambda *_: {"status": "active", "egress": egress}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = settings.gateway_url
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow, connect=connect)
+    assert flow.response is None
+    assert settings.role_reason("bedrock-runtime.us-east-1.amazonaws.com", {"egress": []}) == "role_destination_not_allowed"
+    assert settings.role_reason("gateway.example.test", {"egress": "invalid"}) == "role_policy_invalid"
+
+
+@pytest.mark.parametrize("session", ["", "x" * 129, "sess\n", "sess/invalid", None])
+def test_invalid_provider_proof_session_fails_closed(session):
+    with pytest.raises(ValueError):
+        make_session_proof(session, secrets.token_bytes(32))
+
+
+@pytest.mark.parametrize("destination", ["provider", "sink", "gateway"])
+def test_only_authorized_provider_requests_get_fresh_proxy_proof(setup, destination):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = {"provider": settings.provider_url, "gateway": settings.gateway_url,
+                        "sink": settings.sink_url}[destination]
+    flow.request.headers.add(PROOF_HEADER, "agent-forged")
+    flow.request.headers.add("X-Burn-Session-Proof", "another-forged")
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow, headers_only=True)
+        assert PROOF_HEADER not in flow.request.headers
+        assert flow.response is None
+        with patch("proxy.proof.time.time", return_value=1000):
+            proxy._process(flow)
+    assert flow.response is None
+    if destination == "provider":
+        assert flow.request.headers.get_all(PROOF_HEADER) == [make_session_proof(state.session_id, scanner.key, now=1000)]
+    else:
+        assert PROOF_HEADER not in flow.request.headers
+    assert not state.events
+
+
+@pytest.mark.parametrize("active,leak", [(False, False), (True, True)])
+def test_refused_provider_requests_do_not_get_proof(setup, active, leak):
+    scanner, value, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent, active=active)
+    state.lookup = scanner.lookup
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state, value.encode() if leak else b"safe")
+    flow.request.url = settings.provider_url
+    flow.request.headers[PROOF_HEADER] = "forged"
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow)
+    assert flow.response.status_code == 403
+    assert PROOF_HEADER not in flow.request.headers
