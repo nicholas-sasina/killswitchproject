@@ -156,6 +156,9 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
     if progress_url:
         env[PROGRESS_URL_ENV] = progress_url
     env.update(task or {})  # only what task_values checked; scrub() already removed the host's own copies
+    # No AWS SDK may fall back to the host's instance role through the metadata service: the instance's own key, or
+    # none. AWS_* cannot be passed through, so nothing undoes this.
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
     if credentials.aws_access_key_id:
         env["AWS_ACCESS_KEY_ID"] = credentials.aws_access_key_id
         env["AWS_SECRET_ACCESS_KEY"] = credentials.aws_secret_access_key
@@ -190,6 +193,7 @@ def describe(host_env: dict, proxy_base: str = "", show: bool = False) -> list[s
               f"  {TASK_ENV} / {RESUME_ENV}=<passed on from the host when set, if they hold item ids only>",
               "  BURN_LOCAL_TOKEN=<random per run; the bearer both local endpoints require>",
               "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY=<its own AWS key>",
+              "  AWS_EC2_METADATA_DISABLED=true  (no fallback to the host's instance role)",
               "  BURN_API_KEY=<its own provider key>"]
     if proxy_base:
         parts = urlsplit(proxy_base)

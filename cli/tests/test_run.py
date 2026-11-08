@@ -73,7 +73,9 @@ def test_child_gets_its_own_values_and_none_of_the_hosts(stack):
     env = json.loads(out.read_text())
     for name, value in HOST_SECRETS.items():
         assert name not in env or env[name] != value, name
-    assert not [k for k in env if k.startswith("AWS_") and k not in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION")]
+    assert not [k for k in env if k.startswith("AWS_") and k not in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION",
+                                                                   "AWS_EC2_METADATA_DISABLED")]
+    assert env["AWS_EC2_METADATA_DISABLED"] == "true"  # no SDK falls back to the host's instance role
     assert env["AWS_ACCESS_KEY_ID"].startswith("AKIA") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
     assert env["AWS_SECRET_ACCESS_KEY"] != "host-secret" and env["BURN_API_KEY"].startswith("mpk_live_")
     session = stack.calls("POST", "/instances")[0]

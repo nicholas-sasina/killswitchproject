@@ -94,9 +94,15 @@ def test_claude_gets_bedrock_with_the_instances_own_key(stack, fake_claude):
 
 
 def test_the_presets_variables_hold_no_secret():
-    assert set(harness.CLAUDE.env) & {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-                                      "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} == set()
-    assert not [k for k in harness.CLAUDE.env if k.startswith("BURN_")]
+    names = set(harness.CLAUDE.environment(has_aws_key=True))
+    assert names & {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_EC2_METADATA_DISABLED",
+                    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"} == set()
+    assert not [k for k in names if k.startswith("BURN_")]
+
+
+def test_without_the_instances_own_key_the_preset_sets_no_model():
+    assert harness.CLAUDE.environment(has_aws_key=False) == harness.CLAUDE.env
+    assert "CLAUDE_CODE_USE_BEDROCK" not in harness.CLAUDE.env and "AWS_REGION" not in harness.CLAUDE.env
 
 
 def test_claude_home_connects_burns_tools_and_skips_every_first_run_prompt(stack, fake_claude):
@@ -160,14 +166,21 @@ def test_preset_files_are_chowned_to_the_agent_user(stack, fake_claude, monkeypa
 def test_burn_run_says_it_used_the_preset(stack, fake_claude, capfd):
     run_claude(stack, fake_claude)
     err = capfd.readouterr().err
-    assert "burn: claude preset: Claude Code on Bedrock" in err and "no aws_key" not in err
+    assert f"burn: claude preset: Burn's tools, and Bedrock, {MODEL} with the instance's own AWS key" in err
+    assert "no aws_key" not in err
 
 
-def test_a_role_without_an_aws_key_is_told_claude_has_no_model(stack, fake_claude, capfd):
+def test_a_role_without_an_aws_key_gets_burns_tools_but_no_model_settings(stack, fake_claude, capfd):
     stack.roles["worker"]["credentials"] = ["api_key"]
-    env = run_claude(stack, fake_claude)["env"]
-    assert "AWS_ACCESS_KEY_ID" not in env
-    assert "role worker has no aws_key, so claude has no model" in capfd.readouterr().err
+    seen = run_claude(stack, fake_claude)
+    env = seen["env"]
+    # Without its own key, Bedrock would fall back to another AWS credential: none of the model settings are set
+    for name in ("AWS_ACCESS_KEY_ID", "CLAUDE_CODE_USE_BEDROCK", "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+        assert name not in env, name
+    assert env["AWS_EC2_METADATA_DISABLED"] == "true" and env["AWS_REGION"] == "eu-west-1"  # the host's, as without
+    assert env["ENABLE_TOOL_SEARCH"] == "false" and ".claude.json" in seen["files"]  # Burn's tools still work
+    err = capfd.readouterr().err
+    assert "claude preset: Burn's tools only. Role worker has no aws_key" in err and "own AWS key" not in err
 
 
 def test_allow_env_wins_over_a_presets_default(stack, fake_claude):

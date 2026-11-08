@@ -19,11 +19,17 @@ BEDROCK_REGION = "us-east-1"
 
 @dataclass(frozen=True)
 class Preset:
+    """Variables are non-secret; burn run's own values, and --allow-env pass-throughs, win over them."""
     name: str
-    summary: str  # one line for burn run's stderr: what the preset set up
-    env: dict  # non-secret variables; burn run's own values, and --allow-env pass-throughs, win over these
+    env: dict  # always set
     files: Callable[[str], dict]  # the agent's working directory -> {path relative to HOME: JSON content}
-    needs_aws_key: bool = False  # the model is called with the instance's own AWS key
+    model_env: dict  # set only when the instance has its own AWS key: the model is called with that key
+    model: str = ""  # for burn run's stderr: what model_env sets up
+
+    def environment(self, has_aws_key: bool) -> dict:
+        """The variables to set. Without the instance's own key the model settings are left out, so the harness
+        never falls back to another AWS credential (a profile, an instance role) for its model."""
+        return {**self.env, **(self.model_env if has_aws_key else {})}
 
 
 def _claude_files(cwd: str) -> dict:
@@ -41,8 +47,16 @@ def _claude_files(cwd: str) -> dict:
 
 CLAUDE = Preset(
     name="claude",
-    summary=f"Claude Code on Bedrock ({BEDROCK_MODEL}, the instance's own AWS key) with Burn's tools",
     env={
+        # No auto-update into a HOME that is thrown away at exit, and no telemetry the egress proxy would refuse.
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        # Burn's few tools go straight into the request. Behind tool search, Haiku on Bedrock found them but
+        # could not call them.
+        "ENABLE_TOOL_SEARCH": "false",
+    },
+    files=_claude_files,
+    model=f"Bedrock, {BEDROCK_MODEL}",
+    model_env={
         "CLAUDE_CODE_USE_BEDROCK": "1",
         "AWS_REGION": BEDROCK_REGION,
         "ANTHROPIC_MODEL": BEDROCK_MODEL,
@@ -52,14 +66,7 @@ CLAUDE = Preset(
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": BEDROCK_MODEL,
         "ANTHROPIC_DEFAULT_SONNET_MODEL": BEDROCK_MODEL,
         "ANTHROPIC_DEFAULT_OPUS_MODEL": BEDROCK_MODEL,
-        # No auto-update into a HOME that is thrown away at exit, and no telemetry the egress proxy would refuse.
-        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        # Burn's few tools go straight into the request. Behind tool search, Haiku on Bedrock found them but
-        # could not call them.
-        "ENABLE_TOOL_SEARCH": "false",
     },
-    files=_claude_files,
-    needs_aws_key=True,
 )
 
 PRESETS = {CLAUDE.name: CLAUDE}

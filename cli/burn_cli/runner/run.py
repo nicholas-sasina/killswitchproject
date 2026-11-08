@@ -157,7 +157,8 @@ class Instance:
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
                         spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token,
                         progress_url=spawn.progress_url, task=self._task,
-                        preset_env=self.preset.env if self.preset else None, allow=self.allow_env)
+                        preset_env=self.preset.environment(bool(creds.aws_access_key_id)) if self.preset else None,
+                        allow=self.allow_env)
         self._announce(creds, session)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
@@ -206,10 +207,11 @@ class Instance:
     def _announce(self, creds, session: dict) -> None:
         """Say on stderr what the agent gets beyond its own values: a preset, and anything passed through."""
         if preset := self.preset:
-            log(f"{preset.name} preset: {preset.summary}")
-            if preset.needs_aws_key and not creds.aws_access_key_id:
-                log(f"role {session.get('role', self.role)} has no aws_key, so {preset.name} has no model; "
-                    "add aws_key to the role's credentials")
+            if creds.aws_access_key_id:
+                log(f"{preset.name} preset: Burn's tools, and {preset.model} with the instance's own AWS key")
+            else:
+                log(f"{preset.name} preset: Burn's tools only. Role {session.get('role', self.role)} has no aws_key, "
+                    f"so {preset.name} gets no model settings; add aws_key to the role, or pass a key with --allow-env")
         for name in self.allow_env:
             if name in self.host_env:
                 log(f"{name} passes through to the agent; a burn cannot revoke it")

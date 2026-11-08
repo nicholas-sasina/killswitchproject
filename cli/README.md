@@ -77,6 +77,7 @@ Where nobody signs in, give `burn run` a join token. A join token always wins ov
 | `BURN_MCP_URL` | Burn's tools: MCP over streamable HTTP, on 127.0.0.1 |
 | `BURN_LOCAL_TOKEN` | The bearer the local endpoints require |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | The instance's own AWS key, when the role has `aws_key` |
+| `AWS_EC2_METADATA_DISABLED` | `true`, so no AWS SDK falls back to the host's instance role |
 | `BURN_API_KEY` | The instance's own provider key, when the role has `api_key` |
 | `BURN_SPAWN_URL`, `BURN_PROGRESS_URL` | Start a child instance; report task progress (see [`burn run`](#burn-run)) |
 | `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE` | Who it is |
@@ -97,7 +98,8 @@ the Gateway, so the agent never holds the badge.
 burn run claude                                  # interactive
 burn run claude -p "Summarise ticket T-1"        # one prompt; Burn's tools need no flag
 ```
-It runs on Bedrock with the instance's own AWS key (see [Models](#models)). In the instance's new `HOME`, `burn run`
+It runs on Bedrock with the instance's own AWS key (see [Models](#models)). A role without `aws_key` gets Burn's
+tools but no model settings, so Claude Code never reaches for another AWS credential. In the instance's new `HOME`, `burn run`
 writes a `.claude.json` that connects Burn's MCP server, skips onboarding and trusts the current directory, and a
 `.claude/settings.json` that allows the `mcp__burn` tools, which the role already limits. The server's entry says
 `${BURN_MCP_URL}` and `Bearer ${BURN_LOCAL_TOKEN}`, which Claude Code expands, so no token is written to a file.
@@ -190,8 +192,9 @@ The instance's own AWS key calls Bedrock, so every harness above can use it, and
 from the model as well as its tools. That key may call only the models the stack allows: this repository's stack
 allows Claude Haiku 4.5, `us.anthropic.claude-haiku-4-5-20251001-v1:0`, in us-east-1.
 
-`burn run` sets this up for `claude`: `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION=us-east-1`, and Haiku 4.5 as
-`ANTHROPIC_MODEL` and every model alias, so a subagent never asks for a model the key may not call. For other
+`burn run` sets this up for `claude` when the instance has its own AWS key: `CLAUDE_CODE_USE_BEDROCK=1`,
+`AWS_REGION=us-east-1`, and Haiku 4.5 as `ANTHROPIC_MODEL` and every model alias, so a subagent never asks for a
+model the key may not call. For other
 commands, `burn run` strips the environment, so set non-secret settings inside the command:
 ```bash
 burn run --role coder -- env AWS_REGION_NAME=us-east-1 python agent.py   # LiteLLM, for the Agents SDK
