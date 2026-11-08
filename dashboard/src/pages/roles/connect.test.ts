@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Instance } from "../../contracts";
 import { mergeFleet } from "../../fleet";
 import { buildConsole } from "../../model";
+import { FULL_ACCESS_TOOLS } from "./model";
 import {
+  HARNESSES,
   agentGets,
   firstNewAgent,
   nextAgentName,
+  noRoleLabel,
   runCommand,
   setupCommands,
   targetRole,
@@ -65,13 +68,31 @@ describe("the Connect dialog's commands", () => {
     ).toBe(
       'uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"\n' +
         "export BURN_API_URL=https://api.example.test\n" +
+        "export BURN_PEOPLE_ENABLED=on\n" +
         "export BURN_PEOPLE_DOMAIN=burn-people.auth.us-east-1.amazoncognito.com\n" +
         "export BURN_PEOPLE_CLIENT_ID=4abc5def6ghi7jkl8mno9pqr0s\n" +
         "burn login",
     );
     expect(
-      setupCommands({}, { domain: "https://login.example.test/" }),
-    ).toContain("export BURN_PEOPLE_DOMAIN=https://login.example.test\n");
+      setupCommands({}, { domain: "https://login.example.test:8443/" }),
+    ).toContain("export BURN_PEOPLE_DOMAIN=https://login.example.test:8443\n");
+  });
+
+  it("turns people sign-in on only with both values, and never for a local build", () => {
+    const enabled = (people: Parameters<typeof setupCommands>[1]) =>
+      setupCommands({}, people).includes("export BURN_PEOPLE_ENABLED=on\n");
+    expect(enabled({ domain: "login.example.test", clientId: "abc123" })).toBe(
+      true,
+    );
+    expect(enabled({ domain: "login.example.test" })).toBe(false);
+    expect(enabled({ clientId: "abc123" })).toBe(false);
+    expect(
+      enabled({
+        domain: "login.example.test",
+        clientId: "abc123",
+        localDev: true,
+      }),
+    ).toBe(false);
   });
 
   it("leaves a sign-in line out when its value is missing or would not paste", () => {
@@ -83,6 +104,9 @@ describe("the Connect dialog's commands", () => {
     expect(lines("login.example.test")).toEqual([
       "export BURN_PEOPLE_DOMAIN=login.example.test",
     ]);
+    expect(lines("login.example.test", "abc $(id)")).toEqual([
+      "export BURN_PEOPLE_DOMAIN=login.example.test",
+    ]);
     expect(lines(undefined, "abc123")).toEqual([
       "export BURN_PEOPLE_CLIENT_ID=abc123",
     ]);
@@ -90,10 +114,15 @@ describe("the Connect dialog's commands", () => {
     expect(lines("http://login.example.test")).toEqual([]);
   });
 
+  it("offers only the harnesses burn run connects with one command", () => {
+    expect(HARNESSES.map((choice) => choice.label)).toEqual([
+      "Claude Code",
+      "Script",
+    ]);
+  });
+
   it("runs each harness, adding --role only when one is chosen", () => {
     expect(runCommand("claude")).toBe("burn run claude");
-    expect(runCommand("opencode")).toBe("burn run opencode");
-    expect(runCommand("codex")).toBe("burn run codex");
     expect(runCommand("script")).toBe("burn run python agent.py");
     expect(runCommand("claude", "reviewer")).toBe(
       "burn run --role reviewer claude",
@@ -103,28 +132,34 @@ describe("the Connect dialog's commands", () => {
   it("groups an agent under its harness unless a role is chosen", () => {
     expect(targetRole("claude")).toBe("claude");
     expect(targetRole("script")).toBe("agent");
-    expect(targetRole("codex", "reviewer")).toBe("reviewer");
+    expect(targetRole("script", "reviewer")).toBe("reviewer");
+  });
+
+  it("says what the role burn run names after the harness is", () => {
+    expect(noRoleLabel("claude")).toBe(
+      "None (grouped as claude, Full access, new)",
+    );
+    expect(
+      noRoleLabel("claude", { tools: [...FULL_ACCESS_TOOLS], egress: null }),
+    ).toBe("None (grouped as claude, Full access)");
+    expect(noRoleLabel("claude", { tools: ["read_ticket"] })).toBe(
+      "None (grouped as claude, Limited)",
+    );
   });
 });
 
 describe("what the agent gets", () => {
   it("names the next agent of the role", () => {
     expect(nextAgentName(model, "claude")).toBe("claude-04");
-    expect(nextAgentName(model, "opencode")).toBe("opencode-01");
+    expect(nextAgentName(model, "agent")).toBe("agent-01");
   });
 
-  it("says a burn also cuts off the model it reaches with its own key", () => {
+  it("says a burn also revokes the AWS key its model uses", () => {
     expect(agentGets("claude", "claude-01")).toBe(
-      "It gets its own identity, its own keys and a canary, and appears here as claude-01. Burning it also cuts off its model.",
+      "It gets its own identity, its own keys and a canary, and appears here as claude-01. Burning it also revokes its AWS key, which its model uses.",
     );
     expect(agentGets("script", "agent-01")).toContain(
-      "any model it reaches with its own AWS key",
-    );
-  });
-
-  it("says plainly that Codex brings no model yet", () => {
-    expect(agentGets("codex", "codex-01")).toContain(
-      "Codex connects to Burn's tools but brings no model yet.",
+      "revokes its AWS key, and any model it reaches with that key",
     );
   });
 
@@ -159,6 +194,6 @@ describe("firstNewAgent", () => {
     expect(
       firstNewAgent(model.agents, "claude", opened + 3_600_000, new Set()),
     ).toBeUndefined();
-    expect(firstNewAgent(model.agents, "codex", opened, known)).toBeUndefined();
+    expect(firstNewAgent(model.agents, "agent", opened, known)).toBeUndefined();
   });
 });

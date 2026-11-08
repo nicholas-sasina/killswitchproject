@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import { joinable } from "../../fleet";
 import { CONNECT_GUIDE_URL } from "../../join";
@@ -10,12 +10,14 @@ import {
   firstNewAgent,
   harnessOf,
   nextAgentName,
+  noRoleLabel,
   runCommand,
   setupCommands,
   targetRole,
   type Harness,
 } from "./connect";
 import { accessLevel } from "./model";
+import type { AddStep } from "./AddAgent";
 import { TokenDialog } from "./TokenDialog";
 import "./add-agents.css";
 
@@ -72,6 +74,16 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
   const [chosen, setChosen] = useState(role ?? "");
   const [tokenRole, setTokenRole] = useState(role ?? "");
   const [tokens, setTokens] = useState(false);
+  // The token flow's request and step: while it is creating, nothing may
+  // close it; once a token is shown, changing its role would discard it.
+  const [flow, setFlow] = useState<{ busy: boolean; step: AddStep }>({
+    busy: false,
+    step: "form",
+  });
+  const onFlow = useCallback(
+    (state: { busy: boolean; step: AddStep }) => setFlow(state),
+    [],
+  );
   const [openedAt] = useState(() => Date.now());
   const [known, setKnown] = useState<ReadonlySet<string> | undefined>(() =>
     instancesLoaded
@@ -83,9 +95,22 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
       setKnown(new Set(model.agents.map((agent) => agent.key)));
   }, [known, instancesLoaded, model.agents]);
 
-  const choices = useMemo(() => roles.filter(joinable), [roles]);
-  const record = choices.find((item) => item.name === chosen);
+  // A role opened from its page stays chosen even when /roles has not
+  // listed it (yet), so the select and the command always agree.
+  const choices = useMemo(() => {
+    const joinRoles = roles.filter(joinable);
+    return role && !joinRoles.some((item) => item.name === role)
+      ? [...joinRoles, { name: role, tools: [], managed_by: "code" as const }]
+      : joinRoles;
+  }, [roles, role]);
+  const listed = (name: string) => roles.find((item) => item.name === name);
+  const label = (name: string) => {
+    const known = listed(name);
+    return known ? `${name} · ${accessLevel(known)}` : name;
+  };
   const group = harnessOf(harness).group;
+  const derived = listed(group);
+  const record = chosen ? listed(chosen) : derived;
   const target = targetRole(harness, chosen);
   const name = nextAgentName(model, target);
   const connected = firstNewAgent(
@@ -99,6 +124,7 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
     <Dialog
       labelledBy={titleId}
       onClose={onClose}
+      busy={flow.busy}
       width={640}
       className="add-agents connect"
     >
@@ -109,15 +135,20 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
             Connect an agent
           </h2>
         </div>
-        <button className="btn btn-sm" type="button" onClick={onClose}>
+        <button
+          className="btn btn-sm"
+          type="button"
+          disabled={flow.busy}
+          onClick={onClose}
+        >
           Close
         </button>
       </div>
       <div className="add-form">
         <p className="dialog-body">
-          Run your agent under <span className="id">burn run</span>, from Claude
-          Code, OpenCode, Codex or a script. No role is needed; choose one only
-          to narrow what it may do. The CLI&apos;s guide has{" "}
+          Run your agent under <span className="id">burn run</span>. No role is
+          needed; choose one only to narrow what it may do. Other harnesses,
+          such as Codex, need their own setup: the CLI&apos;s guide has{" "}
           <a
             className="text-link"
             href={CONNECT_GUIDE_URL}
@@ -137,6 +168,7 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
             text={setupCommands(joinUrls, {
               domain: config.peopleDomain,
               clientId: config.peopleClientId,
+              localDev: config.localDev,
             })}
           />
         </section>
@@ -160,10 +192,10 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
               value={chosen}
               onChange={(event) => setChosen(event.target.value)}
             >
-              <option value="">None (Full access, grouped as {group})</option>
+              <option value="">{noRoleLabel(group, derived)}</option>
               {choices.map((item) => (
                 <option key={item.name} value={item.name}>
-                  {item.name} · {accessLevel(item)}
+                  {label(item.name)}
                 </option>
               ))}
             </select>
@@ -206,13 +238,14 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
                 <select
                   id={tokenSelect}
                   className="add-input"
+                  disabled={flow.busy || flow.step !== "form"}
                   value={tokenRole}
                   onChange={(event) => setTokenRole(event.target.value)}
                 >
                   <option value="">A new role</option>
                   {choices.map((item) => (
                     <option key={item.name} value={item.name}>
-                      {item.name} · {accessLevel(item)}
+                      {label(item.name)}
                     </option>
                   ))}
                 </select>
@@ -222,6 +255,7 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
                 role={tokenRole || undefined}
                 onClose={onClose}
                 bare
+                onState={onFlow}
               />
             </div>
           )}

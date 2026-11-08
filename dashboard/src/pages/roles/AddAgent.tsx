@@ -12,10 +12,12 @@ import {
   TextField,
   parseHosts,
   roleNameConflict,
-  rolePattern,
+  roleNameError,
 } from "./fields";
 import { tokenRecord } from "./tokens";
 import "./add-agents.css";
+
+export type AddStep = "form" | "command" | "waiting" | "connected";
 
 export function AddAgent({
   api,
@@ -29,6 +31,7 @@ export function AddAgent({
   onToken,
   onClose,
   bare = false,
+  onState,
 }: {
   api: BurnApi;
   roles: Role[];
@@ -53,6 +56,8 @@ export function AddAgent({
    * dialog. The flow and its token handling are the same.
    */
   bare?: boolean;
+  /** Told when a request starts or ends and when the step changes. */
+  onState?: (state: { busy: boolean; step: AddStep }) => void;
 }) {
   const [name, setName] = useState(role?.name ?? suggestedName ?? "");
   const [tools, setTools] = useState<string[]>(template?.tools ?? []);
@@ -81,11 +86,13 @@ export function AddAgent({
     token?: string;
     previousSessions: string[];
   }>();
-  const [step, setStep] = useState<
-    "form" | "command" | "waiting" | "connected"
-  >("form");
+  const [step, setStep] = useState<AddStep>("form");
   const [copyStatus, setCopyStatus] = useState("");
   const titleId = useId();
+
+  useEffect(() => {
+    onState?.({ busy, step });
+  }, [onState, busy, step]);
 
   useEffect(() => {
     if (!join || step !== "waiting") return;
@@ -104,10 +111,9 @@ export function AddAgent({
     event.preventDefault();
     if (busy) return;
     setError("");
-    if (!rolePattern.test(name)) {
-      setError(
-        "Role name must be 1–32 lowercase letters, digits or hyphens, starting with a letter or digit.",
-      );
+    const nameError = created ? "" : roleNameError(name);
+    if (nameError) {
+      setError(nameError);
       return;
     }
     if (!created && roles.some((existing) => existing.name === name)) {

@@ -3,6 +3,18 @@ import "./add-agents.css";
 
 /** The API's role name rule. */
 export const rolePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/**
+ * What is wrong with a role name before it is sent, or "": the API's
+ * pattern, and "eval" and "eval-*", which Burn keeps for its evaluations.
+ */
+export function roleNameError(name: string): string {
+  if (!rolePattern.test(name))
+    return "Role name must be 1–32 lowercase letters, digits or hyphens, starting with a letter or digit.";
+  if (name === "eval" || name.startsWith("eval-"))
+    return "Names that are eval or start with eval- are kept for Burn's evaluations. Choose another name.";
+  return "";
+}
+
 export const roleNameConflict =
   "A role with that name already exists. Choose a new role name.";
 

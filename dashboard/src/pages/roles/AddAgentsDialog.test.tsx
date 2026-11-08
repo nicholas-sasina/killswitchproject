@@ -49,7 +49,7 @@ function instance(session: string, role: string, created: string): Instance {
   };
 }
 
-function setup(instances: Instance[] = []) {
+function setup(instances: Instance[] = [], roleList: Role[] = roles) {
   const state = { instances, tokens: [] as string[] };
   const fetcher = vi
     .fn<typeof fetch>()
@@ -57,7 +57,7 @@ function setup(instances: Instance[] = []) {
       const path = new URL(String(input)).pathname;
       const method = init?.method ?? "GET";
       let body: unknown;
-      if (path === "/roles" && method === "GET") body = { roles };
+      if (path === "/roles" && method === "GET") body = { roles: roleList };
       else if (path === "/instances") body = { instances: state.instances };
       else if (path === "/events") body = { events: [], agents: [] };
       else if (path === "/flags") body = { flags: [] };
@@ -153,9 +153,9 @@ describe("Connect an agent", () => {
     expect(
       (screen.getByLabelText("Role (optional)") as HTMLSelectElement)
         .selectedOptions[0].textContent,
-    ).toBe("None (Full access, grouped as claude)");
+    ).toBe("None (grouped as claude, Full access, new)");
     expect(document.body.textContent).toContain(
-      "appears here as claude-01. Burning it also cuts off its model.",
+      "appears here as claude-01. Burning it also revokes its AWS key, which its model uses.",
     );
     // No form, and the token flow stays closed.
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -168,16 +168,18 @@ describe("Connect an agent", () => {
     ).toBe("false");
   });
 
-  it("sets the console's people sign-in before burn login", async () => {
+  it("sets the console's people sign-in, turned on, before burn login", async () => {
     setup();
     await show(undefined, {
-      ...config,
+      burnUrl: API_URL,
+      localDev: false,
       peopleDomain: "burn-people.auth.us-east-1.amazoncognito.com",
       peopleClientId: "4abc5def6ghi7jkl8mno9pqr0s",
     });
     expect(code("Setup commands")).toBe(
       'uv tool install "git+https://github.com/nicholas-sasina/killswitchproject#subdirectory=cli"\n' +
         `export BURN_API_URL=${API_URL}\n` +
+        "export BURN_PEOPLE_ENABLED=on\n" +
         "export BURN_PEOPLE_DOMAIN=burn-people.auth.us-east-1.amazoncognito.com\n" +
         "export BURN_PEOPLE_CLIENT_ID=4abc5def6ghi7jkl8mno9pqr0s\n" +
         "burn login",
@@ -187,11 +189,12 @@ describe("Connect an agent", () => {
   it("gives each harness its command, and a role adds --role", async () => {
     setup();
     await show();
-    await press("Codex");
-    expect(code("Run command")).toBe("burn run codex");
-    expect(document.body.textContent).toContain(
-      "Codex connects to Burn's tools but brings no model yet.",
-    );
+    // Only harnesses burn run connects with one command.
+    expect(
+      within(screen.getByRole("group", { name: "Harness" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Claude Code", "Script"]);
     await press("Script");
     expect(code("Run command")).toBe("burn run python agent.py");
     await act(async () => {
@@ -209,7 +212,7 @@ describe("Connect an agent", () => {
           .options,
       ].map((option) => option.textContent),
     ).toEqual([
-      "None (Full access, grouped as agent)",
+      "None (grouped as agent, Full access, new)",
       "reviewer · Full access",
       "reader · Limited",
     ]);
@@ -219,6 +222,29 @@ describe("Connect an agent", () => {
     setup();
     await show("reader");
     expect(code("Run command")).toBe("burn run --role reader claude");
+  });
+
+  it("keeps a role it was opened for chosen, even one /roles does not list", async () => {
+    setup();
+    await show("notifier");
+    const select = screen.getByLabelText(
+      "Role (optional)",
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("notifier");
+    expect(select.selectedOptions[0].textContent).toBe("notifier");
+    expect(code("Run command")).toBe("burn run --role notifier claude");
+  });
+
+  it("says when the role burn run would name is already there, and what it is", async () => {
+    setup(
+      [],
+      [...roles, { name: "claude", tools: ["read_ticket"], managed_by: "ui" }],
+    );
+    await show();
+    expect(
+      (screen.getByLabelText("Role (optional)") as HTMLSelectElement)
+        .selectedOptions[0].textContent,
+    ).toBe("None (grouped as claude, Limited)");
   });
 
   it("waits on the shared instance poll for the first new agent", async () => {
@@ -250,6 +276,11 @@ describe("Connect an agent", () => {
     ).toBe("reviewer");
     await press("Create token");
     const token = fixture.state.tokens[0];
+    // Changing the role now would discard the token on screen.
+    expect(
+      (screen.getByLabelText("Role for the token") as HTMLSelectElement)
+        .disabled,
+    ).toBe(true);
     expect(screen.getByText(token).tagName).toBe("CODE");
     for (const pre of document.querySelectorAll("pre"))
       if (!pre.classList.contains("add-token-value"))

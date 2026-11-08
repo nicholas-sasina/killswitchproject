@@ -41,15 +41,16 @@ Each page is a bookmarkable hash route. Old links still work: `#/burned` opens I
 
 **Connect an agent** in the navigation connects an agent from the harness you already use. Once
 per machine: install the `burn` CLI, set the API and gateway URLs and the console's own sign-in
-(`BURN_PEOPLE_DOMAIN`, `BURN_PEOPLE_CLIENT_ID`), and run `burn login`. Then
-`burn run claude`, `burn run opencode`, `burn run codex` or `burn run python agent.py`; choosing a
-role adds `--role <name>`. The dialog says what the agent gets (its own identity, keys and canary;
-burning it also cuts off its model, except for Codex, which brings no model yet) and waits until
-the first new agent connects. For CI, containers or swarms, a disclosure holds the join token flow:
-pick or create a role and mint a token. The token is shown once, with Copy token, and the commands
-never contain it: they read it with a hidden prompt or from the clipboard, so its value stays out
-of shell history. A role page's **Connect more agents** opens the same dialog with that role
-chosen.
+(`BURN_PEOPLE_ENABLED=on`, `BURN_PEOPLE_DOMAIN`, `BURN_PEOPLE_CLIENT_ID`), and run `burn login`.
+Then `burn run claude` or `burn run python agent.py`; choosing a role adds `--role <name>`. Without
+one, `burn run` groups the agent under the harness's name, and the dialog says whether that role
+already exists and has Full access. It says what the agent gets (its own identity, keys and canary;
+burning it also revokes its AWS key, which its model uses) and waits until the first new agent
+connects. Other harnesses, such as Codex, need their own setup, described in the CLI's guide. For
+CI, containers or swarms, a disclosure holds the join token flow: pick or create a role and mint a
+token. The token is shown once, with Copy token, and the commands never contain it: they read it
+with a hidden prompt or from the clipboard, so its value stays out of shell history. A role page's
+**Connect more agents** opens the same dialog with that role chosen.
 
 ## Sign-in
 

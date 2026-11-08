@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import type { Role } from "../../contracts";
-import { AddAgent } from "./AddAgent";
+import { AddAgent, type AddStep } from "./AddAgent";
 import { rememberToken } from "./tokens";
 
 export interface TokenDialogProps {
@@ -10,6 +10,8 @@ export interface TokenDialogProps {
   onClose: () => void;
   /** Inside another dialog, without its own frame. */
   bare?: boolean;
+  /** Told when a request starts or ends and when the step changes. */
+  onState?: (state: { busy: boolean; step: AddStep }) => void;
 }
 
 /**
@@ -17,7 +19,12 @@ export interface TokenDialogProps {
  * pick one, mint a token, show it once, and give the commands that read it
  * without holding it. Uses the console's roles, agents and join URLs.
  */
-export function TokenDialog({ role, onClose, bare }: TokenDialogProps) {
+export function TokenDialog({
+  role,
+  onClose,
+  bare,
+  onState,
+}: TokenDialogProps) {
   const { api, roles, instances, joinUrls, refreshRoles } = useConsole();
   // A role known only from its agents still takes a token by name.
   const target = useMemo<Role | undefined>(
@@ -44,6 +51,7 @@ export function TokenDialog({ role, onClose, bare }: TokenDialogProps) {
       onToken={rememberToken}
       onClose={onClose}
       bare={bare}
+      onState={onState}
     />
   );
 }

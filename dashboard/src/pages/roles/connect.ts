@@ -4,10 +4,17 @@
  * agent is the one they just started. Pure and tested.
  */
 import type { Role } from "../../contracts";
+import { accessLevel } from "./model";
 import { joinExports, type JoinUrls } from "../../join";
 import { displayName, type ConsoleAgent, type ConsoleModel } from "../../model";
 
-export type Harness = "claude" | "opencode" | "codex" | "script";
+/**
+ * The harnesses `burn run` connects with one command: Claude Code, which
+ * burn run sets up with Burn's tools and its own AWS key for its model, and
+ * a script, which reads the instance's MCP URL and token from its
+ * environment. Other harnesses need their own setup; the CLI's guide has it.
+ */
+export type Harness = "claude" | "script";
 
 export interface HarnessChoice {
   value: Harness;
@@ -20,13 +27,6 @@ export interface HarnessChoice {
 
 export const HARNESSES: readonly HarnessChoice[] = [
   { value: "claude", label: "Claude Code", command: "claude", group: "claude" },
-  {
-    value: "opencode",
-    label: "OpenCode",
-    command: "opencode",
-    group: "opencode",
-  },
-  { value: "codex", label: "Codex", command: "codex", group: "codex" },
   {
     value: "script",
     label: "Script",
@@ -48,20 +48,32 @@ export interface PeopleSignIn {
   /** The managed-login host or https origin. */
   domain?: string;
   clientId?: string;
+  /** A local build signs in with a demo token, not people sign-in. */
+  localDev?: boolean;
 }
 
 // A host or an https origin, and an app client id: nothing a shell reads as
 // anything but text, so each pastes unquoted. Anything else is left out.
-const PASTEABLE_DOMAIN = /^(https:\/\/)?[A-Za-z0-9.-]+$/;
+const PASTEABLE_DOMAIN =
+  /^(https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?|[A-Za-z0-9.-]+)$/;
 const PASTEABLE_CLIENT_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
-function signInExports({ domain, clientId }: PeopleSignIn): string {
+/**
+ * The people sign-in lines. With both values, BURN_PEOPLE_ENABLED=on too:
+ * without it burn asks AWS whether the stack requires sign-in, and with no
+ * AWS access it assumes not and wants a demo token instead.
+ */
+function signInExports({ domain, clientId, localDev }: PeopleSignIn): string {
   const host = (domain ?? "").trim().replace(/\/+$/, "");
   const client = (clientId ?? "").trim();
+  const shownHost = PASTEABLE_DOMAIN.test(host) ? host : "";
+  const shownClient = PASTEABLE_CLIENT_ID.test(client) ? client : "";
+  const enabled = shownHost && shownClient && !localDev ? "on" : "";
   return (
     [
-      ["BURN_PEOPLE_DOMAIN", PASTEABLE_DOMAIN.test(host) ? host : ""],
-      ["BURN_PEOPLE_CLIENT_ID", PASTEABLE_CLIENT_ID.test(client) ? client : ""],
+      ["BURN_PEOPLE_ENABLED", enabled],
+      ["BURN_PEOPLE_DOMAIN", shownHost],
+      ["BURN_PEOPLE_CLIENT_ID", shownClient],
     ] as const
   )
     .filter(([, value]) => value)
@@ -101,9 +113,9 @@ export function nextAgentName(model: ConsoleModel, role: string): string {
 }
 
 /**
- * One plain sentence on what the agent gets. A burn kills the agent's own
- * AWS key, which is also how Claude Code and OpenCode reach their model;
- * Codex connects to Burn's tools but has no model under burn run yet.
+ * One plain sentence on what the agent gets. A burn revokes the agent's
+ * own AWS key, the key its model uses; a role without aws_key gives it none,
+ * and then nothing is said about a model.
  */
 export function agentGets(
   harness: Harness,
@@ -112,12 +124,24 @@ export function agentGets(
 ): string {
   const start = `It gets its own identity, its own keys and a canary, and appears here as ${name}.`;
   const ownAws = role ? (role.credentials ?? []).includes("aws_key") : true;
-  if (harness === "codex")
-    return `${start} Codex connects to Burn's tools but brings no model yet.`;
   if (!ownAws) return start;
   return harness === "script"
-    ? `${start} Burning it also cuts off any model it reaches with its own AWS key.`
-    : `${start} Burning it also cuts off its model.`;
+    ? `${start} Burning it also revokes its AWS key, and any model it reaches with that key.`
+    : `${start} Burning it also revokes its AWS key, which its model uses.`;
+}
+
+/**
+ * The Role select's first option: no role, so burn run groups the agent
+ * under the harness's name. That role is used as it is when it exists, so
+ * say what it is; otherwise burn run creates it with Full access.
+ */
+export function noRoleLabel(
+  group: string,
+  existing?: Pick<Role, "tools" | "egress">,
+): string {
+  return existing
+    ? `None (grouped as ${group}, ${accessLevel(existing)})`
+    : `None (grouped as ${group}, Full access, new)`;
 }
 
 /**
