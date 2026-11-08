@@ -12,8 +12,15 @@ touched (no other tables, no system secrets, no other Cognito clients). It is
 safe to run again after a partial failure: nothing is cleared until every
 instance has been cleaned.
 
+A full reset is unchanged. --orphans-only additionally sweeps badge secrets
+nothing references any more: clean_instances() finds one by looking its agent
+up in burn-sessions, so a secret whose row was already cleared is invisible to
+that path and is then billed indefinitely. Secrets Manager charges per secret
+per month and a swarm or load test leaves one behind per agent id.
+
     python scripts/reset.py                 full reset
-    python scripts/reset.py --orphans-only  only delete badges whose session row is gone
+    python scripts/reset.py --orphans-only  only delete badge clients and badge
+                                            secrets nothing references any more
 """
 import sys
 
@@ -98,6 +105,54 @@ def delete_badge_secret(secrets, agent_id: str) -> None:
         pass  # already gone: a rerun after a partial failure
 
 
+# Badge secrets are named burn/<agent_id>/badge. Derived from the contract
+# helper rather than hardcoded, so a change there cannot silently orphan them.
+# Named SECRET_* so they cannot be confused with BADGE_PREFIX above, which is
+# the Cognito client name prefix.
+_SAMPLE_AGENT = "agent-sample"
+SECRET_PREFIX, SECRET_SUFFIX = names.agent_secret_ref(_SAMPLE_AGENT, "badge").split(_SAMPLE_AGENT)
+
+
+def badge_secret_agent_ids(secrets) -> list[str]:
+    """Agent ids that still have a badge secret, whatever their session status."""
+    ids, kwargs = set(), {}
+    while True:
+        page = secrets.list_secrets(**kwargs)
+        for secret in page.get("SecretList", []):
+            name = secret["Name"]
+            if name.startswith(SECRET_PREFIX) and name.endswith(SECRET_SUFFIX):
+                agent_id = name[len(SECRET_PREFIX):-len(SECRET_SUFFIX)]
+                if is_cleanable_agent(agent_id):
+                    ids.add(agent_id)
+        if not page.get("NextToken"):
+            return sorted(ids)
+        kwargs["NextToken"] = page["NextToken"]
+
+
+def remove_orphaned_badge_secrets(secrets, keep_agent_ids: set[str]) -> list[str]:
+    """Delete badge secrets no session row points at any more. Returns the agent ids.
+
+    clean_instances() finds a badge secret by looking its agent up in
+    burn-sessions, so a secret whose session row was already cleared is
+    invisible to that path and is then billed indefinitely. Secrets Manager
+    charges per secret per month and a swarm or load test leaves one behind per
+    agent id, so on a long-lived account this is the bulk of the bill.
+
+    Only run from --orphans-only, never from a full reset. A reset is followed
+    by new sessions under the same scenario agent ids, and _store_badge() adds
+    a version to an existing secret rather than creating one; deleting the
+    secret there would force a recreate into the window Secrets Manager keeps
+    a deleted name in, which _store_badge() does not handle.
+
+    The Cognito side of this already exists: _remove_badges_live() sweeps
+    orphaned badge clients the same way.
+    """
+    removed = [a for a in badge_secret_agent_ids(secrets) if a not in keep_agent_ids]
+    for agent_id in removed:
+        delete_badge_secret(secrets, agent_id)
+    return removed
+
+
 def clean_instances(agent_ids: list[str], minter, secrets) -> list[str]:
     """Delete what each instance left behind. Returns the agent ids that could not be cleaned."""
     failed = []
@@ -151,6 +206,12 @@ def reset(extra_agent_ids: list[str] = (), minter=invoke_minter, secrets=None, r
 
 if __name__ == "__main__":
     if "--orphans-only" in sys.argv:
-        _remove_badges_live(remaining_client_ids(boto3.resource("dynamodb", region_name=REGION)))
+        dynamodb = boto3.resource("dynamodb", region_name=REGION)
+        _remove_badges_live(remaining_client_ids(dynamodb))
+        # Keep anything still referenced: a session row, or the loaded scenario.
+        keep = set(instance_agent_ids(dynamodb)) | set(loaded_agent_ids(dynamodb))
+        swept = remove_orphaned_badge_secrets(
+            boto3.client("secretsmanager", region_name=REGION), keep)
+        print(f"{len(swept)} orphaned badge secret(s) deleted: {', '.join(swept) or '-'}")
     else:
         reset()
