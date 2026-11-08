@@ -48,11 +48,11 @@ const awsKey = entry({
   exposure: "referenced",
   first_seen: "2026-11-08T19:12:06Z",
 });
-const board = [awsKey, crm, apiKey, canary];
+const sample = [awsKey, crm, apiKey, canary];
 
 describe("ledgerCounts", () => {
   it("counts every key seen, the plain text ones but its canary, and its own", () => {
-    expect(ledgerCounts(board, ME)).toEqual({ seen: 4, plain: 1, owned: 2 });
+    expect(ledgerCounts(sample, ME)).toEqual({ seen: 4, plain: 1, owned: 2 });
   });
 
   it("is all zero for an empty ledger", () => {
@@ -62,21 +62,21 @@ describe("ledgerCounts", () => {
 
 describe("evidenceRefs", () => {
   it("is the keys it saw in plain text, but its own keys and its canary", () => {
-    expect([...evidenceRefs(board, ME)]).toEqual(["burn/shared/crm_db_url"]);
+    expect([...evidenceRefs(sample, ME)]).toEqual(["burn/shared/crm_db_url"]);
     expect(evidenceRefs([{ ...crm, exposure: "referenced" }], ME).size).toBe(0);
     expect(evidenceRefs(undefined, ME).size).toBe(0);
   });
 });
 
 describe("ledgerRows", () => {
-  it("draws the running board: canary first, the evidence, then its own keys", () => {
+  it("orders a running agent's keys: canary first, the evidence, then its own keys", () => {
     const blocked = event({
       action: "blocked",
       agent_id: ME,
       source: "egress",
       secret_ref: "burn/shared/crm_db_url",
     });
-    const rows = ledgerRows(board, {
+    const rows = ledgerRows(sample, {
       agentId: ME,
       events: [blocked],
       burned: false,
@@ -111,7 +111,7 @@ describe("ledgerRows", () => {
     expect(rows[2].hot).toBe(false);
   });
 
-  it("draws the burned board: canary used, keys rotated, the shared key for review", () => {
+  it("shows a burned agent's keys: canary used, keys rotated, the shared key for review", () => {
     const rows = ledgerRows(
       [
         { ...awsKey, status: "rotated" },

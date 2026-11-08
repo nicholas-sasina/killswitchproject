@@ -1,7 +1,7 @@
 /* The agent page. Tokens from styles/tokens.css only; shared pieces from
    src/ui/. Quiet text on white is --muted-2; ember is evidence or a burn. */
 
-/* ---------- Hero: the burn button sits at the right, as on the board ---------- */
+/* ---------- Hero: the burn button sits at the right ---------- */
 
 .agent-page .agent-hero .hero-main {
   max-width: none;
