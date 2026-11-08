@@ -1,4 +1,7 @@
 import asyncio
+import json
+
+import pytest
 
 from burn_agents.swarm_worker import MAX_CONSECUTIVE_FAILURES, start_offset, work
 
@@ -90,3 +93,137 @@ def test_root_cause_unwraps_an_exception_group_to_the_first_underlying_error():
     assert root_cause(group) == "ConnectionRefusedError: [Errno 111] Connect call failed ('172.17.0.1', 8701)"
     assert root_cause(KeyError("x")).startswith("KeyError")
     assert len(root_cause(RuntimeError("x" * 1000))) < 250
+
+
+# --- a worker with a task (BURN_TASK), as the launcher gives it for replace on burn ---------------------------------
+
+def run_task(call, task, resume=None, report=None, **kw):
+    """Run the task loop with fakes; returns (exit code, the ordered log of progress reports and tool calls, sleeps)."""
+    from burn_agents.swarm_worker import work_task
+    seen, sleeps = [], []
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+
+    async def tool_call(tool, args):
+        seen.append(("call", tool))
+        return await call(tool, args)
+
+    async def default_report(item, state):
+        seen.append((state, item))
+
+    kw.setdefault("tool", "read_inbox")
+    kw.setdefault("interval", 3.0)
+    code = asyncio.run(work_task(tool_call, report or default_report, task=task, resume=resume or {}, sleep=sleep, **kw))
+    return code, seen, sleeps
+
+
+async def ok(tool, args):
+    return False, "{}"
+
+
+def test_each_item_is_started_called_once_and_done_in_order_and_then_it_exits_0():
+    code, seen, sleeps = run_task(ok, ["w01-item-01", "w01-item-02"], offset=1.0)
+    assert code == 0
+    assert seen == [("started", "w01-item-01"), ("call", "read_inbox"), ("done", "w01-item-01"),
+                    ("started", "w01-item-02"), ("call", "read_inbox"), ("done", "w01-item-02")]
+    assert sleeps == [1.0, 3.0]  # the offset first, then one interval between items, none after the last
+
+
+def test_a_replacement_skips_the_items_done_and_quarantined_before_it():
+    task = [f"w02-item-{i:02d}" for i in range(1, 6)]
+    resume = {"done": ["w02-item-01", "w02-item-02"], "quarantined": ["w02-item-03"]}
+    code, seen, _ = run_task(ok, task, resume)
+    assert code == 0
+    assert [e for e in seen if e[0] != "call"] == [("started", "w02-item-04"), ("done", "w02-item-04"),
+                                                   ("started", "w02-item-05"), ("done", "w02-item-05")]
+
+
+def test_a_task_with_nothing_left_makes_no_calls_and_exits_0():
+    code, seen, _ = run_task(ok, ["w01-item-01"], {"done": [], "quarantined": ["w01-item-01"]})
+    assert code == 0 and seen == []
+
+
+def test_a_revoked_badge_stops_the_task_with_the_item_started_but_not_done():
+    async def dead(tool, args):
+        return True, BADGE_DEAD
+
+    code, seen, _ = run_task(dead, ["w01-item-01", "w01-item-02"])
+    assert code == 0 and seen == [("started", "w01-item-01"), ("call", "read_inbox")]
+
+
+def test_a_failed_call_is_retried_for_the_same_item_and_reported_done_once():
+    results = [ConnectionError("down"), (True, "BURN: access refused: recipient not allowed"), (False, "{}")]
+
+    async def flaky(tool, args):
+        out = results.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    code, seen, _ = run_task(flaky, ["w01-item-01"])
+    assert code == 0 and results == []
+    assert [e for e in seen if e[0] != "call"] == [("started", "w01-item-01"), ("done", "w01-item-01")]
+
+
+def test_it_gives_up_without_reporting_done_when_the_gateway_stays_unreachable():
+    async def down(tool, args):
+        raise ConnectionError("down")
+
+    code, seen, _ = run_task(down, ["w01-item-01"])
+    assert code == 1 and ("done", "w01-item-01") not in seen
+    assert seen.count(("call", "read_inbox")) == MAX_CONSECUTIVE_FAILURES
+
+
+def test_no_work_is_done_on_an_item_whose_start_the_supervisor_did_not_take():
+    calls = []
+
+    async def refuse(item, state):
+        raise RuntimeError("400 item id must match")
+
+    async def call(tool, args):
+        calls.append(tool)
+        return False, "{}"
+
+    code, _, _ = run_task(call, ["w01-item-01"], report=refuse)
+    assert code == 1 and calls == []
+
+
+def test_the_task_and_resume_come_from_the_environment_and_are_checked():
+    from burn_agents.swarm_worker import read_task
+    assert read_task({}) is None  # no task: today's endless loop
+    assert read_task({"BURN_TASK": '["a-1", "a-2"]'}) == (["a-1", "a-2"], {"done": [], "quarantined": []})
+    assert read_task({"BURN_TASK": '["a-1"]', "BURN_RESUME": '{"done": ["a-1"], "quarantined": []}'}) == (
+        ["a-1"], {"done": ["a-1"], "quarantined": []})
+    for bad in ({"BURN_TASK": '"a-1"'}, {"BURN_TASK": '["a 1"]'}, {"BURN_TASK": "not json"},
+                {"BURN_TASK": '["a-1"]', "BURN_RESUME": '{"done": "a-1"}'},
+                {"BURN_TASK": '["a-1"]', "BURN_RESUME": '{"done": [], "quarantined": [], "note": "x"}'}):
+        with pytest.raises(ValueError):
+            read_task(bad)
+
+
+def test_with_a_task_it_needs_the_progress_endpoint():
+    from burn_agents.swarm_worker import main_async
+    code = asyncio.run(main_async({"BURN_MCP_URL": "http://127.0.0.1:1/mcp", "BURN_TASK": '["a-1"]'}))
+    assert code == 2
+
+
+def test_progress_is_posted_to_the_local_endpoint_with_the_local_token_and_a_refusal_raises():
+    import httpx
+    from burn_agents.swarm_worker import progress_reporter
+    sent = []
+
+    def handler(request):
+        sent.append((str(request.url), request.headers.get("authorization"), json.loads(request.content)))
+        return httpx.Response(204 if len(sent) == 1 else 400, json={"error": "item id must match"})
+
+    async def go():
+        async with progress_reporter("http://127.0.0.1:9/progress", "local-tok",
+                                     transport=httpx.MockTransport(handler)) as report:
+            await report("w01-item-01", "started")
+            with pytest.raises(httpx.HTTPStatusError):
+                await report("w01-item-01", "done")
+
+    asyncio.run(go())
+    assert sent == [("http://127.0.0.1:9/progress", "Bearer local-tok", {"item": "w01-item-01", "state": "started"}),
+                    ("http://127.0.0.1:9/progress", "Bearer local-tok", {"item": "w01-item-01", "state": "done"})]
