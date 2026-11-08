@@ -80,6 +80,18 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
   at this scale. GSIs on those attributes are the next step.
 - `POST /burn`, the ledger and blast radius also accept instance agent ids: `db.get_agent` falls back to
   the instance's session.
+- **Task progress.** A heartbeat may carry `{"progress": [{"item", "state"}]}` (item ids only, at most 50 per
+  heartbeat and 500 items per instance). Burn stamps each event with its own receive time and keeps one entry per
+  item on the session row (`progress`), written on a version check so racing heartbeats never drop each other's
+  items. A non-active instance gets 409 before its body is read; a broken rule is a 400 that records nothing.
+  Reads show only `items_started` and `items_done`.
+- **Linking a replacement.** `POST /instances/{old}/replace {"session_id": new}` (`instances.py`) needs the admin
+  header, or a person once sign-in is on; an instance's own token never opens it. It checks old is pending (409
+  otherwise) and new is a fresh active instance of the same role that is not already a replacement (400), then
+  one TransactWriteItems sets old `pending -> linked` + `replaced_by` and new `replaces` + `generation`, both on
+  conditions. Of any number of racing callers exactly one wins; the rest get 409. Then a `replaced` and a
+  `resumed` event (best-effort: the link is already committed). The transaction needs only `UpdateItem` on
+  `burn-sessions`, which the API already has.
 
 ## Key files
 | File | What |
@@ -91,7 +103,7 @@ credentials, ledger and burn are its own. Scenario agents are roles with one ins
 | `lambdas/api/flag_review.py` | Owner review of flags: list, rotate, dismiss |
 | `lambdas/api/roles.py` | Roles: validation, scenario roles, create/replace rules |
 | `lambdas/api/tokens.py` | Join tokens: create, atomic redeem, revoke |
-| `lambdas/api/instances.py` | Instances: list, heartbeat, exit, idle sweep |
+| `lambdas/api/instances.py` | Instances: list, read one, heartbeat (with task progress), exit, idle sweep, link a replacement |
 | `lambdas/api/burn_scopes.py` | `POST /burns`: resolve targets, revoke, burn in a pool |
 | `lambdas/api/errors.py` | HTTP errors and throttle detection |
 | `lambdas/api/reads.py` | Events feed, ledger, badge status, blast radius |
@@ -118,3 +130,7 @@ cd burn_api && uv run python scripts/e2e.py   # full burn flow incl. gateway and
 - **Why one Lambda for all routes?** The API is small; one router file is easier to read and one IAM role
   is easy to audit.
 - **Is the blast radius instant?** No. CloudTrail event history can lag 5-15 minutes; the response says so.
+- **When an instance is burned mid-task, is its work lost?** Not for a role with `replace_on_burn`. Burn keeps only
+  which task items the instance finished, by Burn's own clock. The launcher that started the instance joins a
+  fresh one with new credentials and links it; the replacement skips the items done before the breach and leaves
+  the ones the instance touched after it for a person. No text the agent wrote reaches its replacement.
