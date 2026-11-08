@@ -22,8 +22,9 @@ at once, and stops when the Gateway refuses its badge. The role must exist (`bur
 each container with `docker run -e NAME`, passing that container's own values (badge, api key, AWS key) from the
 launcher's environment: no secret is in a command line or a file, and containers need no AWS access. In the
 container `burn run` is PID 1 as root, takes the values out of its environment and starts the worker under a uid of
-its own, so a worker can read neither the supervisor's environment nor another worker's. The supervisor still
-sends the admin token to the Burn API (`BURN_DEMO_TOKEN`).
+its own, so a worker can read neither the supervisor's environment nor another worker's. No container ever holds
+the admin token: the launcher uses it only to create the join token, joins send no auth header, and afterwards each
+supervisor authenticates with its instance's own session token, which stays in the supervisor.
 
 Without `MOCK=1` the workers join the demo stack's internal network, whose one way out is the egress proxy, and
 the Burn API, token and Gateway come from `.env` (`make env`); start the stack first. `MOCK=1` runs the same

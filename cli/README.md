@@ -77,8 +77,8 @@ burn env            # what an instance's environment would hold (values hidden; 
    given only to the agent, because any local process can reach 127.0.0.1. Without it they answer 401. The SDK
    sends it; MCP clients should be configured to send it as their bearer (it is replaced by the badge token on
    the way to the Gateway).
-   `BURN_SPAWN_URL` is a local endpoint: `POST {role, command}` starts a child with `POST /sessions
-   {role, parent_session}` and runs it under its own `burn run` (own credentials, own endpoints). It returns
+   `BURN_SPAWN_URL` is a local endpoint: `POST {role, command}` starts a child with `POST /instances
+   {role, parent_session}` with the parent's session token and runs it under its own `burn run` (own credentials, own endpoints). It returns
    `{session_id, agent_id}`. Children stop when their parent's `burn run` ends.
 6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL
    after 5 s) and `burn run` exits with 3. A normal exit posts `/instances/{id}/exit`. SIGINT and SIGTERM are
