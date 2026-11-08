@@ -729,12 +729,25 @@ def test_a_409_during_the_exit_flush_means_burned():
     assert inst._stopped_by_api
 
 
-def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack):
-    stack.heartbeat_status = 409
+def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack, capsys):
+    original, beats = stack.handle, []
+
+    def burned_after_one_failure(method, path, query, body):
+        if path.endswith("/heartbeat"):
+            beats.append(body.get("progress"))
+            # The loop's beat fails, and nothing waits on a "done", so the loop does not try again: only the
+            # exit flush can learn of the burn.
+            return (503, {"error": "busy"}) if len(beats) == 1 else (409, {"error": "Instance is revoked"})
+        return original(method, path, query, body)
+
+    stack.handle = burned_after_one_failure
     code = REPORT + """
     report("item-01", "done")"""
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == EXIT_STOPPED
+    assert beats == [[ev("item-01", "done")], [ev("item-01", "done")]]
     assert not stack.calls("POST", "/instances/" + next(iter(stack.instances)) + "/exit")
+    err = capsys.readouterr().err
+    assert "the instance was burned or has exited" in err and "the agent was stopped" not in err  # the flush's path
 
 
 def test_a_connection_dropped_mid_heartbeat_counts_as_unreachable():
