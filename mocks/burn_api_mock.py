@@ -145,6 +145,13 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
         return {"session_id": session_id, "agent_id": body.agent_id,
                 "badge_ref": agent_secret_ref(body.agent_id, "badge"), **result}
 
+    @app.post("/instances", status_code=201)
+    async def start_instance(body: SessionRequest):
+        """The two role forms of POST /sessions on a path of their own (same behaviour and reply)."""
+        if body.agent_id is not None or body.role is None or (body.enroll_token is None) == (body.parent_session is None):
+            raise HTTPException(400, "Send role with exactly one of enroll_token or parent_session")
+        return swarm.start(body.role, enroll_token=body.enroll_token, parent_session=body.parent_session)
+
     @app.post("/mock-token")
     async def mock_token(authorization: str = Header("")):
         """The badge issuer's OAuth client-credentials endpoint, as the mock MCP server expects its tokens."""
