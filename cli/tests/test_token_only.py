@@ -96,3 +96,28 @@ def test_a_burned_instances_heartbeat_gets_409_and_stops_it(stack):
     started = time.monotonic()
     from burn_cli.runner.run import EXIT_STOPPED
     assert inst.run() == EXIT_STOPPED and time.monotonic() - started < 15
+
+
+def test_burn_run_sends_no_person_token_even_when_someone_is_signed_in_on_the_host(stack, tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import time
+
+    from burn_cli import signin
+    from fake_cognito import jwt
+    config_dir = tmp_path / "config"
+    person_token = jwt({"email": "ada@example.com", "exp": int(time.time()) + 3600})
+    env = {**host_env(stack), "BURN_CONFIG_DIR": str(config_dir), "BURN_JOIN_TOKEN": stack.token}
+    env.pop("BURN_LOCAL_DEV", None)
+    monkeypatch.setenv("BURN_CONFIG_DIR", str(config_dir))
+    signin.save_cache({"id_token": person_token, "refresh_token": "person-refresh", "expires_at": time.time() + 3600,
+                       "email": "ada@example.com", "domain": "auth.example.com", "client_id": "cid"})
+    done = subprocess.run([sys.executable, "-m", "burn_cli", "run", "--role", "worker", "--", sys.executable, "-c", "pass"],
+                          env=env, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    sid = next(iter(stack.instances))
+    for method, path, body, headers in stack.requests:
+        sent = json.dumps(body) + json.dumps(headers)
+        assert person_token not in sent and "person-refresh" not in sent and API_TOKEN not in sent, f"{method} {path}"
+    (exit_call,) = stack.calls("POST", f"/instances/{sid}/exit")
+    assert header(exit_call, "authorization") == "Bearer " + stack.session_tokens[sid]
