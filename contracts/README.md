@@ -237,9 +237,10 @@ Replace on burn adds `progress` (one entry per task item, see below), `generatio
   instance. `done` without `started` counts as both at once; a repeat never moves a time. A broken rule is a
   400 naming it (never a 409, which means burned or exited). Reads show counts only. `burn_contracts.progress`
   holds these rules and the done/quarantined split, so the API, the mock and `burn run` agree.
-- **At burn time** (one instance of a role with `replace_on_burn`; never a role burn) Burn writes `replacement` on
-  the burned instance: `{status, cutoff, cutoff_source, done, quarantined}`. `cutoff` is the earliest evidence of
-  compromise on Burn's clock (`cutoff_source: evidence`: the blocked credential, canary use or refused call that
+- **At burn time** (one instance of a role with `replace_on_burn`: scope `instance`, which a burn by source and a
+  canary burn also use; never a role, lineage or token burn, which mean stop that whole group) Burn writes
+  `replacement` on the burned instance: `{status, cutoff, cutoff_source, done, quarantined}`. `cutoff` is the
+  earliest evidence of compromise on Burn's clock (`cutoff_source: evidence`: the blocked credential, canary use or refused call that
   caused the burn, or for a burn by source this instance's first read of the source), else the burn time
   (`cutoff_source: burn_time`). An item is `done` only if it was done before the cutoff; one in flight at the
   cutoff or touched after it is `quarantined` for a person, never retried. `status` is `pending`, or

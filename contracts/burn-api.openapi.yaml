@@ -877,7 +877,7 @@ components:
         replacement:
           allOf: [{ $ref: '#/components/schemas/Replacement' }]
           nullable: true
-          description: Set when Burn burned this instance and its role has replace_on_burn (never for a role burn).
+          description: Set when this one instance was burned (scope instance, which burns by source and canary burns use too) and its role has replace_on_burn. A role, lineage or token burn never sets it.
         items_started: { type: integer, description: task items this instance reported started, finished ones included }
         items_done: { type: integer, description: task items this instance reported done }
     Replacement:
