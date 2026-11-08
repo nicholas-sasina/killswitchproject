@@ -123,6 +123,8 @@ def record_tool_output(event: dict, session: dict, tool: str, status: int, reply
     arguments = (shapes.request_body(event).get("params") or {}).get("arguments") or {}
     source_ref = tools.source_ref(tool, arguments)
     call = shapes.call_key(event)
+    if source_ref != tool and "result" in reply:  # it read a named resource: by-source must find it
+        ledger.record_read(agent_id, source_ref, via=tool, call=call)
     target_refs = {f.secret_ref for f in targets}
     for finding in detection.by_credential(found).values():
         referenced = finding.secret_ref in replaced

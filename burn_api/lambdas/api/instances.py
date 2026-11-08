@@ -54,8 +54,9 @@ def active_sessions() -> list[dict]:
 
 
 def _exposures(agent_id: str) -> int:
-    return db.table(names.EXPOSURES_TABLE).query(
-        KeyConditionExpression=Key("agent_id").eq(agent_id), Select="COUNT")["Count"]
+    return db.table(names.EXPOSURES_TABLE).query(  # credential rows only: read rows have no fingerprint
+        KeyConditionExpression=Key("agent_id").eq(agent_id), FilterExpression=Attr("fingerprint").exists(),
+        Select="COUNT")["Count"]
 
 
 _pool: ThreadPoolExecutor | None = None

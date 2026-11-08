@@ -420,8 +420,9 @@ paths:
     post:
       summary: Burn every instance that read a source since a time, and every instance they messaged afterwards.
       description: |
-        Finds instances (running or exited) with a ledger row whose source_ref matches since `since`,
-        plus the instances those sent messages to afterwards (handoff rows), and burns each through the
+        Finds instances (running or exited) that read the source since `since`, whether or not it held a
+        credential (the Gateway writes a read row for every tool call that names a resource), plus the
+        instances those sent messages to afterwards (handoff rows), and burns each through the
         scoped-burn path (`POST /burns`, scope instance). Running instances are revoked first.
       requestBody:
         required: true

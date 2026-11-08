@@ -98,10 +98,20 @@ def bump_version(dynamodb) -> None:
         Key={"fingerprint": "_version"}, UpdateExpression="ADD v :one", ExpressionAttributeValues={":one": 1})
 
 
-def ledger_rows(dynamodb, agent_id: str) -> dict[str, dict]:
-    items = dynamodb.Table("burn-exposures").query(
+def _exposure_items(dynamodb, agent_id: str) -> list[dict]:
+    return dynamodb.Table("burn-exposures").query(
         KeyConditionExpression="agent_id = :a", ExpressionAttributeValues={":a": agent_id})["Items"]
-    return {i["secret_ref_or_fp"]: i for i in items}
+
+
+def ledger_rows(dynamodb, agent_id: str) -> dict[str, dict]:
+    """The agent's credential rows (read rows left out)."""
+    return {i["secret_ref_or_fp"]: i for i in _exposure_items(dynamodb, agent_id)
+            if not i["secret_ref_or_fp"].startswith("read#")}
+
+
+def read_rows(dynamodb, agent_id: str) -> dict[str, dict]:
+    """The agent's read rows, keyed by source_ref."""
+    return {i["source_ref"]: i for i in _exposure_items(dynamodb, agent_id) if i["secret_ref_or_fp"].startswith("read#")}
 
 
 def put_session(dynamodb, agent_id="agent-alpha", status="active",
