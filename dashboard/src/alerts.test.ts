@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { attentionCount, toAlerts } from "./alerts";
+import {
+  attentionCount,
+  isBlockedAtExit,
+  isUnknownCaller,
+  toAlerts,
+} from "./alerts";
 import type { LedgerEvent } from "./contracts";
 
 let next = 0;
@@ -125,5 +130,43 @@ describe("what counts", () => {
     ]);
     expect(alerts.map((alert) => alert.tier)).toEqual(["crit", "warn", "info"]);
     expect(attentionCount(alerts)).toBe(2);
+  });
+});
+
+describe("the rules other views share", () => {
+  it("counts a block at the network's exit only when it carries a credential", () => {
+    expect(
+      isBlockedAtExit(
+        event({ action: "blocked", secret_ref: "burn/a/api_key" }),
+      ),
+    ).toBe(true);
+    expect(
+      isBlockedAtExit(
+        event({ action: "blocked", detail: "credential_detected" }),
+      ),
+    ).toBe(true);
+    expect(isBlockedAtExit(event({ action: "blocked", detail: "port" }))).toBe(
+      false,
+    );
+    expect(
+      isBlockedAtExit(
+        event({ action: "blocked", source: "gateway", secret_ref: "burn/a/k" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("names a caller Burn never enrolled, and nothing else", () => {
+    expect(isUnknownCaller(event({ action: "unregistered" }))).toBe(true);
+    expect(
+      isUnknownCaller(
+        event({ action: "refused", detail: "unknown badge client c-91" }),
+      ),
+    ).toBe(true);
+    expect(
+      isUnknownCaller(event({ action: "refused", detail: "session_required" })),
+    ).toBe(true);
+    expect(
+      isUnknownCaller(event({ action: "refused", detail: "badge revoked" })),
+    ).toBe(false);
   });
 });
