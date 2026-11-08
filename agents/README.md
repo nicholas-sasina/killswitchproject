@@ -13,15 +13,17 @@ Scenarios (agents, tickets, files, customers) live in YAML, so a new scenario ne
 - A refused call (`BURN:`), a refused token or a model auth failure logs `badge revoked/credentials rotated - stopping` and the agent stops.
 
 ## Swarm workers
-`make swarm ROLE=worker N=20` starts N deterministic workers, each running under `burn run`, on the demo's
-internal Docker network behind the egress proxy (project `burn-demo`, so it can sit next to `make demo`). A worker makes no
+`make swarm MOCK=1 ROLE=worker N=20` starts N deterministic workers, each running under `burn run`, against the mock
+servers on the host (`host.docker.internal`, the fake credential source, project `burn-demo`). A worker makes no
 model calls, so a swarm costs nothing: it calls one MCP tool (`read_inbox` by default) every few seconds through
 `BURN_MCP_URL`, offset by a hash of its agent id so 20 workers do not all call at once, and stops when the Gateway
-refuses its badge. `scripts/run_swarm.py` creates a join token for the role (the role must exist: `burn apply`),
-writes it with the supervisor's settings to `.run/swarm.env` (mode 600, gitignored) and scales one `worker`
-service. The workers' own environment holds only their own credentials: `burn run` removes the supervisor's.
-`MOCK=1` runs the same containers against the mock servers on the host (`host.docker.internal`) and the fake
-credential source, without the proxy. Ctrl-C stops only the workers.
+refuses its badge. `scripts/run_swarm.py` creates a join token for the role (the role must exist: `burn apply`)
+and writes it with the supervisor's settings to `.run/swarm.env` (mode 600, gitignored). In the container
+`burn run` is PID 1 as root and starts the worker as the unprivileged `agent` user, so the worker cannot read the
+supervisor's environment. Ctrl-C stops only the workers.
+
+Swarms on the real stack (internal network behind the egress proxy, credentials read from AWS) are coming;
+`make swarm` without `MOCK=1` refuses until then.
 
 ## Key files
 | File | What |

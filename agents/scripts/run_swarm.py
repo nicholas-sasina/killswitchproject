@@ -1,11 +1,11 @@
-"""`make swarm ROLE=worker N=20`: start N workers, each running under `burn run`, on the demo network.
+"""`make swarm MOCK=1 ROLE=worker N=20`: start N workers, each running under `burn run`, against the mock servers.
 
-    uv run python scripts/run_swarm.py --role worker --count 20 [--mock] [--interval 3]
+    uv run python scripts/run_swarm.py --role worker --count 20 --mock [--interval 3]
 
 Creates a join token for the role (shown nowhere: it goes only into .run/swarm.env, mode 600, gitignored),
 generates the compose override and starts it with the standalone docker-compose or the compose plugin.
-Workers make no model calls, so a swarm costs nothing but the stack it runs on.
---mock runs against the mock servers on the host (docker.internal) instead of the demo stack.
+Workers make no model calls, so a swarm costs nothing.
+Swarms on the real stack are not available yet, so this refuses to run without --mock.
 """
 import argparse
 import json
@@ -19,6 +19,7 @@ import yaml
 from common import AGENTS_DIR, REPO_ROOT, RUN_DIR, load_dotenv
 from swarm_compose import build_compose, swarm_env
 
+NOT_YET = "swarms on the real stack are not available yet: run `make swarm MOCK=1` against the mock servers"
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
 
@@ -49,9 +50,11 @@ def main() -> int:
     parser.add_argument("--role", required=True)
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between a worker's tool calls")
-    parser.add_argument("--mock", action="store_true", help="use the mock servers on the host")
+    parser.add_argument("--mock", action="store_true", help="use the mock servers on the host (required for now)")
     parser.add_argument("--dry-run", action="store_true", help="write the files and print the command, start nothing")
     args = parser.parse_args()
+    if not args.mock:
+        sys.exit(NOT_YET)
     if args.count < 1:
         sys.exit("--count must be at least 1")
 
@@ -71,21 +74,18 @@ def main() -> int:
                                            gateway_url=gateway, mock=args.mock).items()))
     (RUN_DIR / "compose.swarm.yml").write_text(
         yaml.safe_dump(build_compose(args.role, mock=args.mock, interval=args.interval)))
-    files = ["-f", ".run/compose.swarm.yml"] if args.mock else ["-f", "docker-compose.yml", "-f", ".run/compose.swarm.yml"]
+    files = ["-f", ".run/compose.swarm.yml"]
     # Paths in the override are relative to agents/, as in the base file, wherever the override itself lives.
     up = [*compose_command(), "-p", "burn-demo", "--project-directory", ".", *files]
     if args.dry_run:
         print(" ".join([*up, "up", "--build", "--scale", f"worker={args.count}", "worker"]))
         return 0
-    if not args.mock:
-        from run_demo import prepare_proxy_inputs  # the proxy's build context and its own credentials
-        prepare_proxy_inputs()
     try:
         return subprocess.run([*up, "up", "--build", "--scale", f"worker={args.count}", "worker"], cwd=AGENTS_DIR).returncode
     except KeyboardInterrupt:
         return 0
     finally:
-        # Stop only the workers: with the demo stack the proxy may be serving other agents.
+        # Stop only the workers; anything else running in the project is left alone.
         subprocess.run([*up, "rm", "-s", "-f", "worker"], cwd=AGENTS_DIR)
 
 

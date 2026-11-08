@@ -2,6 +2,7 @@
 
 Same shape as the scenario demo (see compose_gen.py): workers join only the internal network, so their one way
 out is the egress proxy. The proxy is a convenience for well-behaved clients; the network rule is the containment.
+Only the mock form is used today (run_swarm.py refuses the other); the stack form is kept for when it is enabled.
 """
 CERT = "/certs/mitmproxy-ca-cert.pem"
 PROXY = "http://proxy:8080"

@@ -69,7 +69,7 @@ mocks: ## Start the mock Burn API (:8700) and mock MCP tools (:8701), developmen
 proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
 
-swarm: ## Start N deterministic workers under `burn run` on the demo network (ROLE=worker N=20, MOCK=1 for the mock servers)
+swarm: ## Start N deterministic workers under `burn run` against the mock servers (MOCK=1 required; ROLE=worker N=20)
 	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) $(if $(MOCK),--mock)
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
