@@ -148,3 +148,20 @@ def test_pipe_projection_keeps_classification_and_drops_sensitive_fields(templat
         kept_values = {event[f] for f in ("agent_id", "session_id", "role") if event.get(f)}
         if event.get(dropped) and event[dropped] not in kept_values:
             assert event[dropped] not in body
+
+
+def test_a_stored_event_row_reaches_the_queue_with_every_forwarded_field(template):
+    """A row as Burn's writers store it (burn_contracts.events.for_storage), in the stream's DynamoDB JSON,
+    through the Pipe's template: every forwarded path exists, so none of them arrives as an empty string."""
+    from boto3.dynamodb.types import TypeSerializer
+    from burn_contracts.events import for_storage, make_event
+    from burn_notify.events import FORWARDED, parse
+    event = make_event(agent_id="agent-worker-abc123", source="egress", action="blocked",
+                       session_id="sess_0123456789abcdef", secret_ref="burn/agent-worker-abc123/api_key")
+    image = {k: TypeSerializer().serialize(v) for k, v in {"stream": "all", **for_storage(event)}.items()}
+    record = {"eventID": "1", "eventName": "INSERT", "eventSource": "aws:dynamodb",
+              "dynamodb": {"NewImage": image, "StreamViewType": "NEW_IMAGE"}}
+    pipe = next(iter(template.find_resources("AWS::Pipes::Pipe").values()))
+    body = _render_pipe_template(pipe["Properties"]["TargetParameters"]["InputTemplate"], record)
+    forwarded = parse({"messageId": "m", "receiptHandle": "r", "body": body})
+    assert {k: forwarded[k] for k in FORWARDED} == {k: event[k] for k in FORWARDED}

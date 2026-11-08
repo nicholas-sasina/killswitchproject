@@ -4,6 +4,7 @@ import os
 import pathlib
 import re
 import time
+from decimal import Decimal
 
 import jsonschema
 import pytest
@@ -235,6 +236,31 @@ def test_events_without_new_fields_stay_valid():
     event = events.make_event(agent_id="agent-a", source="burn", action="revoked")
     assert event["flag_level"] is None
     jsonschema.validate(event, EVENT_SCHEMA)
+
+
+def test_a_stored_event_keeps_every_field_and_gains_only_a_ttl():
+    event = events.make_event(agent_id="agent-reader", source="egress", action="blocked",
+                              secret_ref="burn/agent-reader/api_key", secret_type="api_key")
+    before = time.time()
+    row = events.for_storage(event)
+    assert set(row) == set(event) | {events.TTL_ATTRIBUTE}
+    assert {k: row[k] for k in event} == event and row["flag_level"] is None  # unused fields stay, as NULLs
+    ttl = row[events.TTL_ATTRIBUTE]
+    days = events.EVENT_RETENTION_DAYS * 86400
+    assert type(ttl) is int and int(before) + days <= ttl <= time.time() + days
+    assert events.TTL_ATTRIBUTE not in event  # the event itself is untouched
+
+
+def test_a_stored_event_reads_back_as_the_event_it_was():
+    event = events.make_event(agent_id="agent-reader", source="burn", action="flagged",
+                              secret_ref="burn/shared/crm_db_url", owner="shared", flag_level="seen")
+    assert events.from_storage(events.for_storage(event)) == event
+    jsonschema.validate(events.from_storage(events.for_storage(event)), EVENT_SCHEMA)
+    # A row missing its unused fields (an older contract, or a writer that left them out), with the TTL
+    # as DynamoDB returns a number: the fields come back as None and the TTL is gone.
+    row = {k: v for k, v in events.for_storage(event).items() if v is not None}
+    row[events.TTL_ATTRIBUTE] = Decimal(row[events.TTL_ATTRIBUTE])
+    assert events.from_storage(row) == event
 
 
 def test_canary_secret_ref_is_per_session_deterministic_and_valid():

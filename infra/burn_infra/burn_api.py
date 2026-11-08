@@ -92,7 +92,8 @@ class BurnApiStack(cdk.Stack):
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/api_key-*",
                        f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/aws_key-*"],
         ))
-        role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge (delete: a failed join's)
+        # badge secrets: burn/<agent_id>/badge (delete: a failed join's, or a role instance's when it ends)
+        role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:DeleteSecret"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/*/badge-*"],
         ))

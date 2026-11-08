@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 from burn_contracts import names
-from burn_contracts.events import utc_now_iso
+from burn_contracts.events import EVENT_RETENTION_DAYS, TTL_ATTRIBUTE, ttl_epoch, utc_now_iso
 
 import caller
 import db
@@ -53,6 +53,9 @@ def create(role_name: str, body: dict) -> dict:
         "uses": uses, "uses_left": uses, "revoked": False,
         "expires_at": _iso(datetime.now(timezone.utc) + timedelta(seconds=ttl)), "created_at": utc_now_iso(),
         "created_by": caller.get().person,
+        # Kept well past expiry so `burn login` failures stay explainable,
+        # then reclaimed. The ISO expires_at above is the one enforced.
+        TTL_ATTRIBUTE: ttl_epoch(EVENT_RETENTION_DAYS + ttl // 86400),
     }
     db.table(names.ENROLL_TOKENS_TABLE).put_item(Item=row)
     return view(row) | {"token": f"{names.JOIN_TOKEN_PREFIX}{token_id}.{secret}"}

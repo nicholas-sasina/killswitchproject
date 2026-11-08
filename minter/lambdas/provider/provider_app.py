@@ -15,7 +15,7 @@ import logging
 
 import boto3
 from burn_contracts import fingerprint as fp
-from burn_contracts.events import make_event
+from burn_contracts.events import for_storage, make_event
 from burn_contracts.names import (EVENTS_STREAM, EVENTS_TABLE, FINGERPRINT_KEY_SECRET,
                                   FINGERPRINTS_TABLE)
 
@@ -54,7 +54,8 @@ def _record_rejection(row: dict, digest: str) -> None:
         owner="shared" if owner == "shared" else "agent", owner_agent_id=owner,
         detail=f"rotated key presented (was version {int(row['version'])})",
     )
-    boto3.resource("dynamodb").Table(EVENTS_TABLE).put_item(Item={"stream": EVENTS_STREAM, **event})
+    boto3.resource("dynamodb").Table(EVENTS_TABLE).put_item(
+        Item={"stream": EVENTS_STREAM, **for_storage(event)})
 
 
 def _source_ip(event: dict) -> str | None:

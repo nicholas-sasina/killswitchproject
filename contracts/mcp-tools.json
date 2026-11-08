@@ -1,8 +1,6 @@
 {
-  "description": "MCP tools exposed through the AgentCore Gateway (real: /gateway tool Lambda; mock: /mocks/mcp_tools_mock.py). Both load this file so names and input schemas cannot drift. Tool data comes from the loaded scenario (contracts/scenario.schema.json), never from code. The pre-call interceptor injects the caller's identity as the argument `burn_caller_agent_id`; it is NOT part of the public input schemas below, and a value sent by the agent is overwritten. `resource_arg` names the argument that identifies what the tool read (null = none); the Gateway records it on ledger rows as source_ref = '<tool>:<value>'. `accepts_secret_refs` lists the arguments in which the Gateway may swap a {{burn:ref:<secret_ref>}} reference for the real value (never for send_message or notify).",
-  "injected_arguments": [
-    "burn_caller_agent_id"
-  ],
+  "description": "MCP tools exposed through the AgentCore Gateway (real: /gateway tool Lambda; mock: /mocks/mcp_tools_mock.py). Both load this file so names and input schemas cannot drift. Tool data comes from the loaded scenario (contracts/scenario.schema.json), never from code. The pre-call interceptor injects the caller's identity as the arguments `burn_caller_agent_id` and `burn_caller_session_id` (the verified badge session, used only to fill {{canary}} with that session's own canary); they are NOT part of the public input schemas below, and values sent by the agent are overwritten. `resource_arg` names the argument that identifies what the tool read (null = none); the Gateway records it on ledger rows as source_ref = '<tool>:<value>'. `accepts_secret_refs` lists the arguments in which the Gateway may swap a {{burn:ref:<secret_ref>}} reference for the real value (never for send_message or notify).",
+  "injected_arguments": ["burn_caller_agent_id", "burn_caller_session_id"],
   "tools": [
     {
       "name": "list_tickets",

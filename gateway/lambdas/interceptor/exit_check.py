@@ -18,13 +18,15 @@ import shapes
 from burn_contracts.events import make_event
 
 CALLER_ARG = "burn_caller_agent_id"
+SESSION_ARG = "burn_caller_session_id"
+INJECTED = {CALLER_ARG, SESSION_ARG}
 # tool -> event source used when it is blocked
 CHECKED_TOOLS = {"send_message": "handoff", "notify": "egress"}
 
 
 def outgoing_text(arguments: dict) -> str:
-    """Every string the agent passed, one per line (our own injected id excluded)."""
-    return "\n".join(str(v) for k, v in sorted(arguments.items()) if k != CALLER_ARG and v is not None)
+    """Every string the agent passed, one per line (our own injected ids excluded)."""
+    return "\n".join(str(v) for k, v in sorted(arguments.items()) if k not in INJECTED and v is not None)
 
 
 def check(event: dict, session: dict, tool: str, arguments: dict) -> dict | None:

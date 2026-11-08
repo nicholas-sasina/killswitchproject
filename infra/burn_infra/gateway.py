@@ -83,12 +83,13 @@ class BurnGatewayStack(cdk.Stack):
         tools_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem", "dynamodb:Query", "dynamodb:DeleteItem"],
             resources=[table("burn-messages")]))
-        # Only the secrets placeholders may name: agents' api_key/aws_key and
-        # shared credentials. Not badges, not burn-system/*. (ARNs end in a random suffix.)
+        # Only the secrets placeholders may name: agents' api_key/aws_key, shared credentials, and the
+        # calling session's canary for {{canary}}. Not badges, not burn-system/*. (ARNs end in a random suffix.)
         tools_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[arn("secretsmanager", "secret:burn/agent-*/api_key-*"),
                        arn("secretsmanager", "secret:burn/agent-*/aws_key-*"),
+                       arn("secretsmanager", "secret:burn/agent-*/canary_*"),
                        arn("secretsmanager", "secret:burn/shared/*")]))
 
         # --- Interceptor Lambda: badge check, allowlists, ledger, exit check ---

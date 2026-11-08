@@ -1,6 +1,7 @@
 """Read-only routes: events feed, ledger, badge status, blast radius."""
 from boto3.dynamodb.conditions import Attr, Key
 from burn_contracts import names
+from burn_contracts.events import from_storage
 
 import db
 import minter_client
@@ -45,7 +46,7 @@ def events_feed(since: str | None, limit: int) -> dict:
     else:
         # Newest `limit` events, then flipped back to ascending order.
         items = tbl.query(KeyConditionExpression=stream, ScanIndexForward=False, Limit=limit)["Items"][::-1]
-    events = [{k: v for k, v in item.items() if k != "stream"} for item in items]
+    events = [from_storage({k: v for k, v in item.items() if k != "stream"}) for item in items]
     return {
         "events": events,
         "agents": agent_states(),

@@ -1,14 +1,18 @@
 # Deploying Burn notifications
 
-**Status: not deployed.** Deploying changes the shared AWS account, so it needs explicit approval from
-the workstream owner **and** the infrastructure owner. Nothing below has been run against AWS. It has
-been checked locally: `cdk synth` of both stacks, a template diff of the stream change, and the stack
-tests (`tests/test_infra.py`).
+Deploying changes two things: it enables a stream on the existing `burn-events` table (in `BurnData`),
+then creates the new `BurnNotifications` stack that reads it. Nothing else in Burn changes.
+
+- **Testing a deployment:** pass `-c burn:notify_notice="SYNTHETIC TEST - ..."` and every message is
+  labelled `[TEST]`. Redeploy without it to make alerts normal.
+- **Email sender:** send from a verified SES **domain** identity with DKIM, plus SPF and DMARC records
+  for that domain. Mailbox providers check that the From domain is authenticated. A free-mail sender
+  such as a @gmail.com address is not aligned when sent through SES, and may be rejected, filtered or
+  dropped.
 
 ## What changes on existing resources
-Exactly one change, prepared on branch `ws/notifications-infra` (`infra/burn_infra/data.py`, +6/−2).
-That branch has no PR yet; it is for the infra owner to open. The synthesized `BurnData` template
-differs from `main` in two places only:
+Exactly one change, in `infra/burn_infra/data.py` (#120). The synthesized `BurnData` template gains two
+things only:
 
 ```diff
 + "StreamSpecification": {"StreamViewType": "NEW_IMAGE"}     # on burn-events
@@ -84,7 +88,7 @@ SES needs no secret: the role is allowed to send from the verified identity.
 | `BURN_NOTIFY_METRICS` | `1` (EMF metrics in `Burn/Notifications`) |
 | `BURN_DASHBOARD_ORIGIN` | from `-c burn:dashboard_origin`, a bare `https://` origin |
 
-## Deployment steps (after approval)
+## Deployment steps
 ```bash
 export AWS_PROFILE=<approved profile> AWS_REGION=us-east-1
 
@@ -114,6 +118,8 @@ cd notifications
 CTX="-c burn:events_stream_arn=$STREAM_ARN -c burn:notify_config=$HOME/burn-notify-deployed.json \
      -c burn:notify_ses_identity=<identity> -c burn:dashboard_origin=https://<dashboard host> \
      -c burn:alarm_email=<on-call address>"
+# optional while testing: every message is labelled [TEST]
+#    -c burn:notify_notice="SYNTHETIC TEST - deployment test; not a real security event"
 uv run --group infra npx -y aws-cdk@2 diff   --app "python infra/app.py" BurnNotifications $CTX
 uv run --group infra npx -y aws-cdk@2 deploy --app "python infra/app.py" BurnNotifications $CTX
 ```
@@ -140,13 +146,54 @@ aws sqs get-queue-attributes --queue-url "$(aws sqs get-queue-url --queue-name b
 The test message goes straight onto the queue, so it checks the queue → Lambda → providers part only.
 **The stream → Pipe → input template part is checked only by a real ledger event**, for example the
 team's demo run (`make demo`) or a canary presentation through the deployed mock provider. That writes
-a genuine (test-agent) event to `burn-events` and needs its own approval. Check its delivery row in
+a genuine (test-agent) event to the shared `burn-events` ledger, so agree it with the team first. Check its delivery row in
 `burn-notify-state`, and confirm the Pipe shows no failures:
 `aws pipes describe-pipe --name burn-events-to-notify` and the `burn-notify-dlq` count.
 
 Then confirm in each channel that the `[TEST]` alert arrived. About a minute later, check for its
 follow-up summary too if the test fixture was a containment update (`--fixture canary_revoked`).
 Real Burn events flow automatically from then on.
+
+### What to look for
+- **Delivery history** (`burn-notify-state`, `delivery#…` items):
+  - Each event and destination appears once.
+  - `status` is `delivered` with `attempts` 1 in the normal case.
+  - `permanently_failed` has a `failure_category` (for example `auth_rejected`, `retries_exhausted:…`).
+  - Summaries appear as `agg_…` event ids.
+- **Providers:**
+  - Telegram and Discord return a message id, recorded as `provider_ref`.
+  - Slack returns only `ok`, so look in the channel.
+  - SES returns a MessageId. With the configuration set below, its `Delivery` event carries the
+    recipient server's SMTP reply.
+- **Email reaching the inbox:** check the received headers for `dkim=pass`, `spf=pass` and
+  `dmarc=pass` for the sender domain. A free-mail From address (for example @gmail.com) can get a
+  `250 OK` from Gmail's server and still never appear in the mailbox.
+- **SES delivery events (optional):** create a configuration set with an event destination (for
+  example SNS to SQS), and set it as the email destination's `options.configuration_set`. The stack
+  grants `ses:SendEmail` on it.
+
+### Alarms
+Subscribe an address (`-c burn:alarm_email=…`, or `aws sns subscribe` to `burn-notify-alarms`), then
+confirm the email AWS sends. To test delivery without an incident:
+```bash
+aws cloudwatch set-alarm-state --alarm-name burn-notify-queue-age --state-value ALARM \
+    --state-reason "TEST: alarm email delivery"     # returns to OK at the next evaluation
+```
+
+### Retries and the DLQ, without touching the live queue
+Create a disposable queue with its own DLQ (for example `maxReceiveCount` 3), a state table, and a
+Lambda from the same code. Give it one healthy destination, plus one that fails transiently: a
+provider-shaped URL on a host that does not resolve, so no real provider is contacted. Send one
+`test-message` and expect:
+1. The healthy destination is delivered once.
+2. The failing one is `retrying`, with growing gaps between receives.
+3. On the last receive it is `permanently_failed: retries_exhausted:…` and the message moves to the
+   DLQ.
+4. A redrive (`aws sqs start-message-move-task`) is absorbed with both destinations skipped and no
+   duplicate post.
+
+Set `BURN_NOTIFY_METRICS=0` on the disposable Lambda. Its metrics would otherwise count towards the
+production `burn-notify-permanent-failures` alarm. Delete the resources afterwards.
 
 ## Stop, roll back, tear down
 | Goal | Command | Effect on Burn |
@@ -156,7 +203,7 @@ Real Burn events flow automatically from then on.
 | Disable one destination | set `"enabled": false` in the config and redeploy the stack | none |
 | Remove the notifications stack | `uv run --group infra npx -y aws-cdk@2 destroy --app "python infra/app.py" BurnNotifications $CTX` | none; delivery history is deleted |
 | Remove the secrets | `aws secretsmanager delete-secret --secret-id burn-notify/<name> --recovery-window-in-days 7` | none |
-| Turn the stream off | revert the `ws/notifications-infra` change, then `make deploy-BurnData` | none (in-place update); destroy the notifications stack first |
+| Turn the stream off | remove the `stream=` argument for `burn-events` in `infra/burn_infra/data.py` (#120), then `make deploy-BurnData` | none (in-place update); destroy the notifications stack first |
 
 ## Operational notes
 - **Order:** deploy the stream first, then the notifications stack; for teardown, the reverse.

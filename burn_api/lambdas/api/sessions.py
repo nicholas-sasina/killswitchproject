@@ -36,7 +36,8 @@ def end_session(session: dict, status: str = "revoked", idle_before: str | None 
     """Flip an active session to `revoked` (burned) or `exited` and delete its Cognito client.
 
     The status flip is the real kill switch (the gateway checks it on every call).
-    Deleting the client only stops new tokens being issued. Returns False if the session
+    Deleting the client only stops new tokens being issued. A role instance's stored badge
+    goes after it, which only reclaims storage: see _delete_badge_secret. Returns False if the session
     was no longer active (someone else ended it first), so an end is never recorded twice.
     With `idle_before`, the session also has to still be unseen since then (`last_seen` older), so
     a heartbeat that lands first wins over the idle sweep.
@@ -59,7 +60,40 @@ def end_session(session: dict, status: str = "revoked", idle_before: str | None 
         badges.delete_badge(session["client_id"])
     except Exception as exc:  # already ended in DynamoDB; a leftover client is harmless
         print(f"delete_badge failed for {session['session_id']}: {type(exc).__name__}")
+    if session.get("role"):  # a role instance; a scenario agent keeps its badge secret for its next session
+        _delete_badge_secret(session.get("agent_id"))
     return True
+
+
+def _delete_badge_secret(agent_id: str | None) -> None:
+    """Drop a role instance's stored badge now its session has ended.
+
+    Only a role instance's. It has an agent id of its own and a single session, so nothing writes or
+    reads burn/<agent_id>/badge again. A scenario agent's secret stays: its next session puts a new
+    version into it. Deleting it would make that start (which ends the old session just before it
+    stores the new badge) wait for Secrets Manager to free the name, and a burn racing a restart could
+    delete the new session's badge.
+
+    Nothing a caller or an auditor reads is lost. The secret holds client_id,
+    which the session row keeps anyway; client_secret, which stopped working
+    the moment the Cognito client was deleted; and a token url and scope
+    that are identical for every badge. The record of what happened is
+    untouched: the session row with its revoked_at or exited_at stamp, the
+    exposure ledger, the fingerprints (kept and marked rotated, so an old
+    value is still caught), and the canary.
+
+    Best effort, exactly like the client deletion. The status flip is
+    what contains the agent, so a storage cleanup failure must never raise,
+    and a secret that is already gone is fine. A later reset or
+    `reset.py --orphans-only` picks up anything missed.
+    """
+    if not agent_id:
+        return
+    try:
+        boto3.client("secretsmanager", region_name=names.REGION).delete_secret(
+            SecretId=names.agent_secret_ref(agent_id, "badge"), ForceDeleteWithoutRecovery=True)
+    except Exception as exc:
+        print(f"badge secret delete failed for {agent_id}: {type(exc).__name__}")
 
 
 def revoke_sessions(agent_id: str) -> list[str]:
@@ -78,15 +112,41 @@ def exit_sessions(agent_id: str) -> list[str]:
             if s.get("status") == "active" and end_session(s, "exited")]
 
 
+#: A scenario agent's badge secret is reused by its next session. A badge
+#: secret can also be deleted: a failed join's, a role instance's when its
+#: session ends, and every instance's at a reset. Secrets Manager keeps a
+#: just-deleted name unusable for a few seconds, even for a force delete with
+#: no recovery window, so storing the badge retries rather than failing the
+#: session start. minter/lambdas/minter/vault.py does the same for credentials.
+STORE_BADGE_ATTEMPTS = 10
+STORE_BADGE_WAIT_SECONDS = 2
+
+
 def _store_badge(agent_id: str, badge: dict) -> str:
     ref = names.agent_secret_ref(agent_id, "badge")
     client = boto3.client("secretsmanager", region_name=names.REGION)
     value = json.dumps(badge)
-    try:
-        client.put_secret_value(SecretId=ref, SecretString=value)
-    except client.exceptions.ResourceNotFoundException:
-        client.create_secret(Name=ref, SecretString=value)
-    return ref
+    for attempt in range(STORE_BADGE_ATTEMPTS):
+        try:
+            try:
+                client.put_secret_value(SecretId=ref, SecretString=value)
+            except client.exceptions.ResourceNotFoundException:
+                client.create_secret(Name=ref, SecretString=value)
+            return ref
+        except client.exceptions.ResourceExistsException:
+            continue  # a concurrent call created it; the next pass puts a value in
+        except client.exceptions.InvalidRequestException as err:
+            # Waiting only helps while the name is still being deleted, which put_secret_value and
+            # create_secret both report this way. Any other refusal fails now, not after the retries.
+            if not _being_deleted(err) or attempt == STORE_BADGE_ATTEMPTS - 1:
+                raise
+            time.sleep(STORE_BADGE_WAIT_SECONDS)
+    raise RuntimeError(f"could not store the badge secret for {agent_id}")
+
+
+def _being_deleted(err: ClientError) -> bool:
+    """An InvalidRequestException about a secret marked for deletion, matched as the minter's vault.put() does."""
+    return "deletion" in str(err) or "deleted" in str(err)
 
 
 def start_session(agent_id: str) -> dict:
@@ -252,7 +312,7 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
     except BaseException:
         _discard_partial_instance(agent_id, minted, badge, session_id)
         raise
-    _recheck_after_write(agent_id, session_id, badge, token_id, parent_session)
+    _recheck_after_write(agent_id, role_name, session_id, badge, token_id, parent_session)
     # The row exists and the token use is spent. A failed event write must not look like a failed
     # join (the caller would refund the use), so events are best effort from here on.
     # A join has no caller of its own yet: its events are the new instance's.
@@ -309,7 +369,7 @@ def _own_secrets(badge: dict, credentials: list[dict]) -> dict:
     return out
 
 
-def _recheck_after_write(agent_id, session_id, badge, token_id, parent_session):
+def _recheck_after_write(agent_id, role_name, session_id, badge, token_id, parent_session):
     """Refuse a child whose parent was burned (or whose token was revoked) while it was starting.
 
     A scoped burn scans for targets and then revokes them. A child written after that scan would
@@ -326,7 +386,8 @@ def _recheck_after_write(agent_id, session_id, badge, token_id, parent_session):
         allowed = not tokens.get(token_id, consistent=True)["revoked"]
     if allowed:
         return
-    end_session({"session_id": session_id, "client_id": badge["client_id"]}, "revoked")
+    end_session({"session_id": session_id, "agent_id": agent_id, "role": role_name, "client_id": badge["client_id"]},
+                "revoked")
     try:
         minter_client.call("DELETE", f"/agents/{agent_id}/credentials")
     except Exception as exc:

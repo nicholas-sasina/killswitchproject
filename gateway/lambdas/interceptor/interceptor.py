@@ -29,6 +29,7 @@ import shapes
 from burn_contracts.events import make_event
 
 CALLER_ARG = "burn_caller_agent_id"
+SESSION_ARG = "burn_caller_session_id"  # lets the tools fill {{canary}} with THIS session's canary
 ACTIVE = "active"
 
 log = logging.getLogger()
@@ -67,6 +68,7 @@ def on_request(event: dict) -> dict:
 
     arguments = dict((body.get("params") or {}).get("arguments") or {})
     arguments[CALLER_ARG] = session["agent_id"]  # overwrite whatever the agent sent
+    arguments[SESSION_ARG] = session["session_id"]  # likewise: never an id the agent typed
 
     if tool == "send_message":
         recipient = arguments.get("to")

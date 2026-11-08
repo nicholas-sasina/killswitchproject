@@ -7,15 +7,18 @@ event types, does not change how events are written, and never writes to a Burn 
 notification cannot block an agent, the Burn API or containment, and the event stays in the ledger
 whatever happens to its notifications.
 
-```
-burn-events (DynamoDB stream, NEW_IMAGE)
-  └─ EventBridge Pipe (filter: eventName = INSERT)
-       └─ SQS burn-notify ──(5 receives)──▶ SQS burn-notify-dlq
-            └─ Lambda burn-notify ─▶ classify ─▶ route ─▶ claim ─▶ send ─▶ record
-                                          Slack · Telegram · Discord · Teams · SES
-EventBridge schedule (1 min) ─▶ Lambda burn-notify-flush ─▶ aggregate summaries, digests,
-                                                             containment summaries
-DynamoDB burn-notify-state: delivery claims and history, ordering facts, windows (TTL)
+```mermaid
+flowchart LR
+  B[Burn API, provider, gateway<br/>write ledger events] --> T[(DynamoDB burn-events)]
+  T -- "stream (NEW_IMAGE)" --> P[EventBridge Pipe<br/>INSERT filter, field allowlist]
+  P --> Q[SQS burn-notify]
+  Q -- "after 5 receives" --> D[SQS burn-notify-dlq]
+  Q --> L[Lambda burn-notify<br/>classify, route, claim, send]
+  L --> S[(DynamoDB burn-notify-state<br/>claims, history, windows)]
+  L --> SL[Slack] & TG[Telegram] & DC[Discord] & SES[SES email]
+  E[EventBridge schedule, 1 min] --> F[Lambda burn-notify-flush<br/>containment summaries, digests]
+  F --> S & SL & TG & DC & SES
+  A[CloudWatch alarms x4] --> N[SNS burn-notify-alarms] --> M[on-call email]
 ```
 
 Guides: [live testing with real channels](docs/LIVE_TESTING.md) · [deployment runbook](docs/DEPLOYMENT.md).
@@ -114,6 +117,17 @@ below HIGH. The wording follows the evidence:
 - **Residual risk.** If a provider accepts a message and the worker dies before recording it, the
   lease expires and the message can be sent again. Delivery is at least once, never exactly once.
 
+## Test layers
+| Layer | What it exercises | Where |
+|---|---|---|
+| Local | Classification, formatting, routing, dedup, retries, redaction, with mocked providers | `tests/` (default `pytest`) |
+| Emulated | AWS on moto (DynamoDB, SQS redrive), real sockets against a local TLS server, Burn's real canary containment code via its harness | `test_aws.py`, `test_transport_real.py`, `test_backend_demo.py` |
+| Live providers | Real Slack, Telegram, Discord and SES delivery from this machine, with `[TEST]` messages | `burn_notify live-check --live` (docs/LIVE_TESTING.md) |
+| Deployed | The stack in AWS: stream, Pipe, SQS, Lambda and the providers | docs/DEPLOYMENT.md, "Verification after deploying" |
+
+A deployed check is end to end only when a real ledger row travels stream → Pipe → SQS → Lambda →
+provider. A test message placed straight on the queue skips the stream and the Pipe.
+
 ## Configuration
 `BURN_NOTIFY_CONFIG=path/to/config.json` (local), or `BURN_NOTIFY_CONFIG_JSON` (set by the stack).
 See [`config.example.json`](config.example.json).
@@ -190,13 +204,13 @@ BURN_NOTIFY_LIVE=1 uv run python demo/backend_demo.py --live --config ~/burn-not
 BURN_NOTIFY_PROBE=1 uv run pytest -m live tests/test_live_probe.py   # negative probes: invalid creds, nothing delivered
 ```
 
-## Deploying (needs the infrastructure owner)
-Not deployed. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the exact commands, IAM, secrets,
-environment, resources and costs (about $2–3 a month), verification, and rollback and teardown.
+## Deploying
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) has the exact commands, IAM, secrets, environment, resources
+and costs (about $2–3 a month), verification, and rollback and teardown.
 
 In short:
-1. **Enable the stream on `burn-events`.** This is the only change to an existing resource: branch
-   `ws/notifications-infra`, an in-place update with no interruption.
+1. **Enable the stream on `burn-events`.** This is the only change to an existing resource
+   (`infra/burn_infra/data.py`, #120). It's an in-place update with no interruption.
 2. **Deploy the new `BurnNotifications` stack** from `infra/app.py`.
    - EventBridge Pipe (INSERT filter, its own DLQ).
    - SQS queue and DLQ.
