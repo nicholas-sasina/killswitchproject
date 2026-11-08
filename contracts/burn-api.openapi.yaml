@@ -76,6 +76,31 @@ paths:
                   token_id: { type: string, nullable: true }
                   tools: { type: array, items: { type: string } }
                   egress: { type: array, items: { type: string }, nullable: true }
+                  secrets:
+                    type: object
+                    required: [badge]
+                    description: |
+                      The instance's own secret values, returned ONLY when a role instance starts
+                      (`enroll_token` or `parent_session`); the scenario `agent_id` form never returns it.
+                      Returned once: Burn never sends these values again. The caller hands them to the
+                      instance and must not log or store them. The join token is the authority to receive them.
+                    properties:
+                      badge:
+                        type: object
+                        required: [client_id, client_secret, token_url, scope]
+                        properties:
+                          client_id: { type: string }
+                          client_secret: { type: string }
+                          token_url: { type: string }
+                          scope: { type: string }
+                      api_key: { type: string, description: Present if the role mints an api_key. }
+                      aws_key:
+                        type: object
+                        description: Present if the role mints an aws_key.
+                        required: [access_key_id, secret_access_key]
+                        properties:
+                          access_key_id: { type: string }
+                          secret_access_key: { type: string }
         '403': { description: join token invalid, expired, used up or revoked; or role not in the parent's may_spawn }
         '404': { description: agent_id is not in the loaded scenario, or the role or parent session does not exist }
         '429': { description: rate limited while issuing credentials; retry with backoff }

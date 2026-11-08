@@ -123,3 +123,20 @@ def test_role_ownership_rules(client):
     assert check(client.get("/roles/worker"), "/roles/{name}")["managed_by"] == "code"
     assert client.get("/roles/nope").status_code == 404
     assert client.post("/roles", json={"name": "Bad Name", "tools": []}).status_code == 422
+
+
+def test_a_role_instance_gets_its_secret_values_once_and_a_scenario_agent_does_not(client, scenario):
+    make_role(client, WORKER)
+    make_role(client, PLANNER | {"may_spawn": ["worker"]})
+    joined = join(client, "worker", token_for(client, "worker")["token"])
+    assert set(joined["secrets"]) == {"badge", "api_key", "aws_key"}
+    assert set(joined["secrets"]["badge"]) == {"client_id", "client_secret", "token_url", "scope"}
+    assert set(joined["secrets"]["aws_key"]) == {"access_key_id", "secret_access_key"}
+    parent = join(client, "planner", token_for(client, "planner")["token"])
+    assert set(parent["secrets"]) == {"badge", "api_key"}  # only what the role mints
+    child = check(client.post("/sessions", json={"role": "worker", "parent_session": parent["session_id"]}),
+                  "/sessions", "post", 201)
+    assert "badge" in child["secrets"] and "aws_key" not in child["secrets"]  # narrowed to the parent's
+    instance = check(client.get("/instances"), "/instances")["instances"][0]
+    assert "secrets" not in json.dumps(instance)
+    assert "secrets" not in start(client, scenario[1]["agents"][0]["id"])
