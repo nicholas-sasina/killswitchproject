@@ -34,8 +34,8 @@
     },
     "action": {
       "type": "string",
-      "enum": ["recorded", "blocked", "revoked", "rotated", "flagged", "refused", "issued", "inherited", "rejected", "started", "exited", "unregistered", "canary_used", "dismissed"],
-      "description": "recorded = credential seen in a tool response, added to ledger. blocked = outbound credential stopped. revoked = badge revoked. rotated = credential rotated. flagged = shared/other-owner credential flagged for review. refused = call with a revoked/unknown badge or disallowed tool refused. issued = session/credential issued. inherited = receiver of send_message inherited sender's ledger entry. rejected = provider refused a stale (rotated) key. started / exited = an instance began or ended (source instance). unregistered = a call with a badge Burn never issued was refused (agent_id system). canary_used = a session's canary (a decoy credential that never authenticates) was presented to the mock API provider; agent_id and session_id (the instance) say whose canary it was. dismissed = an owner closed a flagged credential after review, with a reason (the credential was not rotated)."
+      "enum": ["recorded", "blocked", "revoked", "rotated", "flagged", "refused", "issued", "inherited", "rejected", "started", "exited", "unregistered", "canary_used", "dismissed", "replaced", "resumed"],
+      "description": "recorded = credential seen in a tool response, added to ledger. blocked = outbound credential stopped. revoked = badge revoked. rotated = credential rotated. flagged = shared/other-owner credential flagged for review. refused = call with a revoked/unknown badge or disallowed tool refused. issued = session/credential issued. inherited = receiver of send_message inherited sender's ledger entry. rejected = provider refused a stale (rotated) key. started / exited = an instance began or ended (source instance). unregistered = a call with a badge Burn never issued was refused (agent_id system). canary_used = a session's canary (a decoy credential that never authenticates) was presented to the mock API provider; agent_id and session_id (the instance) say whose canary it was. dismissed = an owner closed a flagged credential after review, with a reason (the credential was not rotated). replaced = a burned instance was linked to the fresh instance that takes over its task (source instance; replaced_by names it). resumed = that replacement took over the task, skipping the items done before the cut-off and leaving the quarantined ones for a person (source instance; replaces names the burned instance)."
     },
     "tool": {
       "type": ["string", "null"],
@@ -94,6 +94,16 @@
     "parent_session": {
       "type": ["string", "null"],
       "description": "Instance events: the session that spawned this instance, if any."
+    },
+    "replaces": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$",
+      "description": "resumed events: the burned session this instance replaced."
+    },
+    "replaced_by": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9_.:-]{1,128}$",
+      "description": "replaced events: the session that replaced this burned one."
     },
     "flag_level": {
       "type": ["string", "null"],

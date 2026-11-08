@@ -255,6 +255,10 @@ Replace on burn adds `progress` (one entry per task item, see below), `generatio
 - Instance lifecycle: source `instance`, actions `started` / `exited`, with `session_id`, `role`
   and `parent_session` set. A call carrying a badge Burn never issued is `agent_id: system`,
   source `gateway`, action `unregistered`.
+- Replace on burn: source `instance`, action `replaced` on the burned instance (`replaced_by` = the new session,
+  detail `replaced by <agent_id>`) and `resumed` on the replacement (`replaces` = the burned session, detail
+  `<n> done, <m> quarantined`). Both carry the caller as `actor`. A pending or needs_person replacement shows on
+  the instance, not as an event.
 - `actor` (optional) says who caused an event: the signed-in person's email, `instance:<session_id>`
   for an instance acting on its own session, `admin` for a caller with the admin header (before
   sign-in is switched on, or in local development), or `system` for Burn itself. Events written before

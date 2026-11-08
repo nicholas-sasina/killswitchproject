@@ -576,3 +576,21 @@ def test_the_replace_route_needs_a_person_and_documents_every_refusal():
     for rule in ("same role", "active", "after", "already"):
         assert rule in op["responses"]["400"]["description"], rule
     assert "TransactWriteItems" in op["description"] or "exactly one" in op["description"]
+
+
+def test_replaced_and_resumed_events_link_the_two_instances():
+    old, new = "sess_burned0123", "sess_fresh4567"
+    replaced = events.make_event(
+        agent_id=WORKER, source="instance", action="replaced", session_id=old, role="worker",
+        replaced_by=new, actor="ada@example.com", detail="replaced by agent-worker-0b7c2e")
+    resumed = events.make_event(
+        agent_id="agent-worker-0b7c2e", source="instance", action="resumed", session_id=new, role="worker",
+        replaces=old, actor="admin", detail="4 done, 1 quarantined")
+    for event in (replaced, resumed):
+        jsonschema.validate(event, EVENT_SCHEMA)
+    assert {"replaced", "resumed"} <= events.ACTIONS
+    description = EVENT_SCHEMA["properties"]["action"]["description"]
+    assert "replaced =" in description and "resumed =" in description
+    assert events.make_event(agent_id="agent-a", source="burn", action="revoked")["replaces"] is None
+    with pytest.raises(ValueError):
+        events.make_event(agent_id=WORKER, source="instance", action="resumed", replaces="has space")
