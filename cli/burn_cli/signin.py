@@ -26,6 +26,7 @@ REDIRECT_URI = names.CLI_REDIRECT_URI  # registered on the people pool's public 
 SCOPE = "openid email profile"
 REFRESH_MARGIN = 60  # seconds: refresh when the ID token has less than this left
 CALLBACK_TIMEOUT = 180
+CONNECTION_TIMEOUT = 5  # seconds one connection to the listener may take
 
 
 class SignInError(Exception):
@@ -55,11 +56,18 @@ def authorize_url(domain: str, client_id: str, challenge: str, state: str) -> st
 # -- the redirect -------------------------------------------------------------------------------
 def wait_for_code(state: str, port: int | None = None, timeout: float = CALLBACK_TIMEOUT,
                   started: threading.Event | None = None) -> str:
-    """Serve 127.0.0.1:<port> until the redirect arrives; return its code. A wrong state is refused."""
+    """Serve 127.0.0.1:<port> until this sign-in's redirect arrives, or `timeout`; return its code.
+
+    A request without this attempt's state (another page, a stale tab, a forged redirect) is answered and ignored,
+    so it can neither finish nor cancel the sign-in. Each connection gets CONNECTION_TIMEOUT seconds, so an idle
+    one (a browser's preconnect, any local process) cannot hold the listener past the deadline.
+    """
     port = port or CALLBACK_PORT
     result: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
+        timeout = CONNECTION_TIMEOUT  # per connection: applied to the socket before the request is read
+
         def do_GET(self):
             parsed = urllib.parse.urlsplit(self.path)
             if parsed.path != "/callback":
@@ -67,13 +75,16 @@ def wait_for_code(state: str, port: int | None = None, timeout: float = CALLBACK
             query = urllib.parse.parse_qs(parsed.query)
             got_state = (query.get("state") or [""])[0]
             if not secrets.compare_digest(got_state.encode(), state.encode()):
-                result["error"] = "the sign-in response did not match this sign-in attempt (state mismatch)"
-                return self._reply(400, "Sign-in failed: this response does not belong to your sign-in attempt.")
+                return self._reply(400, "This page does not belong to the sign-in in progress. You can close it.")
             if "error" in query:
                 result["error"] = f"sign-in was refused: {(query['error'] or [''])[0]}"
                 return self._reply(400, "Sign-in was not completed. You can close this tab.")
-            result["code"] = (query.get("code") or [""])[0]
-            self._reply(200, "You are signed in to Burn. You can close this tab.")
+            code = (query.get("code") or [""])[0]
+            if not code:
+                result["error"] = "the sign-in reply had no authorization code"
+                return self._reply(400, "Sign-in was not completed. You can close this tab.")
+            result["code"] = code
+            self._reply(200, "Sign-in received. Return to the terminal, which shows whether it succeeded.")
 
         def _reply(self, status, text):
             data = f"<!doctype html><title>Burn</title><p>{text}</p>".encode()
@@ -90,7 +101,7 @@ def wait_for_code(state: str, port: int | None = None, timeout: float = CALLBACK
         server = HTTPServer(("127.0.0.1", port), Handler)
     except OSError as exc:
         raise SignInError(f"cannot listen on 127.0.0.1:{port} for the sign-in redirect ({exc.strerror})") from None
-    server.timeout = 1
+    server.timeout = 1  # handle_request() returns at least this often when nobody connects
     if started:
         started.set()
     deadline = time.monotonic() + timeout

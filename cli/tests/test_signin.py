@@ -79,11 +79,69 @@ def test_login_runs_the_whole_flow_and_caches_private_credentials(cognito, capsy
     assert credentials["id_token"] not in out.out + out.err and cached["refresh_token"] not in out.out + out.err
 
 
-def test_a_response_with_the_wrong_state_is_rejected_and_nothing_is_exchanged_or_cached(cognito):
+def callback(port, **query):
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/callback?{urllib.parse.urlencode(query)}", timeout=5).read()
+    except urllib.error.HTTPError as err:
+        return err.code
+    return 200
+
+
+def test_a_redirect_without_this_attempts_state_is_ignored_and_cannot_cancel_the_sign_in(cognito):
+    port, statuses = free_port(), []
+    real = browser(cognito, port)
+
+    def forged_then_real(url):
+        statuses.append(callback(port, code="forged-code", state="forged"))  # e.g. a web page aimed at localhost
+        statuses.append(callback(port, error="access_denied"))               # no state at all
+        return real(url)
+
+    credentials = signin.login(cognito.url, "c", open_browser=forged_then_real, port=port)
+    assert statuses == [400, 400] and credentials["email"] == "ada@example.com"
+    exchanged = [f["code"] for p, f in cognito.requests if f.get("grant_type") == "authorization_code"]
+    assert exchanged == ["good-code"]
+
+
+def test_only_a_forged_redirect_times_out_with_nothing_exchanged_or_cached(cognito):
     port = free_port()
-    with pytest.raises(signin.SignInError, match="state mismatch"):
-        signin.login(cognito.url, "c", open_browser=browser(cognito, port, state="forged"), port=port)
+    with pytest.raises(signin.SignInError, match="timed out"):
+        signin.login(cognito.url, "c", open_browser=browser(cognito, port, state="forged"), port=port, timeout=1.5)
     assert not [f for p, f in cognito.requests if p == "/oauth2/token"] and signin.load_cache() is None
+
+
+def test_a_reply_with_this_state_but_no_code_is_a_clear_error(cognito):
+    port = free_port()
+
+    def no_code(url):
+        state = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["state"][0]
+        callback(port, state=state)
+        return True
+
+    with pytest.raises(signin.SignInError, match="had no authorization code"):
+        signin.login(cognito.url, "c", open_browser=no_code, port=port, timeout=5)
+
+
+@pytest.mark.parametrize("then_sign_in", [False, True])
+def test_an_idle_connection_cannot_hold_the_listener_past_its_deadline(cognito, monkeypatch, then_sign_in):
+    monkeypatch.setattr(signin, "CONNECTION_TIMEOUT", 0.5)
+    port, idle = free_port(), []
+    real = browser(cognito, port)
+
+    def idle_then_maybe_real(url):
+        idle.append(socket.create_connection(("127.0.0.1", port)))  # connects and never sends a byte
+        return real(url) if then_sign_in else True
+
+    started = time.monotonic()
+    try:
+        if then_sign_in:
+            assert signin.login(cognito.url, "c", open_browser=idle_then_maybe_real, port=port, timeout=10)["email"]
+        else:
+            with pytest.raises(signin.SignInError, match="timed out"):
+                signin.login(cognito.url, "c", open_browser=idle_then_maybe_real, port=port, timeout=1.5)
+    finally:
+        for sock in idle:
+            sock.close()
+    assert time.monotonic() - started < (8 if then_sign_in else 1.5 + 0.5 + 2)
 
 
 def test_a_refused_sign_in_and_a_rejected_code_are_clear_errors(cognito):
