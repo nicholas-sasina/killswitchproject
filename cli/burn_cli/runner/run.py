@@ -60,7 +60,9 @@ class Instance:
             raise ApiError("this instance is stopping", 409)
         body = {"role": role, "parent_session": self.session["session_id"]}
         child = retry.call(lambda: self.api.request("POST", "/sessions", body), sleep=self._sleep)
-        argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(child),
+        # argv is readable by every uid in the container (/proc/<pid>/cmdline): pass only non-secret session fields
+        public = {k: v for k, v in child.items() if k != "secrets"}
+        argv = [sys.executable, "-m", "burn_cli", "run", "--role", role, "--adopt", json.dumps(public),
                 *(["--user", self.user_arg] if self.user_arg else []), "--", *command]
         with self._spawn_lock:  # _stop_children takes the same lock, so no child starts after it ran
             if self._stopping.is_set():

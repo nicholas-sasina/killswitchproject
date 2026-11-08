@@ -142,3 +142,41 @@ def test_the_agent_cannot_reread_a_join_token_from_stdin(stack, capfd):
         print("devnull" if os.path.samestat(os.fstat(0), os.stat("/dev/null")) else "inherited")"""
     assert instance(stack, py(code), stdin_devnull=True).run() == 0
     assert capfd.readouterr().out.strip() == "devnull"
+
+
+def test_spawn_never_puts_secrets_in_the_child_supervisors_argv(stack, monkeypatch):
+    import burn_cli.runner.run as runmod
+    stack.roles["worker"]["may_spawn"] = ["worker"]
+    parent = stack.add_instance("sess_p", "worker")
+    secrets_field = {"badge": {"client_id": "cid-xyz", "client_secret": "client-secret-xyz", "token_url": "https://t/xyz"},
+                     "api_key": "mpk_live_secretvalue", "aws_key": {"access_key_id": "AKIASECRETXYZ",
+                                                                  "secret_access_key": "aws-secret-xyz"},
+                     "session_token": "bst_secrettoken"}
+    original = stack.handle
+
+    def with_secrets(method, path, query, body):
+        status, out = original(method, path, query, body)
+        if (method, path) == ("POST", "/sessions") and status == 201:
+            out = {**out, "secrets": secrets_field}
+        return status, out
+
+    stack.handle = with_secrets
+    seen = []
+
+    class Recorder:
+        def __init__(self, argv, **kw):
+            seen.append(list(argv))
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(runmod.subprocess, "Popen", Recorder)
+    inst = instance(stack, py("pass"))
+    inst.session = {"session_id": "sess_p", "agent_id": parent["agent_id"]}
+    result = inst.spawn_child("worker", ["true"])
+    (argv,) = seen
+    joined = " ".join(argv)
+    assert '"secrets"' not in joined and "secrets" not in json.loads(argv[argv.index("--adopt") + 1])
+    for value in ("client-secret-xyz", "mpk_live_secretvalue", "AKIASECRETXYZ", "aws-secret-xyz", "bst_secrettoken"):
+        assert value not in joined
+    assert json.loads(argv[argv.index("--adopt") + 1])["session_id"] == result["session_id"]  # the rest still goes
