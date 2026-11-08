@@ -1,14 +1,11 @@
 /**
  * CloudTrail history for a burned agent's AWS keys.
  *
- * Collapsible and cheap. The previous version polled every ten seconds for as
- * long as the page was open, re-sorted the whole list on every render, and
- * drew one decorated timeline node per call, which is unreadable once a key
- * has been used a few dozen times.
- *
- * Now: closed means no requests at all, the grouping is memoised, calls are
- * grouped by key so repetition collapses, and each group renders a bounded
- * number of rows behind a "show all" control.
+ * Collapsible and cheap: closed means no requests at all, the grouping is
+ * memoised, calls are grouped by key so repetition collapses into one line
+ * with a count, and each group renders a bounded number of rows behind a
+ * "show all" control. One row per call is unreadable once a key has been
+ * used a few dozen times.
  */
 import { useCallback, useMemo, useState } from "react";
 import type { BurnApi } from "../api";

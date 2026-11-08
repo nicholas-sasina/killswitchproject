@@ -1,13 +1,13 @@
 /**
  * Three views, addressed by hash so each is a real location: it survives a
- * reload, can be bookmarked, and can be put on a second screen during a demo.
+ * reload, can be bookmarked, and can be opened in a second window.
  *
  *   overview  the live fleet: active agents, their roles and instances
  *   burned    contained agents, their history, and how to rebuild them
  *   alerts    only what needs an operator, worst first
  *
  * Splitting them keeps any one page from becoming a long stack of equally
- * weighted panels, and means an unmounted view stops polling.
+ * weighted panels, and lets a view's polls stop while it is not shown.
  *
  * Hash rather than history routing because the dashboard is served as static
  * files by Vite with no server-side rewrite, so a path like /alerts would

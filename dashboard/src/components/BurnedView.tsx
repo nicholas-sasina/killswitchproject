@@ -6,10 +6,10 @@
  * the moment you most need the agent's history, so it gets a page where the
  * ledger and the CloudTrail trail are the main content.
  *
- * Built for a real fleet. A deployed stack accumulates swarm workers,
- * livecheck probes and eval agents, so this can be well over a hundred rows;
- * it filters by role, searches by name or session, and renders a bounded
- * number of rows rather than all of them.
+ * Built for a real fleet. A deployed stack accumulates swarm workers and eval
+ * agents, so this can be well over a hundred rows; it filters by role,
+ * searches by name or session, and renders a bounded number of rows rather
+ * than all of them.
  */
 import { useCallback, useMemo, useState } from "react";
 import type { BurnApi } from "../api";

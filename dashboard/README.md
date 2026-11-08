@@ -5,32 +5,35 @@
 Three views in a sidebar, each a bookmarkable location.
 
 **Overview** (`#/overview`) is the live fleet in one place. **Active agents** is a collapsible,
-scrollable list of every agent running right now, swarm workers and probes included, because it is
-built from `/events` and `/instances` merged rather than `/events` alone. It is a list of rows, not
-a grid of cards: a card grid suits three scenario agents and fails at a hundred. Selecting a row
-fills the containment detail below it. Burned agents appear nowhere on this view, including the
-roles table, which starts filtered to `active`; its Status filter still offers every state.
-Finished instances stay out of the roster, which is for what is running, but they are counted
-beside it and remain in Roles and instances. Burned
-agents are not on this roster, so it always reflects what is actually running; a count links to
-Contained. The agent you just burned stays in the containment detail so you can read the outcome
-without changing view.
+scrollable list of every agent running right now, scenario agents and swarm workers alike, built
+from `/events` and `/instances` merged. It is a list of rows rather than a grid of cards, so it
+stays readable at a hundred agents. Selecting a row fills the containment detail below it.
+Burned agents leave the roster as soon as the burn is known and move to Contained, and the
+**Instances by role** panel starts filtered to `active` (its Status filter still offers every
+state). Finished instances are counted beside the roster and remain in **Instances by role**.
+The agent you just burned stays in the containment detail so you can read the outcome without
+changing view.
 
 **Contained** (`#/burned`) holds the agents that were burned, newest first, with each one's
 exposure ledger and the CloudTrail history of its AWS keys. Two actions rebuild an agent:
 _Re-add with the same setup_ mints a fresh join token for the same role, so the new instance gets
 identical tools and permissions with its own newly minted credentials, and _Copy setup to a new
-role_ prefills the Add agent form from that role so you can change tools, credentials,
-permissions, egress or canary settings before creating it. Nothing the burned agent held is ever
-reused.
+role_ prefills the Add agent form from that role (its reference mode included) so you can change
+tools, credentials, permissions, egress or canary settings before creating it. A scenario agent is
+started by its scenario and the API refuses join tokens for scenario roles, so those offer only the
+copy. Nothing the burned agent held is ever reused.
 
 **Alerts** (`#/alerts`) shows only the events that need an operator, most serious first, with what
 each one proves and what to do about it beside every field recorded for it. Severity reflects what
 an event actually shows rather than how alarming it sounds: a canary credential being presented is
-**Critical**, because nothing legitimate ever touches it, while a blocked egress attempt is
-**High**, because it means the exit check worked. Each tally states what its tier means, so the
-scheme does not have to be learned from here, and the tallies double as filters. The navigation marker counts
-everything above `INFO`, so you can stay on the overview and still see the queue filling.
+**Critical**, because nothing legitimate ever touches it; a credential stopped at the egress proxy
+is **High**; a request the proxy refused only for its destination, port or size carries no
+credential and is **Review**. Refusals say which kind they are: a burned agent turned away, an
+unknown caller, or a call outside the agent's role. Each tally states what its tier means and
+doubles as a filter. The navigation marker counts everything above **Noted**, so you can stay on
+the overview and still see the queue filling. The list draws the first 60 alerts the filters leave,
+with a control to show them all.
+
 The **Instances by role** panel groups sessions under their roles, with parent/child lineage,
 status, last seen and exposure counts. Filter by role, status, agent, session or owner to inspect larger swarms.
 Code-managed roles are labelled read-only, and scenario roles retain their names.
@@ -49,6 +52,11 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
 
 - Polls the Burn API every second with an incremental cursor; a reducer deduplicates events by `event_id`.
 - Alerts are derived from that same stream, so the alerts view issues no requests of its own.
+- The fleet is one list built from `/events` (the scenario agents) and `/instances` (every
+  instance that joined), keyed by session, because one agent name can have many sessions with
+  different outcomes. A session only moves forward, so its status is whichever source is further
+  along, and sessions a burn from this page revoked are marked at once rather than on the next
+  instance poll. Contained matches each burn to the session it revoked.
 - Agent selection loads its exposure ledger, refreshed every five seconds.
 - The exposure ledger and the CloudTrail timeline are collapsible and start closed, both with
   scrolling bodies. Closing means different things on purpose: the ledger keeps polling, because
@@ -61,12 +69,19 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
   machine already knows, and it tracks sunset and policy without being asked. An inline script in
   `index.html` resolves it before first paint so reloads do not flash, and a `matchMedia` listener
   follows later changes.
-- An unmounted view stops polling, so sitting on Alerts issues no role or instance requests.
-- One roles request and one instances request refresh the entire role panel every five seconds,
-  including the waiting view, with cancellation and no overlapping requests.
+- The page runs one `/instances` poll every five seconds, shared by the roster, Contained and the
+  **Instances by role** panel, and pauses it on Alerts. Each call scans the sessions and counts
+  every instance's exposures, so it is the most expensive request the dashboard makes.
+- One roles request every five seconds refreshes the role panel, including the waiting view, with
+  cancellation and no overlapping requests. Contained loads roles every thirty seconds, and only
+  once an agent is selected, to offer its rebuild actions.
 - Confirming Burn highlights the card with returned rotation/flag counts for ten seconds; full references remain below the ledger.
 - A revoked agent's CloudTrail timeline refreshes every ten seconds.
 - Every response is checked for `x-burn-mock: true`; once detected, a full-width red banner stays until reload.
+- `src/contracts.ts` is a hand-maintained mirror of `contracts/ledger-event.schema.json`,
+  `contracts/burn-api.openapi.yaml` and `contracts/burn.schema.json`; change both sides together.
+  An event action the mirror does not know yet still renders, as plain text in the stream, and is
+  not treated as an alert.
 
 ## Key files
 
@@ -78,8 +93,9 @@ Existing dashboard-managed roles have a **New token** action. Both **Burn instan
 | `src/polling.ts`                 | Polling with cancellation and no overlapping requests                 |
 | `src/App.tsx`                    | View switching, agent selection and containment state                 |
 | `src/alerts.ts`                  | Which events are alerts, their severity, and what each one means      |
-| `src/router.ts`                  | Hash routing for the two views                                        |
-| `src/theme.ts`                   | Paper/ink/system choice, persistence and live system tracking         |
+| `src/fleet.ts`                   | The merged fleet, contained agents, and rebuilding roles              |
+| `src/router.ts`                  | Hash routing for the three views                                      |
+| `src/theme.ts`                   | Follows the system light or dark setting                              |
 | `src/components/`                | Agent cards, confirmation, ledger, events, alerts and timeline        |
 | `src/components/Brand.tsx`       | The Burn mark, its tile variant and the wordmark                      |
 | `src/components/Collapsible.tsx` | Panel that collapses to its heading                                   |
@@ -115,7 +131,9 @@ Tests cover reducer updates and cursor preservation, request headers and routes,
 Burn confirmation and timed card feedback, nullable metadata, and blocked handoff/egress events.
 Enrollment tests cover role creation, token display/copy/dismissal, retries and connection detection.
 Role panel tests cover lineage across roles, filtering 25 instances, burn confirmations and partial failures,
-and the shared polling limits.
+and the shared polling limits. Fleet and alert tests cover merging the two sources, burns showing
+before the next instance poll, per-session burn times, alert wording for each kind of block and
+refusal, the alerts row cap, which rebuild actions each role gets, and one instance poll per page.
 `npm run preview` serves the production build. The Burn API must allow the dashboard's origin,
 successful unauthenticated OPTIONS preflights, `x-burn-demo-token` and `Content-Type`.
 Development services expose `x-burn-mock` in `Access-Control-Expose-Headers` so the browser can detect mock data.
@@ -145,50 +163,3 @@ is the degraded one.
 **What does MOCK DATA mean, and where does the token live?** At least one API response declared itself a development mock.
 Switch URLs and reload to start a new connection. Vite embeds `VITE_` values in the browser bundle, including the demo token;
 this is a demo access control, so serve the dashboard only to the intended audience and keep builds containing it out of git.
-
-## Integrating this with the rest of the repo
-
-Points worth knowing before merging, and when changing the API alongside it.
-
-**`src/contracts.ts` is a hand-maintained mirror.** It tracks
-`contracts/ledger-event.schema.json`, `contracts/burn-api.openapi.yaml` and
-`contracts/burn.schema.json`. Change either side and change both. As of this branch the event
-`action` and `source` unions match the schema exactly.
-
-**A merge in either order is safe.** If the API ships a new event action before this file mirrors
-it, nothing breaks: `EventFeed` falls back to readable prose for an action it does not recognise
-instead of crashing the stream, and `alerts.ts` treats an unrecognised action as "not an alert"
-rather than inventing a severity for it. Both degrade quietly, so the dashboard does not have to
-be deployed in lockstep with the API.
-
-**New endpoints are additive.** `src/api.ts` is the only place that knows about routes. A view that
-is not mounted issues no requests, so adding a view costs nothing on the others.
-
-**Views are independent.** `Overview`, `Contained` and `Alerts` share only the event poll in
-`App.tsx`. If `/roles` or `/instances` are unavailable, the roles panel shows an error and the rest
-of the overview is unaffected; Alerts never touches those routes.
-
-**`AddAgent` takes an optional `template`.** Passing a `Role` prefills the form with that role's
-tools, credentials, messaging and spawn permissions, egress and canary settings, while leaving
-every field editable and still creating a _new_ role. Passing `role` instead keeps the existing
-behaviour of minting another token for a role that already exists. Both are additive, so existing
-call sites are unchanged.
-
-**One fleet list, two sources.** `src/fleet.ts` merges `/events` (scenario agents only) with
-`/instances` (every instance that ever joined, including swarm workers, livecheck probes and eval
-agents). The unit is the **instance**, keyed by session, because one agent name legitimately has
-many sessions with different outcomes: a deployed stack showed `agent-reader` with eight sessions.
-Reading only `/events` is what made the dashboard report three agents when a hundred and fifty had
-run, and made a burned swarm worker invisible.
-
-**Burned agents map to roles by name.** `roleForAgent` in `src/fleet.ts` matches an agent to its
-role by exact name first, then by the `agent-<role>` convention scenario and swarm agents use. If
-the role is gone, the rebuild actions are replaced with an explanation rather than a dead button.
-
-**Both large-list views are bounded.** Contained filters by role, searches by agent or session, and
-renders at most 60 rows behind a "show all". Alerts filters agents through a select ordered by
-alert count. A livecheck loop can put a hundred agents in the stream, which is why neither renders
-one control per agent.
-
-**`components/common.tsx` still exports `Flame`** as an alias of `BurnMark`, kept so any code that
-imports the old name keeps compiling. Prefer `BurnMark` in new code.
