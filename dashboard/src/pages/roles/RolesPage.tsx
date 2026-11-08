@@ -45,8 +45,8 @@ function RoleRow({ row }: { row: ListRow }) {
   );
 }
 
-function kinds(n: number) {
-  return `${n} ${n === 1 ? "kind" : "kinds"} of agent`;
+function groups(n: number) {
+  return `${n} ${n === 1 ? "group" : "groups"} of agents`;
 }
 
 /**
@@ -106,7 +106,7 @@ export function RolesPage() {
       <Columns>
         <Card
           title="Roles"
-          sub={loading || failed ? undefined : kinds(rows.length)}
+          sub={loading || failed ? undefined : groups(rows.length)}
           className="roles-card"
           aside={
             <div className="roles-legend" aria-label="Legend">

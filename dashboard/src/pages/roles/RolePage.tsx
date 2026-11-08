@@ -32,8 +32,8 @@ function Lede({
     where === "burn.yaml" ? <span className="id">burn.yaml</span> : where;
   return (
     <>
-      A role is a kind of agent: every {name} gets these permissions, its own
-      identity and its own copies of its keys.
+      A role groups agents and sets what they may do: every {name} gets these
+      permissions, its own identity and its own copies of its keys.
       {owner ? (
         <>
           {" "}

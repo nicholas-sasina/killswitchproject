@@ -70,6 +70,8 @@ function setup({
       const path = new URL(String(input)).pathname;
       if (hang) return new Promise<Response>(() => {});
       if (path === "/roles" && init?.method === "POST") {
+        if (JSON.parse(String(init.body)).name === "refused")
+          return new Response("bad", { status: 400 });
         posted.push(JSON.parse(String(init.body)));
         return new Response(
           JSON.stringify({ ...posted.at(-1), managed_by: "ui" }),
@@ -145,7 +147,7 @@ describe("the roles list", () => {
     await show();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Roles");
     expect(document.querySelector(".card-head")?.textContent).toContain(
-      "2 kinds of agent",
+      "2 groups of agents",
     );
     expect(rows()).toEqual([
       [
@@ -305,6 +307,44 @@ describe("a new role", () => {
     fireEvent.click(screen.getByLabelText("Replace a burned agent"));
     await create();
     expect(posted[0]).toMatchObject({ replace_on_burn: true });
+  });
+
+  it("refuses a name kept for evaluations, before writing anything", async () => {
+    setup();
+    await show();
+    await newRole("eval-x");
+    await create();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "kept for Burn's evaluations",
+    );
+    expect(posted).toEqual([]);
+    expect(document.activeElement?.textContent).toBe("Create role");
+  });
+
+  it("says plainly when Burn refuses the role", async () => {
+    setup();
+    await show();
+    await newRole("refused");
+    await create();
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Burn refused this role. Check its name and access, then try again.",
+    );
+  });
+
+  it("ignores websites typed while Full access hides them", async () => {
+    setup();
+    await show();
+    await newRole("reviewer");
+    fireEvent.click(screen.getByLabelText("Limited"));
+    fireEvent.change(
+      screen.getByLabelText("Websites it can reach (optional)"),
+      {
+        target: { value: "not a host!" },
+      },
+    );
+    fireEvent.click(screen.getByLabelText("Full access"));
+    await create();
+    expect(posted[0]).toMatchObject({ egress: null });
   });
 
   it("refuses a name that is taken, before writing anything", async () => {

@@ -1,4 +1,5 @@
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { ApiError } from "../../api";
 import { useConsole } from "../../data/ConsoleData";
 import type { RoleSpec } from "../../contracts";
 import { roleHref } from "../../router";
@@ -9,9 +10,14 @@ import {
   TextField,
   parseHosts,
   roleNameConflict,
-  rolePattern,
+  roleNameError,
 } from "./fields";
-import { FULL_ACCESS_TOOLS, fullAccessRole, type Access } from "./model";
+import {
+  FULL_ACCESS_TOOLS,
+  accessLevel,
+  fullAccessRole,
+  type Access,
+} from "./model";
 import "./add-agents.css";
 
 /**
@@ -33,22 +39,27 @@ export function NewRoleDialog({ onClose }: { onClose: () => void }) {
   const [replaceOnBurn, setReplaceOnBurn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const submitButton = useRef<HTMLButtonElement>(null);
+  // A refusal re-enables the form; keep focus in the dialog, on Create.
+  useEffect(() => {
+    if (error && !busy) submitButton.current?.focus();
+  }, [error, busy]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     setError("");
-    if (!rolePattern.test(name)) {
-      setError(
-        "Role name must be 1–32 lowercase letters, digits or hyphens, starting with a letter or digit.",
-      );
+    const nameError = roleNameError(name);
+    if (nameError) {
+      setError(nameError);
       return;
     }
     if (roles.some((existing) => existing.name === name)) {
       setError(roleNameConflict);
       return;
     }
-    const hosts = parseHosts(egress);
+    // Websites count only when Limited shows them.
+    const hosts = access === "Limited" ? parseHosts(egress) : [];
     if (!hosts) {
       setError(
         "Enter websites as hosts, such as api.example.com, separated by commas or spaces.",
@@ -77,13 +88,15 @@ export function NewRoleDialog({ onClose }: { onClose: () => void }) {
       onClose();
       window.location.hash = roleHref(name);
     } catch (caught) {
+      const status = caught instanceof ApiError ? caught.status : 0;
       setError(
-        caught instanceof Error &&
-          caught.message === "API request failed (HTTP 409)."
+        status === 409
           ? roleNameConflict
-          : caught instanceof Error
-            ? caught.message
-            : "Could not create the role.",
+          : status === 400
+            ? "Burn refused this role. Check its name and access, then try again."
+            : caught instanceof Error
+              ? `The role was not created. ${caught.message}`
+              : "The role was not created.",
       );
     } finally {
       setBusy(false);
@@ -176,6 +189,15 @@ export function NewRoleDialog({ onClose }: { onClose: () => void }) {
                 spellCheck={false}
                 hint="Leave blank for the default allowlist. Burn's Gateway is always reachable."
               />
+              {accessLevel({
+                tools,
+                egress: parseHosts(egress)?.length ? [egress] : null,
+              }) === "Full access" && (
+                <p className="add-hint">
+                  With every tool and no websites listed, this role has Full
+                  access.
+                </p>
+              )}
             </>
           )}
           <button
@@ -216,7 +238,12 @@ export function NewRoleDialog({ onClose }: { onClose: () => void }) {
         </fieldset>
         {error && <Notice tone="error">{error}</Notice>}
         <div className="dialog-actions">
-          <button className="btn btn-dark" disabled={busy} type="submit">
+          <button
+            ref={submitButton}
+            className="btn btn-dark"
+            disabled={busy}
+            type="submit"
+          >
             {busy ? "Creating…" : "Create role"}
           </button>
         </div>
