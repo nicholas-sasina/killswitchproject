@@ -433,6 +433,7 @@ def test_root_starts_the_agent_as_an_unprivileged_user_but_not_child_supervisors
     from burn_cli.runner import privs
     drop = privs.Drop("agent", 4242, 4343)
     monkeypatch.setattr(runmod.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(runmod.os, "chown", lambda *a: None)
     FakePopen.calls.clear()
     inst = instance(stack, py("pass"), drop=drop, user_arg="agent")
     assert inst.run() == 0
@@ -496,3 +497,46 @@ def test_real_process_the_agent_cannot_read_the_supervisors_environment(stack):
     assert instance(stack, py(code), drop=privs.resolve(None)).run() == 0
     result = json.loads(out.read_text())
     assert result["uid"] != 0 and result["gid"] != 0 and result["supervisor_environ_readable"] is False
+
+
+# -- a private HOME ----------------------------------------------------------------------------------
+def test_agent_gets_a_fresh_private_home_removed_at_exit(stack):
+    host_home = stack.tmp / "realhome"
+    (host_home / ".aws").mkdir(parents=True)
+    (host_home / ".aws" / "credentials").write_text("[default]\n")
+    out = stack.tmp / "home.json"
+    code = """
+        import json, os, stat, sys
+        home = os.environ["HOME"]
+        open(os.path.join(home, "scratch"), "w").write("x")
+        json.dump({"home": home, "mode": stat.S_IMODE(os.stat(home).st_mode), "aws": os.path.exists(os.path.expanduser("~/.aws")),
+                   "xdg": os.environ["XDG_CONFIG_HOME"], "cache": os.environ["XDG_CACHE_HOME"]}, open(sys.argv[1], "w"))"""
+    inst = instance(stack, py(code, str(out)))
+    inst.host_env["HOME"] = str(host_home)
+    inst.host_env["XDG_CONFIG_HOME"] = str(host_home / ".config")
+    assert inst.run() == 0
+    seen = json.loads(out.read_text())
+    assert seen["home"] != str(host_home) and seen["mode"] == 0o700 and seen["aws"] is False
+    assert seen["xdg"].startswith(seen["home"]) and seen["cache"].startswith(seen["home"])
+    assert not os.path.exists(seen["home"])  # gone at exit, with what the agent wrote there
+    assert (host_home / ".aws" / "credentials").exists()
+
+
+def test_home_is_chowned_to_the_agent_user_and_removed_when_the_agent_is_stopped(stack, monkeypatch):
+    from burn_cli.runner import privs
+    chowned = []
+    monkeypatch.setattr(runmod.os, "chown", lambda path, uid, gid: chowned.append((path, uid, gid)))
+    monkeypatch.setattr(runmod.subprocess, "Popen", FakePopen)
+    stack.heartbeat_status = 409
+    inst = instance(stack, py("import time; time.sleep(30)"), drop=privs.Drop("agent", 4242, 4343),
+                    heartbeat_every=0.1, stop_grace=1)
+    assert inst.run() == EXIT_STOPPED
+    (path, uid, gid), = chowned
+    assert (uid, gid) == (4242, 4343) and "burn-home-" in path and not os.path.exists(path)
+
+
+def test_child_env_without_a_home_leaves_the_hosts():
+    creds = FakeSource().fetch({"session_id": "s", "agent_id": "agent-a", "credentials": []})
+    env = child_env({"HOME": "/h"}, session={"session_id": "s", "agent_id": "agent-a"}, credentials=creds,
+                    mcp_url="u", spawn_url="v")
+    assert env["HOME"] == "/h"

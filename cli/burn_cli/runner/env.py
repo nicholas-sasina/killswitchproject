@@ -42,9 +42,12 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
-              proxy_base: str = "") -> dict:
+              proxy_base: str = "", home: str = "") -> dict:
     """Everything the agent process runs with: the scrubbed host environment plus its own values."""
     env = scrub(host_env)
+    if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
+        env.update({"HOME": home, "XDG_CONFIG_HOME": f"{home}/.config", "XDG_CACHE_HOME": f"{home}/.cache",
+                    "XDG_DATA_HOME": f"{home}/.local/share", "XDG_STATE_HOME": f"{home}/.local/state"})
     env.update({
         "BURN_SESSION_ID": session["session_id"], "BURN_AGENT_ID": session["agent_id"],
         "BURN_ROLE": session.get("role", ""), "BURN_MCP_URL": mcp_url, "BURN_SPAWN_URL": spawn_url})

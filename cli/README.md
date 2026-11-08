@@ -72,6 +72,11 @@ burn env            # what an instance's environment would hold (values hidden; 
 
 `HTTPS_PROXY` is a convenience so well-behaved clients use the egress proxy. It is **not containment**: a process
 can ignore it. Containment is the network rule in the demo stack, which gives agents no route except the proxy.
+**Home directory.** The agent gets a fresh, private `HOME` (mode 0700, owned by the agent's user, removed when the
+instance ends) with the XDG directories inside it, so SDKs do not pick up `~/.aws`, `~/.config/gh`, `~/.docker`
+or `~/.netrc`. This stops tools from finding those files by accident; it does not stop an agent running as you from
+reading them by path (see below).
+
 **Who the agent runs as.** When `burn run` is root (a container's PID 1), the agent runs as `--user` (default `agent`
 if it exists, else `nobody`), so it cannot read `burn run`'s environment (`/proc/1/environ`), which holds the API
 token and the join token. Child supervisors stay root; only the agent command is dropped. When `burn run` is **not**

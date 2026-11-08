@@ -2,8 +2,10 @@
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Callable
@@ -67,8 +69,9 @@ class Instance:
         badge = BadgeToken(creds.badge)
         mcp = McpProxy(self.gateway_url, badge, self._activity.set).start()
         spawn = SpawnEndpoint(self.spawn_child).start()
+        home = self._make_home()
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
-                        spawn_url=spawn.url, proxy_base=self.proxy_url)
+                        spawn_url=spawn.url, proxy_base=self.proxy_url, home=home)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,
@@ -77,6 +80,7 @@ class Instance:
             log(f"cannot start {self.command[0]!r}: {exc.strerror}")
             self._exit()
             mcp.stop(), spawn.stop()
+            shutil.rmtree(home, ignore_errors=True)
             return 127
         beat = threading.Thread(target=self._heartbeat_loop, daemon=True)
         beat.start()
@@ -88,11 +92,19 @@ class Instance:
             self._restore_signals(previous)
             mcp.stop(), spawn.stop()
             self._stop_children()
+            shutil.rmtree(home, ignore_errors=True)  # last, so a child cannot recreate it behind us
         if self._stopped_by_api:
             log("the instance was burned or has exited; the agent was stopped")
             return EXIT_STOPPED
         self._exit()
         return code if code >= 0 else 128 - code
+
+    def _make_home(self) -> str:
+        """A new private HOME for the agent, owned by the agent's user and removed when the instance ends."""
+        home = tempfile.mkdtemp(prefix="burn-home-")  # mode 0700
+        if self.drop:
+            os.chown(home, self.drop.uid, self.drop.gid)
+        return home
 
     def _exit(self) -> None:
         try:
