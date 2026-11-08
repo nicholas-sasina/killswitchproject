@@ -14,12 +14,14 @@ def reply_body(output: dict) -> dict:
 
 def test_active_badge_passes_and_caller_id_is_injected(aws):
     session = put_session(aws)
-    body = tool_call("read_config", {"path": "a.env", "burn_caller_agent_id": "agent-forged"})
+    body = tool_call("read_config", {"path": "a.env", "burn_caller_agent_id": "agent-forged",
+                                     "burn_caller_session_id": "sess-forged"})
 
     out = interceptor.handler(request_event(body, session["client_id"]), None)
 
     params = forwarded_body(out)["params"]
-    assert params["arguments"] == {"path": "a.env", "burn_caller_agent_id": "agent-alpha"}
+    assert params["arguments"] == {"path": "a.env", "burn_caller_agent_id": "agent-alpha",
+                                   "burn_caller_session_id": session["session_id"]}
     assert params["name"] == "burn-tools___read_config"
     assert events(aws) == []
 

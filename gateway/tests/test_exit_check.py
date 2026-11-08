@@ -105,3 +105,10 @@ def test_other_tools_arguments_are_not_exit_checked(aws):
     out = send(session, "read_config", {"path": value})
 
     assert "transformedGatewayRequest" in out["mcp"]
+
+
+def test_injected_ids_are_not_scanned_as_agent_text():
+    import exit_check
+    text = exit_check.outgoing_text({"text": "hello", "burn_caller_agent_id": "agent-alpha",
+                                     "burn_caller_session_id": "sess-alpha-1"})
+    assert text == "hello"
