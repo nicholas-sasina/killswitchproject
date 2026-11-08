@@ -83,15 +83,30 @@ Where nobody signs in, give `burn run` a join token. A join token always wins ov
 | `BURN_TASK`, `BURN_RESUME` | Its task and where to resume, when a launcher sets them |
 
 Nothing else from your environment reaches it except an allow-list: `PATH`, locale and terminal settings, `TMPDIR`,
-`AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables. Its `HOME` is a new, empty directory. `burn env`
-names everything that would be removed.
+`AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables, plus what you pass with `--allow-env` (see
+[Models](#models)). Its `HOME` is a new, empty directory, apart from a harness preset's files (see Claude Code
+below). `burn env` names everything that would be removed.
 
 ### Connect your harness
 Every harness connects the same way: MCP over streamable HTTP at `$BURN_MCP_URL`, sending
 `Authorization: Bearer $BURN_LOCAL_TOKEN`. `burn run` swaps that bearer for the instance's badge token on the way to
 the Gateway, so the agent never holds the badge.
 
-**Claude Code**: a `.mcp.json` in the directory it runs in. Claude Code expands `${VAR}` in `url` and `headers`.
+**Claude Code**: `burn run` sets it up when the command is `claude`, so there is nothing to configure:
+```bash
+burn run --role coder -- claude                                  # interactive
+burn run --role coder -- claude -p "Summarise ticket T-1"        # one prompt
+```
+It runs on Bedrock with the instance's own AWS key (see [Models](#models)). In the instance's new `HOME`, `burn run`
+writes a `.claude.json` that connects Burn's MCP server, skips onboarding and trusts the current directory, and a
+`.claude/settings.json` that allows the `mcp__burn` tools, which the role already limits. The server's entry says
+`${BURN_MCP_URL}` and `Bearer ${BURN_LOCAL_TOKEN}`, which Claude Code expands, so no token is written to a file.
+Your own `~/.claude` is never read or changed. Because the directory is trusted, a project's own `.claude`
+settings, hooks included, run without the trust prompt, so start it only in a directory you trust.
+
+Under another command, such as a wrapper script, no preset applies. Then put the server in a `.mcp.json` in the
+directory it runs in (Claude Code expands `${VAR}` in `url` and `headers`), and allow its tools with
+`--allowedTools mcp__burn` after the prompt; an interactive session asks you to approve the server on every run.
 ```json
 {
   "mcpServers": {
@@ -103,10 +118,7 @@ the Gateway, so the agent never holds the badge.
   }
 }
 ```
-`claude -p` loads it at once, but under `burn run` it starts with no settings, so it is denied every call to Burn's
-tools unless you allow them: add `--allowedTools mcp__burn` after the prompt (the flag takes a list, so it would
-read a prompt placed after it as a tool name). An interactive session asks you to approve the server first, on every
-run, because `HOME` is new each time.
+The flag takes a list, so it would read a prompt placed after it as a tool name.
 
 **Codex CLI**: `config.toml` does not expand variables, so pass the server on the command line, through a shell
 that does:
@@ -178,15 +190,23 @@ The instance's own AWS key calls Bedrock, so every harness above can use it, and
 from the model as well as its tools. That key may call only the models the stack allows: this repository's stack
 allows Claude Haiku 4.5, `us.anthropic.claude-haiku-4-5-20251001-v1:0`, in us-east-1.
 
-`burn run` strips the environment, so set non-secret settings inside the command:
+`burn run` sets this up for `claude`: `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION=us-east-1`, and Haiku 4.5 as
+`ANTHROPIC_MODEL` and every model alias, so a subagent never asks for a model the key may not call. For other
+commands, `burn run` strips the environment, so set non-secret settings inside the command:
 ```bash
-burn run --role coder -- env CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1 \
-  ANTHROPIC_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0 claude -p "Summarise ticket T-1" --allowedTools mcp__burn
 burn run --role coder -- env AWS_REGION_NAME=us-east-1 python agent.py   # LiteLLM, for the Agents SDK
 ```
-Other providers' keys, such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, are removed like any other secret, and
-`burn run` has no way to pass one through. Codex connects to Burn's tools as above, but a model for it is not
-covered here: its sign-in and `OPENAI_API_KEY` do not reach it.
+Other providers' keys, such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, are removed like any other secret.
+`--allow-env NAME` (repeatable) passes one through, and `burn run` warns about each one:
+```bash
+burn run --role coder --allow-env OPENAI_API_KEY -- python agent.py
+# burn: OPENAI_API_KEY passes through to the agent; a burn cannot revoke it
+```
+That is the trade-off: a burn revokes the instance's own keys, not yours, so an agent that copied your key keeps
+it after the burn. Rotate it yourself after an incident. A pass-through wins over a preset's setting of the same
+name. Names `burn run` sets itself (`BURN_*`, `AWS_*`, `XDG_*`, `HOME`, `PATH` and the proxy variables) are
+refused, and a child started with `burn.spawn` gets none of them. Codex connects to Burn's tools as above, but a
+model for it is not covered here.
 
 ### Containment
 On a laptop `burn run` is not root, so the agent runs as you. It can read your files, your `burn login` session in
@@ -220,6 +240,7 @@ Real isolation takes two things:
 | `burn_cli/retry.py` | Exponential backoff with jitter |
 | `burn_cli/runner/run.py` | `burn run`: session, lifecycle, heartbeat, stop on burn |
 | `burn_cli/runner/env.py` | Scrubbing the host environment and building the instance's |
+| `burn_cli/runner/harness.py` | Presets for well-known harnesses (`claude`): settings and files for the new `HOME` |
 | `burn_cli/runner/credentials.py` | The instance's own values, taken from the join reply's `secrets` |
 | `burn_cli/runner/badge.py` | Badge token minting and refresh |
 | `burn_cli/runner/mcp_proxy.py` | The local MCP endpoint |
@@ -376,7 +397,8 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
 - **Why can't my agent use my `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`?** `burn run` passes on only an allow-list of
   your environment, and a provider key is a secret like any other. A key the agent took from your shell would
-  outlive a burn; the instance's own AWS key does not. Use Bedrock with that key (see [Models](#models)).
+  outlive a burn; the instance's own AWS key does not. Use Bedrock with that key, or pass yours with
+  `--allow-env NAME` and accept that a burn cannot revoke it (see [Models](#models)).
 - **What is task progress for?** When an instance of a role with "replace on burn" is burned, its launcher starts
   a clean replacement, which skips the items finished before the breach. Progress is how Burn knows which those
   are: the agent posts item ids to `BURN_PROGRESS_URL` and they reach Burn with the next heartbeat, stamped with
