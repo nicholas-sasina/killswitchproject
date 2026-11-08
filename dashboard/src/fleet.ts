@@ -59,12 +59,27 @@ function fromAgentState(agent: AgentState): FleetAgent {
 }
 
 /**
+ * How far a session has gone. A session only moves forward (it never becomes
+ * active again once ended), so when two reports disagree the furthest one is
+ * the true one.
+ */
+const STAGE: Record<FleetStatus, number> = {
+  idle: 0,
+  active: 1,
+  exited: 2,
+  revoked: 3,
+};
+
+/**
  * Every agent the API knows about, de-duplicated by session.
  *
- * `/instances` wins where both describe the same session, because it carries
- * the role, owner and timestamps. A scenario agent with no matching instance
- * is still included, so the demo keeps working against an API that has no
- * instance records.
+ * `/instances` supplies the entry where both describe the same session,
+ * because it carries the role, owner and timestamps. Its status can lag,
+ * though: the event feed is polled every second and `/instances` every few,
+ * and the latter takes seconds to answer for a large fleet. So the status is
+ * whichever report is further along, and a burn shows as soon as the feed
+ * has it. A scenario agent with no matching instance is still included, so
+ * the demo works against an API that has no instance records.
  */
 export function mergeFleet(
   agents: AgentState[],
@@ -75,9 +90,30 @@ export function mergeFleet(
     byKey.set(instance.session_id, fromInstance(instance));
   for (const agent of agents) {
     const entry = fromAgentState(agent);
-    if (!byKey.has(entry.key)) byKey.set(entry.key, entry);
+    const known = byKey.get(entry.key);
+    if (!known) byKey.set(entry.key, entry);
+    else if (STAGE[entry.status] > STAGE[known.status])
+      byKey.set(entry.key, { ...known, status: entry.status });
   }
   return [...byKey.values()];
+}
+
+/**
+ * Mark the sessions a burn from this dashboard just revoked, ahead of the
+ * next poll that would report it.
+ */
+export function markRevoked(
+  fleet: FleetAgent[],
+  sessions: ReadonlySet<string>,
+): FleetAgent[] {
+  if (!sessions.size) return fleet;
+  return fleet.map((entry) =>
+    entry.sessionId &&
+    sessions.has(entry.sessionId) &&
+    entry.status !== "revoked"
+      ? { ...entry, status: "revoked" }
+      : entry,
+  );
 }
 
 /** Agents running now. Exited and revoked instances are not running. */
@@ -93,11 +129,10 @@ export function liveFleet(fleet: FleetAgent[]): FleetAgent[] {
 
 export interface ContainedAgent {
   entry: FleetAgent;
-  /** When the badge was revoked, if that event is in the current stream. */
+  /** When the burn revoked this session, if its event is in the stream loaded. */
   revokedAt?: string;
   /** The burn's own note, if the event carried one. */
   note?: string;
-  observed: boolean;
 }
 
 /**
@@ -106,32 +141,36 @@ export interface ContainedAgent {
  * Only `revoked` counts as contained. An `exited` instance finished its work
  * and was never burned, so including it would overstate what containment did.
  *
- * Revocation events are matched by agent name rather than session, because
- * the burn event does not always carry the session. Where one name has
- * several burned sessions they share the most recent timestamp, which is why
- * the row shows the session too.
+ * A burn's `revoked` event names the session it revoked, so events are
+ * matched by session: one agent name can have several sessions, and each
+ * keeps its own burn time rather than borrowing the latest one. A session
+ * with no matching event in the stream loaded shows no time.
  */
 export function containedFleet(
   fleet: FleetAgent[],
   events: LedgerEvent[],
 ): ContainedAgent[] {
-  const revocation = new Map<string, LedgerEvent>();
+  const bySession = new Map<string, LedgerEvent>();
+  const byAgent = new Map<string, LedgerEvent>(); // entries without a session
   for (const event of events) {
     if (event.action !== "revoked") continue;
-    const seen = revocation.get(event.agent_id);
+    const [map, key] = event.session_id
+      ? [bySession, event.session_id]
+      : [byAgent, event.agent_id];
+    const seen = map.get(key);
     // Event ids sort by time, so the largest is the most recent revocation.
-    if (!seen || event.event_id > seen.event_id)
-      revocation.set(event.agent_id, event);
+    if (!seen || event.event_id > seen.event_id) map.set(key, event);
   }
   return fleet
     .filter((entry) => entry.status === "revoked")
     .map((entry) => {
-      const event = revocation.get(entry.agentId);
+      const event = entry.sessionId
+        ? bySession.get(entry.sessionId)
+        : byAgent.get(entry.agentId);
       return {
         entry,
         revokedAt: event?.ts,
         note: event?.detail ?? undefined,
-        observed: Boolean(event),
       };
     })
     .sort(
@@ -163,7 +202,8 @@ export function byRole(
 
 /**
  * The role name an agent can be re-added through: exact match first, then the
- * `agent-<role>` convention that scenario and swarm agents follow.
+ * `agent-<role>` convention that scenario agents follow. The longest name
+ * wins, so `agent-code-reader` is code-reader's, not reader's.
  */
 export function roleForAgent(
   agent: { agentId: string; role?: string | null },
@@ -172,5 +212,34 @@ export function roleForAgent(
   if (agent.role && roleNames.includes(agent.role)) return agent.role;
   const byName = roleNames.find((name) => name === agent.agentId);
   if (byName) return byName;
-  return roleNames.find((name) => agent.agentId.endsWith(`-${name}`));
+  return roleNames
+    .filter((name) => agent.agentId.endsWith(`-${name}`))
+    .sort((a, b) => b.length - a.length)[0];
+}
+
+/** Role names: a lowercase letter or digit, then up to 31 more (contracts/burn.schema.json). */
+const ROLE_NAME_MAX = 32;
+
+/**
+ * A free name for a copy of a role: `<name>-2`, `-3`, and so on, shortened so
+ * it stays within the 32 characters a role name may have.
+ */
+export function copyName(name: string, taken: string[]): string {
+  for (let n = 2; ; n += 1) {
+    const suffix = `-${n}`;
+    const base = name
+      .slice(0, ROLE_NAME_MAX - suffix.length)
+      .replace(/-+$/, "");
+    const candidate = `${base}${suffix}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+}
+
+/**
+ * Whether a join token can start a new instance of this role. A scenario
+ * role's agent is started by its scenario, and the API refuses a join for one
+ * (403), so a token minted for it could never be used.
+ */
+export function joinable(role: { managed_by: string }): boolean {
+  return role.managed_by !== "scenario";
 }

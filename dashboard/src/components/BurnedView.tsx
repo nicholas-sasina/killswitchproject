@@ -16,6 +16,8 @@ import type { BurnApi } from "../api";
 import {
   byRole,
   containedFleet,
+  copyName,
+  joinable,
   roleForAgent,
   type FleetAgent,
 } from "../fleet";
@@ -214,9 +216,13 @@ export function BurnedView({
             <div className="panel-heading">
               <h2>{selected?.entry.agentId}</h2>
               <span className="meta">
-                {selected?.observed
-                  ? "Burned during this session"
-                  : "Burned before this dashboard opened"}
+                {selected?.revokedAt ? (
+                  <>
+                    Burned <Timestamp value={selected.revokedAt} />
+                  </>
+                ) : (
+                  "Burned before the events shown here"
+                )}
               </span>
             </div>
             <p className="panel-intro">
@@ -228,14 +234,16 @@ export function BurnedView({
             <div className="rebuild-actions">
               {selectedRole ? (
                 <>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={!enabled}
-                    onClick={() => setRebuild({ role: selectedRole })}
-                  >
-                    Re-add with the same setup
-                  </button>
+                  {joinable(selectedRole) && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={!enabled}
+                      onClick={() => setRebuild({ role: selectedRole })}
+                    >
+                      Re-add with the same setup
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="secondary-button"
@@ -243,7 +251,10 @@ export function BurnedView({
                     onClick={() =>
                       setRebuild({
                         template: selectedRole,
-                        suggestedName: `${selectedRole.name}-2`,
+                        suggestedName: copyName(
+                          selectedRole.name,
+                          roleList.map((role) => role.name),
+                        ),
                       })
                     }
                   >
@@ -258,12 +269,20 @@ export function BurnedView({
                 </p>
               )}
             </div>
-            {selectedRole && (
+            {selectedRole && joinable(selectedRole) && (
               <p className="panel-footnote">
                 Re-adding issues a fresh join token for{" "}
                 <code>{selectedRole.name}</code>. The new instance gets the same
                 tools and permissions and its own newly minted credentials;
                 nothing the burned agent held is reused.
+              </p>
+            )}
+            {selectedRole && !joinable(selectedRole) && (
+              <p className="panel-footnote">
+                <code>{selectedRole.name}</code> belongs to the demo scenario,
+                which starts its agent itself, so the API would refuse a join
+                token for it. To run the same setup again, copy it to a new
+                role: the copy gets its own newly minted credentials.
               </p>
             )}
           </section>

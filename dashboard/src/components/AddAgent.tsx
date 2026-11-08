@@ -158,6 +158,9 @@ export function AddAgent({
           owner: owner.trim() || null,
           canaries,
           auto_burn: autoBurn,
+          // Not on the form, so a copy keeps the original's setting rather
+          // than falling back to the API's default.
+          ...(template?.references ? { references: template.references } : {}),
           managed_by: "ui",
         };
         target = await api.createRole(spec);

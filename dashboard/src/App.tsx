@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createApi, readConfig, type ApiConfig } from "./api";
 import { attentionCount, toAlerts } from "./alerts";
-import { containedFleet, liveFleet, mergeFleet } from "./fleet";
-import type { AgentState, BurnResult } from "./contracts";
+import { containedFleet, liveFleet, markRevoked, mergeFleet } from "./fleet";
+import type { AgentState, BurnResult, Instance } from "./contracts";
 import { newestEvents } from "./events";
 import { MockBanner, mockDataReducer } from "./MockBanner";
 import { useEventFeed, usePolling } from "./polling";
@@ -49,16 +49,52 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   // stay on another view and still know the queue is filling.
   const pending = useMemo(() => attentionCount(toAlerts(events)), [events]);
   // /events lists only the scenario agents; /instances lists every instance
-  // that joined, including swarm workers and probes. The roster is both.
+  // that joined, including swarm workers. The roster is both. This is the
+  // page's only /instances poll (the roles panel is handed its result), and
+  // it pauses on Alerts, which never shows instances: each call scans the
+  // sessions and counts every instance's exposures.
   const loadInstances = useCallback(
     (signal: AbortSignal) => api.instances(undefined, signal),
     [api],
   );
-  const instancePoll = usePolling(configured ? loadInstances : null, 5_000);
-  const instances = instancePoll.data?.instances ?? [];
+  const instancePoll = usePolling(
+    configured && view !== "alerts" ? loadInstances : null,
+    5_000,
+  );
+  // Kept while the poll is paused, so returning from Alerts does not show a
+  // roster without its instances until the next answer.
+  const [lastInstances, setLastInstances] = useState<{
+    instances: Instance[];
+  }>();
+  useEffect(() => {
+    if (instancePoll.data) setLastInstances(instancePoll.data);
+  }, [instancePoll.data]);
+  const instanceData = instancePoll.data ?? lastInstances;
+  const instances = instanceData?.instances ?? [];
+  const sharedInstances = useMemo(
+    () => ({ data: instanceData, error: instancePoll.error }),
+    [instanceData, instancePoll.error],
+  );
+  const instanceError = instancePoll.error
+    ? `Instances could not be loaded: ${instancePoll.error} The list may be incomplete.`
+    : "";
+  const [burnResults, setBurnResults] = useState<
+    Record<string, { result: BurnResult; sessionId: AgentState["session_id"] }>
+  >({});
+  // Sessions a burn from here revoked: shown as revoked at once, not on the
+  // next instance poll.
+  const burnedSessions = useMemo(
+    () =>
+      new Set(
+        Object.values(burnResults).flatMap(
+          (record) => record.result.sessions_revoked,
+        ),
+      ),
+    [burnResults],
+  );
   const fleet = useMemo(
-    () => mergeFleet(state.agents, instances),
-    [state.agents, instancePoll.data],
+    () => markRevoked(mergeFleet(state.agents, instances), burnedSessions),
+    [state.agents, instanceData, burnedSessions],
   );
   const live = useMemo(() => liveFleet(fleet), [fleet]);
   const contained = useMemo(
@@ -69,9 +105,6 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const [confirmAgent, setConfirmAgent] = useState<AgentState>();
   const [busy, setBusy] = useState(false);
   const [burnError, setBurnError] = useState("");
-  const [burnResults, setBurnResults] = useState<
-    Record<string, { result: BurnResult; sessionId: AgentState["session_id"] }>
-  >({});
   const [refresh, setRefresh] = useState(0);
   const activeCount = live.length;
   const revokedCount = contained.length;
@@ -89,9 +122,22 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
     session_id: entry.sessionId,
     exposures: entry.exposures,
   }));
+  // A swarm instance you just burned is on neither list any more, so the
+  // whole fleet is searched too; otherwise its result and timeline vanish on
+  // the next poll and the selection jumps to another agent.
+  const burnedEntry = fleet.find(
+    (entry) => entry.agentId === selectedId && entry.status === "revoked",
+  );
   const selectedAgent =
     state.agents.find((agent) => agent.agent_id === selectedId) ??
     liveAgents.find((agent) => agent.agent_id === selectedId) ??
+    (burnedEntry && {
+      agent_id: burnedEntry.agentId,
+      role: burnedEntry.role,
+      status: "revoked",
+      session_id: burnedEntry.sessionId,
+      exposures: burnedEntry.exposures,
+    }) ??
     liveAgents[0] ??
     state.agents[0];
   function resultFor(agent: AgentState) {
@@ -215,6 +261,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                     },
                   ]}
                 />
+                <ErrorMessage message={instanceError} />
                 <BurnedView
                   api={api}
                   fleet={fleet}
@@ -326,6 +373,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                         key={`${config.burnUrl}:${config.demoToken}`}
                         api={api}
                         enabled={configured}
+                        sharedInstances={sharedInstances}
                         defaultStatus="active"
                       />
                     </section>
