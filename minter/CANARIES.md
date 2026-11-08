@@ -11,8 +11,10 @@ session start ──POST /sessions/{sid}/canary──▶ minter: value -> Secret
 agent reads a doc with {{canary}} ──Gateway──▶ ledger row (agent_id, canary_ref)      = exposure, no alert
 canary leaks (any encoding) ─▶ attacker decodes ─▶ GET /v1/whoami  Bearer <canary>
 provider: exact fingerprint has canary=true ─▶ 401 "invalid key" (same as unknown)
-          one canary_used event + async invoke burn-api {"canary_incident": {secret_ref, event_id}}
-burn-api: re-verify attribution ─▶ conditional revoke of THAT session ─▶ delete badge
+          origin from x-burn-session-proof: through a Burn session ─▶ canary_used ALERT, stop
+          from outside Burn ─▶ canary_used + async invoke burn-api {"canary_incident": {secret_ref, event_id}}
+burn-api: re-verify attribution ─▶ role auto_burn off? ─▶ ALERT + flag, stop (report-only)
+          ─▶ conditional revoke of THAT session ─▶ delete badge
           ─▶ rotate the agent's own credentials (only if no other active session uses them)
           ─▶ flag shared credentials it saw (seen; attempted if a check blocked them)
 ```
@@ -20,6 +22,27 @@ burn-api: re-verify attribution ─▶ conditional revoke of THAT session ─▶
 Detection does not depend on how the canary escaped. It works because whoever uses the canary has
 to present it, in plain form, to a service Burn monitors. It does not see inside encrypted
 traffic.
+
+## Burn or alert
+
+| Canary used... | Result |
+|---|---|
+| from outside Burn (no valid session proof), role `auto_burn` on (default) | burn that one instance, if the trusted-signal policy below holds |
+| from outside Burn, role `auto_burn: false` (report-only) | `canary_used` alert + flags on what it saw; never a burn |
+| through the instance's own session | alert only. Enforcing proxy: blocked before it leaves (`blocked` event naming the canary). Forwarding proxy: `canary_used` "own session; alert only" |
+| through another Burn session | `canary_used` alert for review (the canary reached a second instance) |
+
+If a role-based session's role record cannot be read, nothing is burned.
+
+## Where to plant canaries
+
+Only where an honest agent has no reason to use them, so any use means something went wrong:
+- a revoked key in an archived migration note: `old provider key (revoked 2024-03, do not use): {{canary}}`
+- a commented-out line in a backup or `.bak` config: `# PROVIDER_API_KEY={{canary}}  # pre-rotation, dead`
+- another team's closed ticket the agent may read for context
+
+Never in the config, runbook or ticket the agent needs for its task. It already has its own `api_key` for
+the provider, so using the canary is never the honest path.
 
 ## Trusted-signal policy (what may contain automatically)
 
@@ -39,12 +62,16 @@ they cannot cause repeated rotations or flood the event feed.
 
 - **Issue the canary** right after the session id exists (before the session row is written, same as
   credentials), for every path into `POST /sessions` (`agent_id`, `role` + `enroll_token`,
-  `role` + `parent_session`). The call is idempotent, so retry freely:
+  `role` + `parent_session`). Use the helper, which honours the role's `canaries` flag; it is idempotent:
   ```python
-  minter_client.call("POST", f"/sessions/{session_id}/canary", {"agent_id": agent_id})
+  import canary
+  canary.issue_for_session(agent_id, session_id, role)  # None when the role has canaries: false
   ```
-  `agent_id` is the instance's own id (`names.instance_agent_id(role, suffix)`). Response:
-  `{canary_ref, agent_id, session_id, version, status, issued_at}`, never the value.
+  `agent_id` is the instance's own id (`names.instance_agent_id(role, suffix)`); `role` is None for
+  scenario agents. Response: `{canary_ref, agent_id, session_id, version, status, issued_at}`, never the value.
+- **Roles**: store and return `canaries` and `auto_burn` (both default true) in `roles.py`, like the other
+  role fields (contract in #40; the mock already carries them). The canary path reads them from
+  `burn-roles` by the session row's `role`.
 - **Containment primitive used**: a conditional `UpdateItem` on `burn-sessions`
   (`status: active -> revoked`, `revoked_by = "canary:<event_id>"`). If sessions/instances move to
   another table, please expose `revoke_session_if_active(session_id) -> bool` with the same
@@ -68,7 +95,22 @@ they cannot cause repeated rotations or flood the event feed.
 3. Nothing else changes. Canary fingerprint rows are ordinary registered rows (`secret_type=other`),
    so the response interceptor already writes the ledger row and the `recorded` event. That ledger row
    is the exposure evidence containment requires.
-4. Planting: a scenario file the worker reads, e.g. `PROVIDER_API_KEY={{canary}}` in a config file.
+4. Planting: follow "Where to plant canaries" above. Never in a file the agent needs for its task.
+
+## Egress proxy owner: session proof
+
+On every request the proxy forwards to the provider host, drop any `x-burn-session-proof` the agent sent
+and add the proxy's own:
+
+```python
+ts = str(int(time.time()))
+mac = hmac_sha256_hex(fingerprint_key, f"burn-session-proof:v1:{session_id}:{ts}")
+flow.request.headers["x-burn-session-proof"] = f"v1.{session_id}.{ts}.{mac}"
+```
+
+`minter/lambdas/provider/session_proof.py` has `make()` as the reference implementation. Today the exit
+check blocks a canary going out, so this only matters if the proxy ever forwards one (report-only
+egress). Without the header, every canary use at the provider counts as outside Burn.
 
 ## Secret-reference owner
 
@@ -108,6 +150,11 @@ Optional env on the provider: `BURN_API_FUNCTION`, `MINTER_FUNCTION` (defaults `
 - `flagged` with no `secret_ref` and a detail starting `rotation deferred` / `rotation failed` /
   `canary incident not contained` means containment is incomplete. Show it as such.
 - Ledger entries now carry `flag_level` (`seen` / `attempted` / `reported`, or null).
+- `GET /flags`: one flag per credential, with `flag_level` (highest reached), `instance_count`, `state`,
+  first evidence per level and the last `resolution`. `POST /flags/resolve`
+  `{secret_ref, action: rotate|dismiss, reason, by}` writes a `rotated` or `dismissed` event (the
+  `dismissed` label is in the EventFeed since #40).
+- A role with `auto_burn: false` is report-only: canary incidents on it end as `report_only`.
 
 ## Local harness and measured timings
 

@@ -12,6 +12,8 @@ accepts only the current version of each key.
 - `burn-provider` (API Gateway HTTP API, URL in SSM `/burn/provider/url`) looks the bearer key up by exact fingerprint: current = 200, rotated = 401 plus a `rejected` event.
 - **Canaries**: `POST /sessions/{id}/canary` gives each session its own decoy key (looks like an `api_key`, never authenticates). The provider answers it with 401, writes one `canary_used` event and hands the incident to the Burn API, which contains only that session. Interfaces for other components: [CANARIES.md](CANARIES.md).
 - **Flag levels**: `POST /flags` raises a credential the agent does not own to `seen` < `attempted` < `reported`. It never lowers the level, keeps the first evidence per level, and never rotates.
+- **Flag review**: one flag per credential with its highest level and `instance_count`; `GET /flags` lists them and `POST /flags/resolve` lets an owner rotate (new version, flag cleared) or dismiss, with a reason.
+- **Canary origin**: the provider checks the egress proxy's `x-burn-session-proof` (`session_proof.py`). Only use from outside Burn is dispatched for a possible burn; use through a Burn session is an alert.
 - `GET /agents/{id}/key-activity` returns the agent's current and previous AWS key with their IAM status (active or inactive), plus their CloudTrail events.
 
 ## Key files
