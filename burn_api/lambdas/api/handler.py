@@ -133,7 +133,8 @@ def handler(event, context=None):
     # Parsed once: auth decides on the same body the route then acts on.
     request_body = _json_body(event)
     if not auth.allows(http["method"], http["path"], headers, request_body):
-        return _resp(401, {"error": "missing or invalid x-burn-demo-token"})
+        return _resp(401, {"error": "missing or invalid x-burn-demo-token (an instance's own calls may send "
+                                    "its session token as Authorization: Bearer instead)"})
     try:
         status, body = route(http["method"], http["path"], event.get("queryStringParameters") or {},
                              request_body)

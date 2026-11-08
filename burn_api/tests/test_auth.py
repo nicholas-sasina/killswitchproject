@@ -83,3 +83,85 @@ def test_each_instance_gets_its_own_session_token_and_only_its_hash_is_stored(en
 def test_a_scenario_session_gets_no_session_token(env):
     status, body = call(env, "POST", "/sessions", {"agent_id": "agent-a"})
     assert status == 201 and "secrets" not in body
+
+
+# --- an instance's own calls with its session token ---------------------------------------------
+
+HELPER_ROLE = {"name": "helper", "tools": ["notify"], "credentials": ["api_key"]}
+
+
+def as_instance(env, method, path, bearer, body=None, scheme="Bearer"):
+    """A request with no admin token, only an Authorization header."""
+    import json
+    import handler
+    event = {"requestContext": {"http": {"method": method, "path": path}},
+             "headers": {"Authorization": f"{scheme} {bearer}"},
+             "queryStringParameters": None, "body": None if body is None else json.dumps(body)}
+    out = handler.handler(event)
+    return out["statusCode"], json.loads(out["body"])
+
+
+def _two_instances(env):
+    from test_swarm import join
+    make_role(env, WORKER | {"may_spawn": ["helper"]}); make_role(env, HELPER_ROLE)
+    return join(env, "worker")[1], join(env, "worker")[1]
+
+
+def test_an_instance_heartbeats_spawns_and_exits_with_its_session_token(env):
+    a, _ = _two_instances(env)
+    token = a["secrets"]["session_token"]
+    assert as_instance(env, "POST", f"/instances/{a['session_id']}/heartbeat", token)[0] == 200
+    status, child = as_instance(env, "POST", "/sessions", token, {"role": "helper", "parent_session": a["session_id"]})
+    assert status == 201 and child["parent_session"] == a["session_id"]
+    child_token = child["secrets"]["session_token"]
+    assert as_instance(env, "POST", f"/instances/{child['session_id']}/heartbeat", child_token)[0] == 200
+    assert as_instance(env, "POST", f"/instances/{a['session_id']}/exit", token)[0] == 200
+
+
+def test_a_session_token_speaks_only_for_its_own_instance(env):
+    a, b = _two_instances(env)
+    token_a = a["secrets"]["session_token"]
+    assert as_instance(env, "POST", f"/instances/{b['session_id']}/heartbeat", token_a)[0] == 401
+    assert as_instance(env, "POST", f"/instances/{b['session_id']}/exit", token_a)[0] == 401
+    assert as_instance(env, "POST", "/sessions", token_a, {"role": "helper", "parent_session": b["session_id"]})[0] == 401
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/instances", None), ("GET", "/events", None), ("GET", "/roles", None),
+    ("POST", "/burns", {"scope": "instance", "id": "SELF"}), ("POST", "/roles/worker/tokens", {"uses": 1}),
+    ("POST", "/sessions", {"agent_id": "agent-a"}),
+    ("POST", "/sessions", {"role": "helper", "parent_session": "SELF", "extra": 1}),
+    ("GET", "/instances/SELF/heartbeat", None),
+])
+def test_a_session_token_opens_nothing_else(env, method, path, body):
+    a, _ = _two_instances(env)
+    path = path.replace("SELF", a["session_id"])
+    body = None if body is None else {k: (a["session_id"] if v == "SELF" else v) for k, v in body.items()}
+    assert as_instance(env, method, path, a["secrets"]["session_token"], body)[0] == 401
+
+
+def test_wrong_shapes_are_refused_without_a_lookup(env, monkeypatch):
+    a, _ = _two_instances(env)
+    token, heartbeat = a["secrets"]["session_token"], f"/instances/{a['session_id']}/heartbeat"
+    import auth
+    monkeypatch.setattr(auth.db, "table", lambda name: pytest.fail("a malformed request must cost no lookup"))
+    for bearer, scheme in [(token, "Basic"), (token + "\n", "Bearer"), (token[:-1], "Bearer"), ("", "Bearer"),
+                           (a["secrets"]["badge"]["client_secret"], "Bearer")]:
+        assert as_instance(env, "POST", heartbeat, bearer, scheme=scheme)[0] == 401
+
+
+def test_a_burned_instance_is_still_told_it_is_burned_and_cannot_spawn(env):
+    a, _ = _two_instances(env)
+    token = a["secrets"]["session_token"]
+    assert call(env, "POST", "/burns", {"scope": "instance", "id": a["session_id"], "reason": "test"})[0] == 200
+    # auth accepts the token; the routes refuse because the instance is burned
+    assert as_instance(env, "POST", f"/instances/{a['session_id']}/heartbeat", token)[0] == 409
+    assert as_instance(env, "POST", "/sessions", token, {"role": "helper", "parent_session": a["session_id"]})[0] == 403
+
+
+def test_a_scenario_session_has_no_session_token_to_match(env):
+    status, body = call(env, "POST", "/sessions", {"agent_id": "agent-a"})
+    import secrets as pysecrets
+    from burn_contracts import names
+    guess = names.SESSION_TOKEN_PREFIX + pysecrets.token_urlsafe(32)
+    assert as_instance(env, "POST", f"/instances/{body['session_id']}/exit", guess)[0] == 401
