@@ -1,18 +1,22 @@
 """Starting swarm workers: join once per container from the host, then hand each container its own values.
 
-The launcher holds every worker's secrets in its own environment. It makes one person-side call (creating the join
-token), signed in as the automation person, and never gives that sign-in to a container: workers join with the join token and
-afterwards authenticate with their own session token. `docker run -e NAME` (a name
+The launcher holds every worker's secrets in its own environment. Its person-side calls (creating join tokens and,
+with a task, reading and replacing a burned instance) are signed in as the automation person, and it never gives that
+sign-in to a container: workers join with a join token and afterwards authenticate with their own session token. `docker run -e NAME` (a name
 with no value) copies each from that environment into the container, so no secret is ever on a command line (visible
 in `ps`) or in a file. The container's `burn run` receives the secrets as BURN_ADOPT_SECRETS, takes them out of its
 environment, and gives its worker only the worker's own values.
 
 With a task (`--items`), each worker gets its own list of item ids as BURN_TASK, and the launcher keeps the map of
-container to task. The task stays here: Burn never holds it, so a compromised agent cannot change it.
+container to task. When a worker's container exits and Burn says the instance was burned with a replacement pending,
+the launcher starts the replacement: one fresh join, POST /instances/{old}/replace, and a new container with the same
+task and BURN_RESUME (what the burned instance finished, and what it touched after the breach). The task stays here:
+Burn never holds it, so a compromised agent cannot change it.
 """
 import json
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -45,6 +49,8 @@ CERT = "/certs/mitmproxy-ca-cert.pem"
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # must match burn_cli.runner.run.ADOPT_SECRETS
 WORKER = ["python", "-m", "burn_agents.swarm_worker"]
 JOIN_TTL = 3600
+REPLACEMENT_JOIN_TTL = 300  # a replacement's join token is for one join, made straight away
+READS, READ_GAP = 3, 5.0  # a burned instance's replacement record can land a moment after its container exits
 
 
 def task_ids(worker: int, items: int) -> list[str]:
@@ -108,7 +114,8 @@ def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *,
 class BurnCalls:
     """Every Burn API call the launcher makes.
 
-    The person-side call (the join token) goes through `api`, which carries the launcher's own sign-in. Joining and ending an instance go through `instances`, which sends no person
+    The person-side calls (join tokens, reading an instance, linking a replacement) go through `api`, which carries the
+    launcher's own sign-in. Joining and ending an instance go through `instances`, which sends no person
     credentials: a join token or the instance's own session token is the authority.
     """
 
@@ -124,6 +131,12 @@ class BurnCalls:
     def end(self, session_id: str, session_token: str) -> None:
         self.instances.exit(session_id, session_token)
 
+    def instance(self, session_id: str) -> dict:
+        return self.api.request("GET", f"/instances/{session_id}")
+
+    def replace(self, old_session: str, new_session: str) -> dict:
+        return self.api.request("POST", f"/instances/{old_session}/replace", {"session_id": new_session})
+
 
 @dataclass
 class Worker:
@@ -134,19 +147,20 @@ class Worker:
 
 
 class Swarm:
-    """The launcher's workers: the map of container to task."""
+    """The launcher's workers: the map of container to task, and what to do when a container exits."""
 
     def __init__(self, calls: BurnCalls, role: str, *, api_url: str, gateway_url: str, mock: bool, interval: float,
-                 certs_dir: str, docker: Callable[[list[str], dict], object]):
+                 certs_dir: str, docker: Callable[[list[str], dict], object], sleep=None, log=None):
         self.calls, self.role, self.docker = calls, role, docker
         self._container = {"api_url": api_url, "gateway_url": gateway_url, "mock": mock, "interval": interval}
         self.mock, self.certs_dir = mock, certs_dir
+        self.sleep, self.log = sleep or time.sleep, log or (lambda line: print(line, flush=True))
         self.workers: dict[str, Worker] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # follow() handles each worker's exit on its own thread
 
     @property
     def names(self) -> list[str]:
-        """Every container started, so stopping the launcher removes them all."""
+        """Every container started, replacements included, so stopping the launcher removes them all."""
         with self._lock:
             return list(self.workers)
 
@@ -184,15 +198,85 @@ class Swarm:
             self.workers[name] = Worker(public["agent_id"], public["session_id"], task)
         return name
 
+    def on_exit(self, name: str) -> str | None:
+        """A worker's container exited. Returns the name of the container that replaced it, or None.
+
+        Only a burned instance whose replacement Burn has marked pending is replaced. Nothing here retries: a step that
+        fails is logged, and the burned instance stays pending for a person.
+        """
+        worker = self.workers.get(name)
+        if worker is None or not worker.task:
+            return None  # without a task the launcher only follows logs, as it always has
+        try:
+            instance = self._read(worker.session_id)
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"{worker.agent_id} exited and Burn could not be asked about it ({exc}): not restarted")
+            return None
+        record = instance.get("replacement") or {}
+        if record.get("status") != "pending":
+            self.log(f"{worker.agent_id} {_why_not(instance)}: not restarted")
+            return None
+        return self._replace(worker)
+
+    def _read(self, session_id: str) -> dict:
+        """The instance, read again (a few times, briefly) while it is burned and its record is not written yet."""
+        for attempt in range(READS):
+            instance = self.calls.instance(session_id)
+            if instance.get("status") != "revoked" or instance.get("replacement") or attempt == READS - 1:
+                return instance
+            self.sleep(READ_GAP)
+        raise AssertionError("unreachable")
+
+    def _replace(self, old: Worker) -> str | None:
+        """One fresh join with a single-use token, link it to the burned instance, start it on the same task."""
+        try:
+            reply = self.calls.join(self.role, self.calls.join_token(self.role, 1, ttl=REPLACEMENT_JOIN_TTL))
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"cannot replace {old.agent_id}: no fresh instance could join ({exc}); it stays pending")
+            return None
+        try:
+            linked = self.calls.replace(old.session_id, reply["session_id"])
+        except Exception as exc:  # noqa: BLE001 - 409: no longer pending (linked elsewhere, or needs a person)
+            outcome = "it is no longer pending: not restarted" if getattr(exc, "status", None) == 409 else "it stays pending"
+            self.log(f"cannot replace {old.agent_id}: Burn did not link {reply['agent_id']} ({exc}); {outcome}")
+            try:
+                self.calls.end(reply["session_id"], (reply.get("secrets") or {}).get("session_token", ""))
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+        try:
+            name = self._launch(reply, old.task, linked)
+        except BaseException as exc:  # noqa: BLE001 - docker() exits on failure; this thread must not die silently
+            self.log(f"{reply['agent_id']} replaced {old.agent_id} in Burn, but its container did not start ({exc})")
+            return None
+        self.log(f"replaced {old.agent_id} with {reply['agent_id']}: "
+                 f"{len(linked['done'])} done, {len(linked['quarantined'])} quarantined")
+        return name
+
+
+def _why_not(instance: dict) -> str:
+    """Why an exited worker is not replaced, for the launcher's log."""
+    status, record = instance.get("status"), instance.get("replacement") or {}
+    if record.get("status") == "needs_person":
+        return "was burned and needs a person: its task has been replaced the most times allowed"
+    if record.get("status") == "linked":
+        return f"was burned and already replaced by {instance.get('replaced_by')}"
+    if status == "revoked":
+        return ("was burned and Burn has no replacement record (replace on burn is off for the role, "
+                "or the whole group was burned)")
+    if status == "exited":
+        return "exited"
+    return f"stopped but is still active in Burn (status {status})"
+
 
 def start_workers(api: Api, instances: InstanceApi, role: str, count: int, *, api_url: str, gateway_url: str,
                   mock: bool, interval: float, certs_dir: str, docker: Callable[[list[str], dict], object],
-                  items: int = 0, sleep=None) -> Swarm:
+                  items: int = 0, sleep=None, log=None) -> Swarm:
     """Join `count` times with one join token and start one container per instance, each with a task of `items` items.
 
     A session whose container could not be started is ended, so a failure does not leave instances dangling.
     """
     swarm = Swarm(BurnCalls(api, instances, sleep=sleep), role, api_url=api_url, gateway_url=gateway_url, mock=mock,
-                  interval=interval, certs_dir=certs_dir, docker=docker)
+                  interval=interval, certs_dir=certs_dir, docker=docker, sleep=sleep, log=log)
     swarm.start(count, items)
     return swarm

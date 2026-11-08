@@ -10,7 +10,8 @@ Without --mock the workers run on the demo stack's internal network, whose one w
 (start the stack first); the Burn API and Gateway come from the environment or .env (`make env`).
 With --mock they run against the mock servers on the host, which are the only servers it will talk to.
 
-With --items each worker works through a task of that many items and exits when it is done.
+With --items each worker works through a task of that many items and exits when it is done. A worker that Burn burns
+is replaced by a fresh instance that resumes its task (when the role has replace on burn); see swarm_launch.py.
 """
 import argparse
 import os
@@ -40,15 +41,29 @@ def docker(argv: list[str], env: dict | None = None) -> subprocess.CompletedProc
     return result
 
 
-def follow(names: list[str]) -> None:
-    """Prefix and print each container's log until it exits; return when all have."""
-    def tail(name: str) -> None:
-        proc = subprocess.Popen(["docker", "logs", "-f", name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        short = name.rsplit("-", 1)[-1]
-        for line in proc.stdout:
-            print(f"{short} | {line.rstrip()}", flush=True)
+def tail_logs(name: str) -> None:
+    """Print one container's log, each line prefixed with its short name, until the container exits."""
+    proc = subprocess.Popen(["docker", "logs", "-f", name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    short = name.rsplit("-", 1)[-1]
+    for line in proc.stdout:
+        print(f"{short} | {line.rstrip()}", flush=True)
 
-    threads = [threading.Thread(target=tail, args=(n,), daemon=True) for n in names]
+
+def follow(names: list[str], on_exit=None, tail=tail_logs) -> None:
+    """Follow each worker until it exits, then the container `on_exit(name)` started in its place, if any.
+
+    Each worker has a thread of its own, so one replacement never waits on another. Returns when none is left.
+    """
+    def lane(name: str | None) -> None:
+        while name:
+            tail(name)
+            try:
+                name = on_exit(name) if on_exit else None
+            except Exception as exc:  # noqa: BLE001 - say so rather than let the thread end silently
+                print(f"{name}: {exc}", flush=True)
+                name = None
+
+    threads = [threading.Thread(target=lane, args=(n,), daemon=True) for n in names]
     for t in threads:
         t.start()
     for t in threads:
@@ -100,7 +115,7 @@ def main() -> int:
                               certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker, items=args.items)
         task = f", {args.items} item(s) each" if args.items else ""
         print(f"started {len(swarm.names)} worker(s) of role {args.role}{task}; Ctrl-C stops them")
-        follow(swarm.names)
+        follow(swarm.names, swarm.on_exit)
     except KeyboardInterrupt:
         pass
     finally:
