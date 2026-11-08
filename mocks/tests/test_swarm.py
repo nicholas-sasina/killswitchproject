@@ -142,3 +142,11 @@ def test_a_role_instance_gets_its_secret_values_once_and_a_scenario_agent_does_n
     instance = check(client.get("/instances"), "/instances")["instances"][0]
     assert "secrets" not in json.dumps(instance)
     assert "secrets" not in start(client, scenario[1]["agents"][0]["id"])
+
+
+def test_eval_role_names_are_reserved(client):
+    for name in ("eval", "eval-7"):
+        response = client.post("/roles", json={"name": name, "tools": []})
+        assert response.status_code == 400 and "reserved" in response.json()["detail"]
+        assert client.put(f"/roles/{name}", json={"name": name, "tools": []}).status_code == 400
+    assert client.post("/roles", json={"name": "evaluator", "tools": []}).status_code == 201

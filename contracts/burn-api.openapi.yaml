@@ -543,6 +543,7 @@ components:
     RoleName:
       type: string
       pattern: '^[a-z0-9][a-z0-9-]{0,31}$'
+      description: "`eval` and `eval-*` are reserved for the eval harness (its load-test agents are agent-eval-*); creating a role with such a name is a 400."
       example: worker
     RoleFields:
       type: object

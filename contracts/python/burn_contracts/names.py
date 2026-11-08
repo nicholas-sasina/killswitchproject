@@ -40,6 +40,9 @@ SHARED_OWNER = "shared"
 
 # Roles. A role name plus "-" and a 6-hex suffix must still fit an agent id, hence 32 chars.
 ROLE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+# `eval` and `eval-*` are reserved: an instance of such a role would be agent-eval-*, which reset
+# and the badge cleanup treat as the eval harness's load-test agents and never touch.
+RESERVED_ROLE_PREFIX = "eval"
 INSTANCE_SUFFIX_RE = re.compile(r"^[0-9a-f]{6}$")
 ROLE_SOURCES = ("code", "ui", "scenario")  # managed_by: burn.yaml, dashboard, scenario file
 
@@ -59,6 +62,10 @@ def is_agent_id(value: str) -> bool:
 
 def is_role_name(value: str) -> bool:
     return bool(ROLE_NAME_RE.match(value or ""))
+
+
+def is_reserved_role_name(value: str) -> bool:
+    return value == RESERVED_ROLE_PREFIX or (value or "").startswith(RESERVED_ROLE_PREFIX + "-")
 
 
 def instance_agent_id(role: str, suffix: str) -> str:
