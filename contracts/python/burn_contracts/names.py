@@ -37,8 +37,30 @@ DEMO_TOKEN_SECRET = "burn-system/demo-token"
 # Lambda function names.
 MINTER_FUNCTION = "burn-minter"
 
-# Header the Burn API checks on every request.
+# Header the Burn API accepts as the admin credential. Local development only: the deployed API
+# honors it only when its environment sets LOCAL_DEV_ENV to "1", which a deployment never does.
 DEMO_TOKEN_HEADER = "x-burn-demo-token"
+LOCAL_DEV_ENV = "BURN_LOCAL_DEV"
+
+# People sign-in (an invite-only user pool, separate from the instances' badge pool). The stack
+# publishes these four values to SSM so the CLI, the dashboard and the API find them by name.
+PEOPLE_POOL_NAME = "burn-people"
+PEOPLE_SSM_PREFIX = "/burn/people"
+PEOPLE_USER_POOL_ID_PARAM = f"{PEOPLE_SSM_PREFIX}/user-pool-id"
+PEOPLE_CLIENT_ID_PARAM = f"{PEOPLE_SSM_PREFIX}/client-id"
+PEOPLE_DOMAIN_PARAM = f"{PEOPLE_SSM_PREFIX}/domain"
+PEOPLE_ISSUER_PARAM = f"{PEOPLE_SSM_PREFIX}/issuer"
+# Scripts and tests that run without a person (e2e, smoke, load) sign in as an "automation" person
+# through a second, confidential app client that alone accepts the admin password flow. Its client
+# id is published next to the others. The person's credentials live in Secrets Manager as the JSON
+# {"username": "<email>", "password": "<password>"}, for AdminInitiateAuth (ADMIN_USER_PASSWORD_AUTH).
+AUTOMATION_CLIENT_NAME = "burn-automation"
+AUTOMATION_CLIENT_ID_PARAM = f"{PEOPLE_SSM_PREFIX}/automation-client-id"
+AUTOMATION_PERSON_SECRET = "burn-system/automation-person"
+# Where a sign-in returns to: the CLI listens on a fixed loopback port, the dashboard on its dev server.
+CLI_LOOPBACK_PORT = 8976
+CLI_REDIRECT_URI = f"http://localhost:{CLI_LOOPBACK_PORT}/callback"
+DASHBOARD_REDIRECT_URI = "http://localhost:5173/"
 
 # Header mock servers add so the dashboard can show a MOCK banner.
 MOCK_HEADER = "x-burn-mock"

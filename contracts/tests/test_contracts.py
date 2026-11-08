@@ -369,3 +369,111 @@ def test_specs_have_no_duplicate_yaml_keys(spec):
 
     Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
     yaml.load((ROOT / spec).read_text(), Loader=Strict)
+
+
+# --- sign-in -----------------------------------------------------------------------------------
+
+def _api():
+    return yaml.safe_load((ROOT / "burn-api.openapi.yaml").read_text())
+
+
+def _operations(api):
+    for path, item in api["paths"].items():
+        for method, op in item.items():
+            if method in ("get", "post", "put", "delete"):
+                yield path, method, op
+
+
+def _schemes(api, op):
+    """Names of the security schemes an operation accepts (its own list, else the global one)."""
+    return {name for requirement in op.get("security", api["security"]) for name in requirement}
+
+
+def test_every_security_requirement_names_a_defined_scheme():
+    api = _api()
+    defined = set(api["components"]["securitySchemes"])
+    assert defined == {"personBearer", "instanceBearer", "joinToken", "adminHeader"}
+    for path, method, op in _operations(api):
+        assert _schemes(api, op) <= defined, (method, path)
+
+
+def test_people_cover_every_route_except_the_instance_routes():
+    api = _api()
+    instance_routes = {("/instances", "post"), ("/instances/{session_id}/heartbeat", "post"),
+                       ("/instances/{session_id}/exit", "post")}
+    for path, method, op in _operations(api):
+        schemes = _schemes(api, op)
+        if (path, method) in instance_routes:
+            assert "personBearer" not in schemes and "instanceBearer" in schemes, (method, path)
+        else:
+            assert "personBearer" in schemes and not schemes & {"instanceBearer", "joinToken"}, (method, path)
+
+
+def test_a_join_token_is_accepted_only_where_a_role_instance_starts():
+    api = _api()
+    starts = {(path, method) for path, method, op in _operations(api) if "joinToken" in _schemes(api, op)}
+    assert starts == {("/instances", "post")}  # every form of POST /sessions needs a person
+
+
+def test_the_exempt_routes_are_exactly_the_three_instance_routes():
+    api = _api()
+    exempt = {(path, method) for path, method, op in _operations(api) if "personBearer" not in _schemes(api, op)}
+    assert exempt == {("/instances", "post"), ("/instances/{session_id}/heartbeat", "post"),
+                      ("/instances/{session_id}/exit", "post")}
+    description = api["info"]["description"]
+    assert "Every form of `POST /sessions` now needs a person" in description
+    assert "OPTIONS" in description
+    assert "personBearer" not in api["paths"]["/instances"]["post"]["security"][0]
+
+
+def test_a_missing_or_invalid_person_token_is_a_documented_401():
+    api = _api()
+    for path, method, op in _operations(api):
+        assert "401" in op["responses"], (method, path)
+        if "personBearer" in _schemes(api, op):
+            assert op["responses"]["401"] == {"$ref": "#/components/responses/Unauthorized"} or path == "/instances", (method, path)
+
+
+def test_the_admin_header_is_local_development_only():
+    api = _api()
+    scheme = api["components"]["securitySchemes"]["adminHeader"]
+    assert scheme["name"] == names.DEMO_TOKEN_HEADER and "local development only" in scheme["description"].lower()
+    assert names.LOCAL_DEV_ENV in scheme["description"] and "BURN_LOCAL_DEV" in api["info"]["description"]
+
+
+def test_created_by_and_actor_are_nullable_and_leave_owner_alone():
+    api = _api()["components"]["schemas"]
+    assert api["CreatedBy"]["nullable"] is True and api["CreatedBy"]["type"] == "string"
+    for schema in ("SessionStarted", "Instance", "EnrollToken"):
+        assert api[schema]["properties"]["created_by"] == {"$ref": "#/components/schemas/CreatedBy"}
+    assert api["Instance"]["properties"]["owner"] == {"type": "string", "nullable": True}  # still the team
+    actor = json.loads((ROOT / "ledger-event.schema.json").read_text())["properties"]["actor"]
+    assert actor["type"] == ["string", "null"]
+
+
+def test_actor_is_a_person_an_instance_or_the_system():
+    from burn_contracts import events
+    schema = json.loads((ROOT / "ledger-event.schema.json").read_text())
+    for actor in ("ada@example.com", "instance:sess_0123456789abcdef", "system", None):
+        event = events.make_event(agent_id="agent-a", source="session", action="issued", actor=actor)
+        jsonschema.validate(event, schema)
+    for bad in ("", "someone", "instance:", "instance:a b", "a@b c", "x" * 400 + "@example.com"):
+        with pytest.raises(ValueError):
+            events.make_event(agent_id="agent-a", source="session", action="issued", actor=bad)
+    event = events.make_event(agent_id="agent-a", source="session", action="issued")
+    assert event["actor"] is None  # events without one stay valid
+    jsonschema.validate(event, schema)
+
+
+def test_sign_in_names():
+    assert names.PEOPLE_POOL_NAME == "burn-people"
+    assert [names.PEOPLE_USER_POOL_ID_PARAM, names.PEOPLE_CLIENT_ID_PARAM,
+            names.PEOPLE_DOMAIN_PARAM, names.PEOPLE_ISSUER_PARAM] == [
+        "/burn/people/user-pool-id", "/burn/people/client-id", "/burn/people/domain", "/burn/people/issuer"]
+    assert names.LOCAL_DEV_ENV == "BURN_LOCAL_DEV"
+    assert names.CLI_LOOPBACK_PORT == 8976
+    assert names.CLI_REDIRECT_URI == "http://localhost:8976/callback"
+    assert names.DASHBOARD_REDIRECT_URI == "http://localhost:5173/"
+    assert names.AUTOMATION_CLIENT_NAME == "burn-automation"
+    assert names.AUTOMATION_CLIENT_ID_PARAM == "/burn/people/automation-client-id"
+    assert names.AUTOMATION_PERSON_SECRET == "burn-system/automation-person"

@@ -34,6 +34,17 @@ cd contracts && uv run --with pytest --with jsonschema --with pyyaml pytest -q
   every API, not against each other, so pieces can be developed and replaced independently.
 - **Do you store credentials in the ledger?** No. The ledger stores an HMAC-SHA256 fingerprint keyed
   with a server-side secret, so the ledger itself is useless to an attacker.
+- **How do people sign in, and what stops a worker from calling the API as an admin?** People sign in
+  to an invite-only user pool and send their ID token as `Authorization: Bearer <jwt>`; the API
+  gateway checks it before the API runs, and the signed-in email is recorded as `created_by` on what
+  they create and as `actor` on the ledger events they cause. A worker never holds a person's token.
+  Exactly three routes are exempt: `POST /instances` (a join with its join token, or a spawn with the
+  parent's session token), and an instance's own heartbeat and exit (its session token, `bst_...`);
+  the CORS preflight is exempt too. They carry their own credential and the API checks it itself.
+  Every form of `POST /sessions` needs a person, so instance clients use `/instances`. The old shared
+  `x-burn-demo-token` header works only in local development (`BURN_LOCAL_DEV=1`); a deployment never
+  sets it, so the header cannot open any route there. Scripts that run without a person sign in as an
+  automation person through a separate app client (see `names.AUTOMATION_*`).
 
 ---
 
@@ -144,12 +155,14 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 
 `burn-sessions` rows keep their existing fields (`session_id`, `agent_id`, `client_id`, `status`,
 `tools`, `send_to`, `created_at`). Instances add optional fields, never renaming or removing one:
-`role`, `parent_session`, `token_id`, `owner`, `egress`, `credentials` (the narrowed credential types
+`role`, `parent_session`, `token_id`, `owner`, `created_by` (the signed-in person's email, or null; `owner` stays the
+team), `egress`, `credentials` (the narrowed credential types
 minted for the instance), `last_seen`, `exited_at`, `session_token_sha256` (the session token itself
 is returned once in the join reply and never stored; the supervisor never hands it to the agent).
 `status` is `active`, `revoked` (burned) or `exited` (clean exit or inactivity).
 
-`burn-enroll-tokens` rows: `token_id`, `role`, `secret_sha256`, `uses`, `uses_left`, `expires_at`,
+`burn-enroll-tokens` rows: `token_id`, `role`, `created_by` (the person who made the token, or null),
+`secret_sha256`, `uses`, `uses_left`, `expires_at`,
 `revoked`, `created_at`. The token itself is never stored.
 
 ### Roles and instances
@@ -214,6 +227,9 @@ is returned once in the join reply and never stored; the supervisor never hands 
 - Instance lifecycle: source `instance`, actions `started` / `exited`, with `session_id`, `role`
   and `parent_session` set. A call carrying a badge Burn never issued is `agent_id: system`,
   source `gateway`, action `unregistered`.
+- `actor` (optional) says who caused an event: the signed-in person's email, `instance:<session_id>`
+  for an instance acting on its own session, or `system` for Burn itself. Events written before
+  sign-in have none.
 - `detail` is for humans. Never put a credential value, a full URL with a query string, or a
   request body in it.
 

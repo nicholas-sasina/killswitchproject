@@ -30,12 +30,13 @@ OPTIONAL_FIELDS = (
     "session_id", "tool", "secret_ref", "fingerprint", "secret_type", "owner",
     "owner_agent_id", "target_agent_id", "destination", "encoding", "detail",
     "role", "parent_session",
-    "flag_level",
+    "flag_level", "actor",
 )
 
 _SECRET_REF_RE = re.compile(r"^burn/(agent-[a-z0-9-]{1,40}|shared)/[a-z0-9_]{1,40}$")
 _FP_RE = re.compile(r"^[0-9a-f]{64}$")
 _AGENT_RE = re.compile(r"^(agent-[a-z0-9-]{1,40}|system)$")
+_ACTOR_RE = re.compile(r"^(system|instance:[A-Za-z0-9_.:-]{1,128}|[^@\s]{1,64}@[^@\s]{1,255})$")
 _ROLE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 
@@ -66,6 +67,8 @@ def make_event(*, agent_id: str, source: str, action: str, **fields) -> dict:
         raise ValueError("fingerprint must be 64 lowercase hex chars")
     if fields.get("role") is not None and not _ROLE_RE.match(fields["role"]):
         raise ValueError(f"invalid role: {fields['role']!r}")
+    if fields.get("actor") is not None and not _ACTOR_RE.match(fields["actor"]):
+        raise ValueError(f"invalid actor: {fields['actor']!r}")
     if fields.get("flag_level") is not None and fields["flag_level"] not in FLAG_LEVELS:
         raise ValueError(f"invalid flag_level: {fields['flag_level']!r}")
     if fields.get("detail") is not None and len(fields["detail"]) > 500:
