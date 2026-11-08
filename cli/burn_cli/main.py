@@ -16,8 +16,8 @@ CLOUDTRAIL_NOTE = "CloudTrail event history can lag 5-15 minutes behind real act
 RUN_HELP = """Run COMMAND as one Burn instance: burn run --role worker -- python agent.py
 
 burn run joins with a join token (--token or BURN_JOIN_TOKEN), fetches the instance's own credentials, and
-starts COMMAND with only those: your AWS_* variables, BURN_JOIN_TOKEN, the API token and other credential
-variables are removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
+starts COMMAND with only those, and with only an allow-list of your environment (PATH, LANG, LC_*, TZ, TERM,
+the AWS region and CA-bundle variables): every other variable, credentials included, is removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
 (POST {role, command} to start a child instance), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE.
 It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
 

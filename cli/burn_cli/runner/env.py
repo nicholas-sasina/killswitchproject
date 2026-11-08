@@ -1,32 +1,27 @@
-"""The environment an agent process gets: the host's credentials removed, its own values set."""
-import re
+"""The environment an agent process gets: an allow-list of the host's, plus its own values."""
 from urllib.parse import quote, urlsplit, urlunsplit
 
-# Credential-bearing names removed from the host environment. AWS_REGION, AWS_DEFAULT_REGION and AWS_CA_BUNDLE
-# are the only AWS_ variables kept: they hold no credential and boto3 needs a region.
-KEEP_AWS = {"AWS_REGION", "AWS_DEFAULT_REGION", "AWS_CA_BUNDLE"}
-SCRUB_NAMES = {
-    "BURN_JOIN_TOKEN", "BURN_DEMO_TOKEN", "BURN_API_KEY", "BURN_API_URL", "BURN_CLIENT_ID", "BURN_CLIENT_SECRET",
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY", "GH_TOKEN", "GITHUB_TOKEN",
-    "GITLAB_TOKEN", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "NPM_TOKEN", "PYPI_TOKEN", "SLACK_BOT_TOKEN",
-    "SLACK_TOKEN", "STRIPE_API_KEY", "DATABASE_URL", "REDIS_URL", "GOOGLE_APPLICATION_CREDENTIALS",
-    "AZURE_CLIENT_SECRET", "SSH_AUTH_SOCK", "KUBECONFIG", "DOCKER_CONFIG",
+# The agent's environment is an allow-list: a variable reaches it only if it is listed here. A deny-list has to
+# know every credential name (PGPASSWORD, MYSQL_PWD, SENTRY_DSN, a proxy URL with a password in it...) and misses some.
+# AWS_REGION and AWS_DEFAULT_REGION hold no credential and boto3 needs a region; the CA-bundle variables let TLS
+# work behind the proxy. Everything burn run sets itself is added after this filter.
+ALLOWED_NAMES = {
+    "PATH", "LANG", "LANGUAGE", "TZ", "TERM", "COLORTERM", "TMPDIR",
+    "AWS_REGION", "AWS_DEFAULT_REGION",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
 }
-SCRUB_PATTERN = re.compile(
-    r"(^AWS_)|(_TOKEN$)|(_SECRET$)|(_SECRET_KEY$)|(_SECRET_ACCESS_KEY$)|(_ACCESS_KEY$)|(_PASSWORD$)|(_PASSWD$)"
-    r"|(_API_KEY$)|(_APIKEY$)|(_CREDENTIALS$)|(_PRIVATE_KEY$)|(_AUTH$)", re.IGNORECASE)
+ALLOWED_PREFIXES = ("LC_",)
 PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 LOOPBACK = "127.0.0.1,localhost"
 
 
 def is_scrubbed(name: str) -> bool:
-    if name in KEEP_AWS:
-        return False
-    return name in SCRUB_NAMES or bool(SCRUB_PATTERN.search(name))
+    """True for every host variable the agent does not get."""
+    return name not in ALLOWED_NAMES and not name.startswith(ALLOWED_PREFIXES)
 
 
 def scrub(host_env: dict) -> dict:
-    """The host environment without anything that looks like a credential."""
+    """Only the allow-listed part of the host environment."""
     return {k: v for k, v in host_env.items() if not is_scrubbed(k)}
 
 
@@ -43,7 +38,7 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
               proxy_base: str = "", home: str = "", local_token: str = "") -> dict:
-    """Everything the agent process runs with: the scrubbed host environment plus its own values."""
+    """Everything the agent process runs with: the allow-listed host environment plus its own values."""
     env = scrub(host_env)
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
         env.update({"HOME": home, "XDG_CONFIG_HOME": f"{home}/.config", "XDG_CACHE_HOME": f"{home}/.cache",

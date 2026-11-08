@@ -56,12 +56,14 @@ burn env            # what an instance's environment would hold (values hidden; 
    jitter (new IAM keys take seconds to work, and 20 parallel spawns hit rate limits).
 2. Reads the instance's own badge, AWS key and provider key from Secrets Manager with the host's AWS access
    (`BURN_CREDENTIAL_SOURCE=aws`, the default; `fake` is for the mock servers).
-3. Starts the command with the host's credentials **removed** (`AWS_*` except the region and CA bundle,
-   `BURN_JOIN_TOKEN`, the API token, and variables named `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY`...) and
-   the instance's own values **set**: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `BURN_API_KEY`,
-   `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE`, `BURN_MCP_URL`, `BURN_SPAWN_URL`, and `HTTPS_PROXY`/`HTTP_PROXY`
-   when `BURN_PROXY_URL` is set (with the agent id and session id as the proxy user and password, which is how
-   the egress proxy attributes traffic).
+3. Starts the command with an **allow-list** of your environment (`PATH`, `LANG`, `LC_*`, `TZ`, `TERM`, `TMPDIR`,
+   `AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables such as `SSL_CERT_FILE`); everything else is removed,
+   including `AWS_*` credentials, `BURN_JOIN_TOKEN`, the API token, database passwords, DSNs and proxy URLs with
+   credentials in them. It sets the instance's own values: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`,
+   `BURN_API_KEY`, `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE`, `BURN_MCP_URL`, `BURN_SPAWN_URL`,
+   `BURN_LOCAL_TOKEN`, and `HTTPS_PROXY`/`HTTP_PROXY` when `BURN_PROXY_URL` is set (with the agent id and session id
+   as the proxy user and password, which is how the egress proxy attributes traffic). `burn env` lists every host
+   variable that would be removed, by name.
 4. `BURN_MCP_URL` is a local endpoint (127.0.0.1, random port) that forwards to `BURN_GATEWAY_URL` and adds
    `Authorization: Bearer <badge token>`. The token comes from the badge's client-credentials token URL and is
    refreshed before it expires. The agent never sees the badge secret or token, and MCP activity triggers heartbeats.

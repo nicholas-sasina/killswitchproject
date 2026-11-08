@@ -97,10 +97,27 @@ def test_no_proxy_means_no_proxy_variables(stack):
     assert not [k for k in json.loads(out.read_text()) if "proxy" in k.lower()]
 
 
-def test_scrub_removes_common_credential_names():
-    kept = scrub({"PATH": "/bin", "LANG": "C", "AWS_REGION": "x", "FOO_TOKEN": "t", "MY_API_KEY": "k", "DB_PASSWORD": "p",
-                  "AWS_FUTURE_THING": "x", "HOME": "/h"})
-    assert kept == {"PATH": "/bin", "LANG": "C", "AWS_REGION": "x", "HOME": "/h"}
+def test_only_allow_listed_host_variables_reach_the_agent():
+    kept = scrub({"PATH": "/bin", "LANG": "C", "LC_ALL": "C", "TZ": "UTC", "TERM": "xterm", "AWS_REGION": "x",
+                  "SSL_CERT_FILE": "/c.pem", "AWS_CA_BUNDLE": "/c.pem", "HOME": "/h", "USER": "me", "SHELL": "/bin/zsh",
+                  "FOO_TOKEN": "t", "AWS_FUTURE_THING": "x", "SOME_NEW_THING": "x"})
+    assert kept == {"PATH": "/bin", "LANG": "C", "LC_ALL": "C", "TZ": "UTC", "TERM": "xterm", "AWS_REGION": "x",
+                    "SSL_CERT_FILE": "/c.pem", "AWS_CA_BUNDLE": "/c.pem"}
+
+
+@pytest.mark.parametrize("name,value", [
+    ("SECRET_KEY", "django-insecure"), ("PGPASSWORD", "pw"), ("MYSQL_PWD", "pw"), ("OPENAI_KEY", "sk"),
+    ("GITHUB_PAT", "ghp"), ("SENTRY_DSN", "https://k@o.ingest.sentry.io/1"), ("MONGODB_URI", "mongodb://u:p@h/db"),
+    ("CELERY_BROKER_URL", "amqp://u:p@h//"), ("DB_CONNECTION_STRING", "Server=h;Password=p"),
+    ("HTTPS_PROXY", "http://user:pass@corp-proxy:3128"), ("ALL_PROXY", "socks5://u:p@h:1080"),
+    ("http_proxy", "http://user:pass@corp-proxy:3128"), ("NO_PROXY", "internal.example"), ("PYTHONPATH", "/opt/private-libs")])
+def test_credential_looking_variables_the_old_deny_list_missed_do_not_reach_the_agent(stack, name, value):
+    out = stack.tmp / "env.json"
+    inst = instance(stack, py(DUMP_ENV, str(out)))
+    inst.host_env[name] = value
+    assert inst.run() == 0
+    env = json.loads(out.read_text())
+    assert name not in env and value not in json.dumps(env)
 
 
 def test_proxy_url_keeps_existing_userinfo_and_adds_the_instance_identity():
@@ -116,7 +133,7 @@ def test_env_command_hides_values_and_never_prints_removed_ones(capsys, monkeypa
     monkeypatch.setenv("BURN_PROXY_URL", "http://proxy:8080")
     assert cli(["env"]) == 0
     out = capsys.readouterr().out
-    assert "AWS_SECRET_ACCESS_KEY" in out and "host-secret" not in out and JOIN not in out and API_TOKEN not in out
+    assert "AWS_SECRET_ACCESS_KEY" in out and "MY_SERVICE_PASSWORD" in out and "host-secret" not in out and JOIN not in out and API_TOKEN not in out
     assert "<redacted>" in out and "convenience, not containment" in out
     assert cli(["env", "--show"]) == 0
     shown = capsys.readouterr().out
@@ -576,11 +593,11 @@ def test_home_is_chowned_to_the_agent_user_and_removed_when_the_agent_is_stopped
     assert (uid, gid) == (4242, 4343) and "burn-home-" in path and not os.path.exists(path)
 
 
-def test_child_env_without_a_home_leaves_the_hosts():
+def test_child_env_without_a_home_has_none():
     creds = FakeSource().fetch({"session_id": "s", "agent_id": "agent-a", "credentials": []})
     env = child_env({"HOME": "/h"}, session={"session_id": "s", "agent_id": "agent-a"}, credentials=creds,
                     mcp_url="u", spawn_url="v")
-    assert env["HOME"] == "/h"
+    assert "HOME" not in env  # the host's home is never passed on
 
 
 # -- local endpoints need the per-run token ------------------------------------------------------------
