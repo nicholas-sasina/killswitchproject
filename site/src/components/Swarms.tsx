@@ -15,17 +15,20 @@ const RUN: TermLine[] = [
 ];
 
 const REFERENCE: TermLine[] = [
-  { text: "# a tool returns a credential", muted: true },
-  { text: 'read_config("crm")' },
+  { text: "# a tool reads a config file that holds a live key", muted: true },
+  { text: 'read_config("config/app.env")' },
   { text: "" },
-  { text: "# the agent receives a reference instead", muted: true },
+  {
+    text: "# the content that comes back has a reference instead",
+    muted: true,
+  },
   {
     text: "",
     swap: {
-      before: '{ "db_url": "postgres://crm:',
+      before: "CRM_DB_URL=postgres://svc_crm:",
       from: "••••••",
       to: "{{burn:ref:burn/shared/crm_db_url}}",
-      after: '@db.internal:5432/crm" }',
+      after: "@crm-db.internal.example:5432/crm",
     },
   },
 ];

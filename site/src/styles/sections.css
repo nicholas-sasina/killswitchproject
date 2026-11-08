@@ -122,6 +122,19 @@
   display: block;
 }
 
+.t-part,
+.t-swap {
+  white-space: nowrap;
+}
+
+/* Too narrow for the longest part: let it wrap anywhere rather than overflow. */
+@media (max-width: 380px) {
+  .t-part,
+  .t-swap {
+    white-space: inherit;
+  }
+}
+
 .t-muted,
 .t-prompt {
   color: #6b7078;

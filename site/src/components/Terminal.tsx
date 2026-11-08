@@ -35,15 +35,19 @@ export function Terminal({ lines }: { lines: TermLine[] }) {
           >
             {line.prompt && <span className="t-prompt">$ </span>}
             {line.swap ? (
+              // A long value wraps only between its parts, never at a
+              // hyphen inside a host name.
               <>
-                {line.swap.before}
+                <span className="t-part">{line.swap.before}</span>
+                <wbr />
                 <Swap
                   from={line.swap.from}
                   to={line.swap.to}
                   phase={phase}
                   delay={at * LINE_MS + SWAP_DELAY_MS}
                 />
-                {line.swap.after}
+                <wbr />
+                <span className="t-part">{line.swap.after}</span>
               </>
             ) : (
               line.text || " "
