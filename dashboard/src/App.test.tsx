@@ -46,6 +46,8 @@ describe("containment dashboard", () => {
               },
             ],
           };
+        else if (path === "/roles") body = { roles: [] };
+        else if (path === "/instances") body = { instances: [] };
         else if (path.endsWith("/ledger")) body = { agent_id: id, entries: [] };
         else if (path.endsWith("/blast-radius"))
           body = { agent_id: id, keys: [], events: [] };
@@ -156,6 +158,8 @@ describe("containment dashboard", () => {
           ],
           cursor: null,
         };
+      else if (path === "/roles") body = { roles: [] };
+      else if (path === "/instances") body = { instances: [] };
       else if (path.endsWith("/ledger"))
         body = {
           agent_id: id,
@@ -240,6 +244,10 @@ describe("containment dashboard", () => {
                 ],
               }),
             );
+          if (path === "/roles")
+            return new Response(JSON.stringify({ roles: [] }));
+          if (path === "/instances")
+            return new Response(JSON.stringify({ instances: [] }));
           if (path.endsWith("/ledger"))
             return new Response(JSON.stringify({ agent_id: id, entries: [] }));
           throw new Error("Unexpected endpoint");
@@ -261,7 +269,7 @@ describe("containment dashboard", () => {
       expect(feed.textContent).toContain(source);
       expect(
         fetcher.mock.calls.every(([url]) =>
-          ["/events", `/agents/${id}/ledger`].includes(
+          ["/events", "/roles", "/instances", `/agents/${id}/ledger`].includes(
             new URL(String(url)).pathname,
           ),
         ),
