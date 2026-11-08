@@ -90,7 +90,7 @@ class ProgressQueue:
     def wait_recorded(self, item: str, timeout: float) -> tuple[str, str]:
         """Wait until the API has recorded `item` as started. Returns (outcome, detail), the outcome one of
         "recorded", "gone" (burned or exited), "refused" (a 400 dropped it; detail says why) or "timeout"."""
-        deadline = time.monotonic() + timeout
+        deadline, told = time.monotonic() + timeout, False
         with self._changed:
             self._waiting += 1
             try:
@@ -104,6 +104,9 @@ class ProgressQueue:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         return "timeout", ""
+                    if not told:  # a start now waits: the heartbeat may go after the shorter gap
+                        told = True
+                        self._on_change()
                     self._changed.wait(remaining)
             finally:
                 self._waiting -= 1

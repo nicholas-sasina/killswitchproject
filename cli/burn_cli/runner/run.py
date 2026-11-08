@@ -26,6 +26,7 @@ from .spawn_endpoint import SpawnEndpoint
 EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # how a supervisor receives the secrets of a session someone else started
 STOP_GRACE = 5.0  # seconds between SIGTERM and SIGKILL when stopping the agent
+START_GAP = 1.0  # the minimum gap instead, while a start waits for Burn: the agent is blocked on that beat
 BARE_AFTER = 2  # failed sends of a batch in a row before one heartbeat goes without it
 FLUSH_DEADLINE = 10.0  # seconds the exit may wait for the progress still queued
 UNCONFIRMED = 1  # _beat's result when the API took a heartbeat but its reply does not show the progress
@@ -68,6 +69,7 @@ class Instance:
         self._bare_next = False  # after a refused batch: the API recorded nothing, not even that we are alive
         self._batch_failures = 0  # heartbeats in a row whose batch failed: past BARE_AFTER, liveness goes first
         self._clock, self._last_beat = time.monotonic, 0.0  # when the last heartbeat began
+        self._wait = self._activity.wait  # how the loop waits for activity; tests drive it on a fake clock
         self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
 
     # -- session ------------------------------------------------------------------------------
@@ -197,19 +199,29 @@ class Instance:
         except ApiError as exc:
             log(f"could not report the exit ({exc})")
 
+    def _gap_left(self) -> float:
+        """Seconds until the next heartbeat may go: the minimum gap, or the shorter START_GAP while the agent
+        waits for a start to be recorded. Every other beat, done-only batches included, keeps the normal gap."""
+        gap = min(START_GAP, self.min_gap) if self._progress.waiting() else self.min_gap
+        return gap - (self._clock() - self._last_beat)
+
     def _heartbeat_loop(self) -> None:
         while not self._done.is_set():
-            woke = self._activity.wait(self.heartbeat_every)  # MCP activity and new progress wake the loop early
+            woke = self._wait(self.heartbeat_every)  # MCP activity, new progress and waiting starts wake it early
             if self._done.is_set():
                 return
             if woke:
                 self._activity.clear()
-                gap_left = self.min_gap - (self._clock() - self._last_beat)
-                if gap_left > 0:
+                if self._gap_left() > 0:
                     if not (self._progress.pending() or self._bare_next):
                         continue  # MCP activity just after a beat: that beat already showed the instance alive
-                    if self._done.wait(gap_left):  # progress goes out as soon as the minimum gap allows
-                        return
+                    # Progress goes out as soon as the gap allows. A start that begins waiting meanwhile wakes
+                    # this wait, and the gap is worked out again (it may now be the shorter one).
+                    while (left := self._gap_left()) > 0:
+                        if self._wait(left):
+                            self._activity.clear()
+                        if self._done.is_set():
+                            return
             status = self._beat()
             if status in (404, 409):  # burned, exited or gone: the agent must not keep running
                 self._stopped_by_api = True

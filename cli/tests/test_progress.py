@@ -911,3 +911,49 @@ def test_the_admin_token_from_dotenv_is_refused_as_an_item_too(stack, capsys, mo
     err = capsys.readouterr().err
     assert "holds a credential" in err and ADMIN not in err
     assert not stack.calls("POST", "/instances")
+
+
+# -- a shorter gap while a start waits ------------------------------------------------------------------
+def beats_on_fake_clock(events, waiting, beats=4):
+    """Run the real heartbeat loop on a fake clock; returns when each heartbeat began, in fake seconds."""
+    clock = [1000.0]
+    api = SlowApi(clock, takes=0.0)
+    inst = on_fake_clock(api, clock)
+    inst.min_gap, inst.heartbeat_every = 3.0, 60.0
+    inst._progress.waiting = lambda: waiting  # a start is (or is not) blocked on the next beat
+
+    def fake_wait(timeout):  # what threading.Event.wait does, with time passing only on the fake clock
+        if inst._activity.is_set() or len(api.calls) >= beats:
+            if len(api.calls) >= beats:
+                inst._done.set()
+            return True
+        clock[0] += timeout
+        return False
+
+    inst._wait = fake_wait
+    for event in events:
+        inst._progress.add(event)
+    inst._heartbeat_loop()
+    return [at for at, _ in api.calls][:beats]
+
+
+def test_with_a_start_waiting_the_next_beat_goes_after_the_short_gap():
+    starts = beats_on_fake_clock([ev(f"item-{i:03d}") for i in range(200)], waiting=True)
+    assert [round(b - a, 6) for a, b in zip(starts, starts[1:])] == [runmod.START_GAP] * 3 == [1.0] * 3
+
+
+def test_with_no_start_waiting_the_normal_gap_applies_even_to_a_backlog():
+    starts = beats_on_fake_clock([ev(f"item-{i:03d}", "done") for i in range(200)], waiting=False)
+    assert [round(b - a, 6) for a, b in zip(starts, starts[1:])] == [3.0] * 3
+
+
+def test_a_burst_of_starts_sends_no_faster_than_one_beat_per_short_gap():
+    starts = beats_on_fake_clock([ev(f"item-{i:03d}") for i in range(500)], waiting=True, beats=10)
+    assert len(starts) == 10 and all(b - a >= 1.0 - 1e-9 for a, b in zip(starts, starts[1:]))
+
+
+def test_a_start_that_begins_waiting_wakes_the_loop_to_use_the_short_gap():
+    woken = []
+    queue = ProgressQueue(on_change=lambda: woken.append(1))
+    queue.add(ev("a"))
+    assert queue.wait_recorded("a", 0.01) == ("timeout", "") and len(woken) == 2  # the add, then the wait
