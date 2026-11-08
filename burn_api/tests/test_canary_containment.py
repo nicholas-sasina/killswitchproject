@@ -17,6 +17,14 @@ import db
 from burn_contracts.events import make_event
 
 WORKERS = 20
+
+
+class _Invoked:
+    """The Lambda context of a direct invoke of the canary alias, the only way the provider reaches the API."""
+    invoked_function_arn = "arn:aws:lambda:us-east-1:123456789012:function:burn-api:canary"
+
+
+CANARY_ALIAS_CONTEXT = _Invoked()
 NOTIFIER = {"agent-notifier": {"id": "agent-notifier", "role": "notifier", "tools": ["notify"],
                                "credentials": ["api_key"]}}
 
@@ -230,7 +238,7 @@ def test_session_mismatch_never_contains(stack, fleet):  # 15
 ])
 def test_forged_or_malformed_incidents_never_contain(stack, fleet, payload):  # 15
     import handler
-    result = handler.handler({"canary_incident": payload})
+    result = handler.handler({"canary_incident": payload}, CANARY_ALIAS_CONTEXT)
     assert result["outcome"] in ("ignored", "not_actionable")
     _no_one_revoked(stack, fleet)
 

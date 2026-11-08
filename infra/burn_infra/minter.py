@@ -89,14 +89,17 @@ class BurnMinterStack(cdk.Stack):
             actions=["dynamodb:GetItem", "dynamodb:UpdateItem"],
             resources=[f"arn:aws:dynamodb:{region}:{acct}:table/{names.CREDENTIALS_TABLE}"]))
         role.add_to_policy(iam.PolicyStatement(  # hand a canary incident to the Burn API; report to the minter
+            # Only the Burn API's canary alias, never the function itself: the provider faces the internet,
+            # and the alias accepts nothing but canary incidents (an HTTP-shaped event there is refused).
             actions=["lambda:InvokeFunction"],
-            resources=[f"arn:aws:lambda:{region}:{acct}:function:{fn_name}"
-                       for fn_name in (names.BURN_API_FUNCTION, names.MINTER_FUNCTION)]))
+            resources=[f"arn:aws:lambda:{region}:{acct}:function:{names.BURN_API_CANARY_TARGET}",
+                       f"arn:aws:lambda:{region}:{acct}:function:{names.MINTER_FUNCTION}"]))
         fn = lambda_.Function(
             self, "ProviderFn", function_name="burn-provider",
             runtime=lambda_.Runtime.PYTHON_3_12, handler="provider_app.handler",
             code=lambda_.Code.from_asset(lambda_asset("provider", "minter/lambdas/provider")),
             role=role, timeout=cdk.Duration.seconds(10), memory_size=256,
+            environment={"BURN_API_FUNCTION": names.BURN_API_CANARY_TARGET},  # read by provider dispatch.py
         )
         api = apigw.HttpApi(self, "ProviderApi", api_name="burn-provider")
         api.add_routes(path="/v1/whoami", methods=[apigw.HttpMethod.GET],

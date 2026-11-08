@@ -162,8 +162,13 @@ def owner_of(secret_ref: str) -> str:
 CANARY_PREFIX = "canary_"
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
-# Lambda the mock provider hands a canary incident to (direct async invoke).
+# The Burn API Lambda. API Gateway invokes the function itself (unqualified).
 BURN_API_FUNCTION = "burn-api"
+# The mock provider hands a canary incident to the API by direct async invoke, and may invoke only this
+# alias. The alias serves canary incidents and nothing else; the unqualified function refuses them. So
+# the internet-facing provider can never send the API an HTTP-shaped event of its own making.
+BURN_API_CANARY_ALIAS = "canary"
+BURN_API_CANARY_TARGET = f"{BURN_API_FUNCTION}:{BURN_API_CANARY_ALIAS}"
 
 
 def canary_secret_ref(agent_id: str, session_id: str) -> str:
