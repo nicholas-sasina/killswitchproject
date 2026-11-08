@@ -6,6 +6,7 @@ AGENT ?=
 ENCODING ?= random
 ROLE ?= worker
 N ?= 20
+ITEMS ?= 0
 CDK := npx -y aws-cdk@2
 export AWS_REGION := us-east-1
 export AWS_DEFAULT_REGION := us-east-1
@@ -76,8 +77,8 @@ mocks: ## Start the mock Burn API (:8700) and mock MCP tools (:8701), developmen
 proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 	cd detection && uv run --python 3.12 --extra proxy python scripts/proxy_env.py
 
-swarm: ## Start N deterministic workers under `burn run` in containers (ROLE=worker N=20; MOCK=1 for the mock servers)
-	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) $(if $(MOCK),--mock)
+swarm: ## Start N deterministic workers under `burn run` in containers (ROLE=worker N=20; ITEMS=10 gives each a task; MOCK=1 for the mock servers)
+	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) --items $(ITEMS) $(if $(MOCK),--mock)
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)

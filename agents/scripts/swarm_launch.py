@@ -6,9 +6,14 @@ afterwards authenticate with their own session token. `docker run -e NAME` (a na
 with no value) copies each from that environment into the container, so no secret is ever on a command line (visible
 in `ps`) or in a file. The container's `burn run` receives the secrets as BURN_ADOPT_SECRETS, takes them out of its
 environment, and gives its worker only the worker's own values.
+
+With a task (`--items`), each worker gets its own list of item ids as BURN_TASK, and the launcher keeps the map of
+container to task. The task stays here: Burn never holds it, so a compromised agent cannot change it.
 """
 import json
 import sys
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit, urlunsplit
@@ -19,6 +24,7 @@ sys.path.insert(0, str(REPO_ROOT / "cli"))  # the CLI's API client (standard lib
 from burn_cli import retry  # noqa: E402
 from burn_cli.api import Api  # noqa: E402
 from burn_cli.runner.instance_api import InstanceApi  # noqa: E402
+from burn_contracts.names import RESUME_ENV, TASK_ENV  # noqa: E402
 
 class PersonApi(Api):
     """The client for the launcher's person-side call, authenticated by `headers()` (see run_swarm.py)."""
@@ -38,6 +44,12 @@ PROXY = "http://proxy:8080"
 CERT = "/certs/mitmproxy-ca-cert.pem"
 ADOPT_SECRETS = "BURN_ADOPT_SECRETS"  # must match burn_cli.runner.run.ADOPT_SECRETS
 WORKER = ["python", "-m", "burn_agents.swarm_worker"]
+JOIN_TTL = 3600
+
+
+def task_ids(worker: int, items: int) -> list[str]:
+    """Worker `worker`'s task (counting from 1): `items` item ids, empty for no task."""
+    return [f"w{worker:02d}-item-{i:02d}" for i in range(1, items + 1)]
 
 
 def to_container_url(url: str) -> str:
@@ -58,7 +70,8 @@ def split_reply(reply: dict) -> tuple[dict, dict]:
 
 
 def container_env(*, public: dict, secrets: dict, api_url: str, gateway_url: str,
-                  mock: bool, interval: float) -> dict[str, str]:
+                  mock: bool, interval: float, task: list[str] | None = None,
+                  resume: dict | None = None) -> dict[str, str]:
     """Everything one container is given, secrets included. Handed to docker through its environment only."""
     if mock:
         api_url, gateway_url = to_container_url(api_url), to_container_url(gateway_url)
@@ -69,6 +82,10 @@ def container_env(*, public: dict, secrets: dict, api_url: str, gateway_url: str
         "BURN_GATEWAY_URL": gateway_url, "BURN_WORKER_INTERVAL": str(interval),
         ADOPT_SECRETS: json.dumps(secrets),
     }
+    if task:  # item ids only, never secret; `burn run` checks them and passes them on to its worker
+        env[TASK_ENV] = json.dumps(task)
+        if resume is not None:
+            env[RESUME_ENV] = json.dumps({"done": resume["done"], "quarantined": resume["quarantined"]})
     if not mock:
         identity = f"http://{public['agent_id']}:{public['session_id']}@proxy:8080"  # how the proxy tells agents apart
         env.update({"BURN_PROXY_URL": PROXY, "HTTPS_PROXY": identity, "HTTP_PROXY": identity,
@@ -88,37 +105,94 @@ def docker_run_argv(name: str, role: str, public: dict, env_names: list[str], *,
     return argv + [IMAGE, "burn", "run", "--role", role, "--adopt", json.dumps(public), "--", *WORKER]
 
 
+class BurnCalls:
+    """Every Burn API call the launcher makes.
+
+    The person-side call (the join token) goes through `api`, which carries the launcher's own sign-in. Joining and ending an instance go through `instances`, which sends no person
+    credentials: a join token or the instance's own session token is the authority.
+    """
+
+    def __init__(self, api: Api, instances: InstanceApi, sleep=None):
+        self.api, self.instances, self._retry = api, instances, {"sleep": sleep} if sleep else {}
+
+    def join_token(self, role: str, uses: int, ttl: int = JOIN_TTL) -> str:
+        return self.api.request("POST", f"/roles/{role}/tokens", {"uses": uses, "ttl": ttl})["token"]
+
+    def join(self, role: str, token: str) -> dict:
+        return retry.call(lambda: self.instances.join(role, token), **self._retry)
+
+    def end(self, session_id: str, session_token: str) -> None:
+        self.instances.exit(session_id, session_token)
+
+
+@dataclass
+class Worker:
+    """What the launcher knows about one container: its instance and its task (empty without one)."""
+    agent_id: str
+    session_id: str
+    task: list[str]
+
+
+class Swarm:
+    """The launcher's workers: the map of container to task."""
+
+    def __init__(self, calls: BurnCalls, role: str, *, api_url: str, gateway_url: str, mock: bool, interval: float,
+                 certs_dir: str, docker: Callable[[list[str], dict], object]):
+        self.calls, self.role, self.docker = calls, role, docker
+        self._container = {"api_url": api_url, "gateway_url": gateway_url, "mock": mock, "interval": interval}
+        self.mock, self.certs_dir = mock, certs_dir
+        self.workers: dict[str, Worker] = {}
+        self._lock = threading.Lock()
+
+    @property
+    def names(self) -> list[str]:
+        """Every container started, so stopping the launcher removes them all."""
+        with self._lock:
+            return list(self.workers)
+
+    def start(self, count: int, items: int = 0) -> list[str]:
+        """Join `count` times with one join token and start one container per instance. Returns their names."""
+        token = self.calls.join_token(self.role, count)
+        started = []
+        try:
+            for k in range(1, count + 1):
+                started.append(self._launch(self.calls.join(self.role, token), task_ids(k, items)))
+        except BaseException:
+            if started:  # do not leave the workers that did start running with nobody watching them
+                try:
+                    self.docker(["docker", "rm", "-f", *started], {})
+                except BaseException:  # noqa: BLE001
+                    pass
+            raise
+        return started
+
+    def _launch(self, reply: dict, task: list[str], resume: dict | None = None) -> str:
+        """Start the container for a joined instance. If it does not start, the session is ended with its own token."""
+        try:
+            public, secrets = split_reply(reply)
+            env = container_env(public=public, secrets=secrets, task=task, resume=resume, **self._container)
+            name = f"burn-swarm-{self.role}-{public['agent_id'].rsplit('-', 1)[-1]}"
+            self.docker(docker_run_argv(name, self.role, public, sorted(env), mock=self.mock,
+                                        certs_dir=self.certs_dir), env)
+        except BaseException:
+            try:
+                self.calls.end(reply["session_id"], (reply.get("secrets") or {}).get("session_token", ""))
+            except Exception:  # noqa: BLE001 - best effort while already failing
+                pass
+            raise
+        with self._lock:  # started: its supervisor owns the session now
+            self.workers[name] = Worker(public["agent_id"], public["session_id"], task)
+        return name
+
+
 def start_workers(api: Api, instances: InstanceApi, role: str, count: int, *, api_url: str, gateway_url: str,
                   mock: bool, interval: float, certs_dir: str, docker: Callable[[list[str], dict], object],
-                  sleep=None) -> list[str]:
-    """Join `count` times with one join token and start one container per instance. Returns the container names.
+                  items: int = 0, sleep=None) -> Swarm:
+    """Join `count` times with one join token and start one container per instance, each with a task of `items` items.
 
     A session whose container could not be started is ended, so a failure does not leave instances dangling.
     """
-    token = api.request("POST", f"/roles/{role}/tokens", {"uses": count, "ttl": 3600})["token"]  # the person-side call
-    names, joined = [], {}
-    try:
-        for i in range(count):
-            reply = retry.call(lambda: instances.join(role, token), **({"sleep": sleep} if sleep else {}))
-            joined[reply["session_id"]] = (reply.get("secrets") or {}).get("session_token", "")
-            public, secrets = split_reply(reply)
-            env = container_env(public=public, secrets=secrets, api_url=api_url,
-                                gateway_url=gateway_url, mock=mock, interval=interval)
-            name = f"burn-swarm-{role}-{public['agent_id'].rsplit('-', 1)[-1]}"
-            docker(docker_run_argv(name, role, public, sorted(env), mock=mock, certs_dir=certs_dir), env)
-            names.append(name)
-            joined.pop(public["session_id"])  # started: its supervisor owns the session now
-    except BaseException:
-        if names:  # do not leave the workers that did start running with nobody watching them
-            try:
-                docker(["docker", "rm", "-f", *names], {})
-            except BaseException:  # noqa: BLE001
-                pass
-        raise
-    finally:
-        for session_id, session_token in joined.items():  # joined but never started: end them with their own token
-            try:
-                instances.exit(session_id, session_token)
-            except Exception:  # noqa: BLE001 - best effort while already failing
-                pass
-    return names
+    swarm = Swarm(BurnCalls(api, instances, sleep=sleep), role, api_url=api_url, gateway_url=gateway_url, mock=mock,
+                  interval=interval, certs_dir=certs_dir, docker=docker)
+    swarm.start(count, items)
+    return swarm

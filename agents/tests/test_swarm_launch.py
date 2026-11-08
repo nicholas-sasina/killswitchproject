@@ -55,10 +55,10 @@ class Docker:
 
 def launch(api=None, docker=None, mock=True, count=3):
     api, docker = api or FakeApi(), docker or Docker()
-    names = start_workers(api, api, "worker", count, api_url="http://localhost:8700",
+    swarm = start_workers(api, api, "worker", count, api_url="http://localhost:8700",
                           gateway_url="http://localhost:8701/mcp", mock=mock, interval=3.0,
                           certs_dir="/repo/.run/proxy-certs", docker=docker)
-    return api, docker, names
+    return api, docker, swarm.names
 
 
 def test_each_container_is_joined_once_with_one_token_and_gets_only_its_own_values():
@@ -151,7 +151,9 @@ def run_main(monkeypatch, *args):
     captured = {}
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", *args])
     monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
-    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(kw, api=api, instances=instances) or [])
+    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(
+        kw, api=api, instances=instances) or swarm_launch.Swarm(None, role, docker=None, **{
+            k: kw[k] for k in ("api_url", "gateway_url", "mock", "interval", "certs_dir")}))
     run_swarm.main()
     return captured
 
