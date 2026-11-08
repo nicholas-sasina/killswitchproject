@@ -19,10 +19,11 @@ Each page is a bookmarkable hash route. Old links still work: `#/burned` opens I
   with a square per agent; a square dims briefly when its agent makes a call. Beside it: what
   needs a person (flagged shared keys, unknown callers, canary uses), today's burns and the live
   feed, each event written as a sentence.
-- **Roles** (`#/roles`) lists every role. A **role page** (`#/roles/<name>`) shows its agents by
-  state (Running, Burned, Finished, All; the filter is kept in the address), what the role may do,
-  its protections and the join tokens made from this tab. **Burn** on a row burns one agent;
-  **Burn every <role>** burns them all.
+- **Roles** (`#/roles`) lists every role, with a square per agent running or burned today. A
+  **role page** (`#/roles/<name>`) shows its agents by state (Running, Burned, Finished, All; the
+  filter is kept in the address), with an agent another one started indented under it. Beside them:
+  what the role may do, its protections, and the join tokens its agents joined with, which can be
+  revoked there. **Burn** on a row burns one agent; **Burn every <role>** burns them all.
 - **Agent** (`#/agents/<session_id>`): one agent's exposure ledger, its timeline, and a
   containment card that shows what a burn will do before it and ticks through what it did after.
   A burned agent also shows its replacement and its AWS keys' blast radius. **Replay the burn**
@@ -32,9 +33,11 @@ Each page is a bookmarkable hash route. Old links still work: `#/burned` opens I
 - **Credentials** (`#/credentials`): shared keys an agent saw, flagged for their owners, who
   **Rotate** them or **Dismiss** the flag with a reason.
 
-**Add agents** in the navigation creates a role or mints a join token for an existing one, and
-shows the `burn run` commands. The token is shown once; the commands read it with a hidden prompt
-or from the clipboard, so its value stays out of shell history.
+**Add agents** in the navigation creates a role or mints a join token for an existing one; on a
+role page, **Add <role>s** mints one for that role. The dialog shows the token once, with Copy
+token, and the `burn run` commands. The commands never contain the token: they read it with a
+hidden prompt or from the clipboard, so its value stays out of shell history. The dialog then waits
+until the first new agent connects.
 
 ## Sign-in
 
@@ -133,7 +136,7 @@ Tests cover the event reducer, its cursor and its bound; the history backfill; r
 routes; persistent mock detection; agent names, role grouping, burned-today scoping, incidents and
 event sentences; the routes and their redirects; one poll of each collection across pages; the
 burn dialog's requests, partial failures and checklist; Rotate and Dismiss with their errors; join
-tokens and the join commands; each page's empty, loading, error and board states; and reduced motion.
+tokens and the join commands; each page's empty, loading, error and populated states; and reduced motion.
 `npm run preview` serves the production build. The Burn API must allow the console's origin,
 successful unauthenticated OPTIONS preflights, `Authorization` and `Content-Type` (also `x-burn-demo-token` for local mocks).
 Development services expose `x-burn-mock` in `Access-Control-Expose-Headers` so the browser can detect mock data.
