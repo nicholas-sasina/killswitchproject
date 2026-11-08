@@ -83,11 +83,12 @@ instance ends) with the XDG directories inside it, so SDKs do not pick up `~/.aw
 or `~/.netrc`. This stops tools from finding those files by accident; it does not stop an agent running as you from
 reading them by path (see below).
 
-**Who the agent runs as.** When `burn run` is root (a container's PID 1), the agent runs as `--user` (default `agent`
-if it exists, else `nobody`), so it cannot read `burn run`'s environment (`/proc/1/environ`), which holds the API
-token and the join token. Child supervisors stay root; only the agent command is dropped. When `burn run` is **not**
-root (directly on a laptop), the agent runs as you: it can read your files and `burn run`'s environment. Containment
-against a hostile agent then needs a container or a separate user.
+**Who the agent runs as.** When `burn run` is root (a container's PID 1), each instance's agent runs under a numeric
+uid of its own from a reserved range (or `--user NAME`, shared by every instance given that name), so it cannot
+read `burn run`'s environment (`/proc/1/environ`), which holds the API token and the join token, and one agent
+cannot read another's: a child never sees its parent's credentials. Child supervisors stay root; only agent commands
+are dropped. When `burn run` is **not** root (directly on a laptop), the agent runs as you: it can read your
+files and `burn run`'s environment. Containment against a hostile agent then needs a container or a separate user.
 
 `burn run` also needs `BURN_GATEWAY_URL` (written by `make env`) and, optionally, `BURN_PROXY_URL`.
 

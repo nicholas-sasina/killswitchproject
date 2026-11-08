@@ -19,8 +19,8 @@ model calls, so a swarm costs nothing: it calls one MCP tool (`read_inbox` by de
 `BURN_MCP_URL`, offset by a hash of its agent id so 20 workers do not all call at once, and stops when the Gateway
 refuses its badge. `scripts/run_swarm.py` creates a join token for the role (the role must exist: `burn apply`)
 and writes it with the supervisor's settings to `.run/swarm.env` (mode 600, gitignored). In the container
-`burn run` is PID 1 as root and starts the worker as the unprivileged `agent` user, so the worker cannot read the
-supervisor's environment. Ctrl-C stops only the workers.
+`burn run` is PID 1 as root and starts each worker under a uid of its own, so a worker can read neither the
+supervisor's environment nor another worker's. Ctrl-C stops only the workers.
 
 Swarms on the real stack (internal network behind the egress proxy, credentials read from AWS) are coming;
 `make swarm` without `MOCK=1` refuses until then.

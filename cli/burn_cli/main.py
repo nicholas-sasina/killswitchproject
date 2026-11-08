@@ -25,8 +25,9 @@ HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved
 egress proxy. They are not containment: a process can ignore them. Containment is the network rule in the
 demo stack, which gives the agent no route except the proxy.
 
-Who the agent runs as: when burn run is root (a container's PID 1) the agent runs as --user (default: agent,
-else nobody), so it cannot read burn run's environment or files. When burn run is not root, the agent runs as
+Who the agent runs as: when burn run is root (a container's PID 1) the agent runs as an unprivileged uid of its
+own (or --user), so it cannot read burn run's environment or files, and no instance can read another's, so a
+child never sees its parent's credentials. When burn run is not root, the agent runs as
 you: it can read your files and burn run's environment (/proc/<pid>/environ). Containment against a hostile
 agent then needs a container or a separate user.
 """
@@ -75,8 +76,8 @@ def build_parser() -> argparse.ArgumentParser:
                                        "command lines are visible to other users)")
     run_p.add_argument("--token-stdin", action="store_true",
                        help="read the join token from the first line of stdin (keeps it out of shell history)")
-    run_p.add_argument("--user", help="run the agent as this user when burn run is root "
-                                      "(default: agent if it exists, else nobody)")
+    run_p.add_argument("--user", help="when burn run is root, run the agent as this existing user "
+                                      "(default: a uid of its own for each instance)")
     run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
     run_p.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
     env_p = sub.add_parser("env", help="show the environment `burn run` gives an instance")

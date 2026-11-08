@@ -4,10 +4,10 @@ WORKDIR /app
 COPY contracts /src/contracts
 COPY cli /src/cli
 RUN pip install --no-cache-dir /src/contracts /src/cli "mcp>=1.9,<2" "httpx>=0.27"
-# burn run is PID 1 and runs as root; it starts the worker as this user, so the worker cannot read burn run's
-# environment (the API and join tokens). Nothing the supervisor alone needs is left readable by other users.
-RUN useradd --system --no-create-home --shell /usr/sbin/nologin agent \
-    && rm -rf /src && chmod 700 /root
+# burn run is PID 1 and runs as root; it starts each worker under a numeric uid of its own, so a worker can read
+# neither burn run's environment (the API and join tokens) nor another worker's. No source tree or root home
+# is left readable by other users.
+RUN rm -rf /src && chmod 700 /root
 COPY agents/burn_agents /app/burn_agents
 ENV PYTHONPATH=/app
 # The proxy writes its CA certificate to a shared volume when it starts; wait for it before the first HTTPS call.

@@ -452,20 +452,61 @@ def test_root_starts_the_agent_as_an_unprivileged_user_but_not_child_supervisors
     inst._stop_children()
 
 
-def test_default_user_is_agent_else_nobody_and_never_root(monkeypatch):
+@pytest.fixture
+def claims(tmp_path, monkeypatch):
     from burn_cli.runner import privs
     monkeypatch.setattr(privs.os, "geteuid", lambda: 0)
-    users = {"nobody": 65534}
-    entry = lambda n: type("E", (), {"pw_uid": users[n], "pw_gid": users[n]})() if n in users else (_ for _ in ()).throw(KeyError(n))  # noqa: E731
-    monkeypatch.setattr(privs.pwd, "getpwnam", entry)
-    assert privs.resolve(None).name == "nobody"
-    users["agent"] = 999
-    assert privs.resolve(None).name == "agent" and privs.resolve("nobody").name == "nobody"
-    users["toor"] = 0
+    monkeypatch.setattr(privs, "_claim_dir", lambda: str(tmp_path))
+    return tmp_path
+
+
+def test_every_instance_gets_its_own_uid_from_the_reserved_range(claims):
+    from burn_cli.runner import privs
+    drops = [privs.resolve(None) for _ in range(200)]
+    uids = {d.uid for d in drops}
+    assert len(uids) == 200  # no two live instances share a uid, so none can read another's environ or HOME
+    assert all(privs.UID_BASE <= d.uid < privs.UID_BASE + privs.UID_COUNT and d.gid == d.uid for d in drops)
+    assert all(d.popen_args() == {"user": d.uid, "group": d.uid, "extra_groups": []} for d in drops)
+
+
+def test_a_claimed_uid_is_not_handed_out_again_until_released(claims):
+    from burn_cli.runner import privs
+    import random
+    first = privs.allocate(random.Random(1))
+    again = privs.allocate(random.Random(1))  # same random stream: the first draw collides with the claim
+    assert again.uid != first.uid
+    privs.release(first)
+    assert privs.allocate(random.Random(1)).uid == first.uid
+
+
+def test_claim_directory_must_be_private_and_root_owned(monkeypatch, tmp_path):
+    from burn_cli.runner import privs
+    monkeypatch.setattr(privs.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(privs.os.path, "isdir", lambda p: False if p == "/run" else os.path.isdir(p))
+    with pytest.raises(ValueError, match="owned by root"):  # not root here, so the directory is "someone else's"
+        privs._claim_dir()
+
+
+def test_named_user_is_used_as_given_and_never_root(claims, monkeypatch):
+    from burn_cli.runner import privs
+    users = {"svc": 999, "toor": 0}
+    monkeypatch.setattr(privs.pwd, "getpwnam", lambda n: type("E", (), {"pw_uid": users[n], "pw_gid": users[n]})()
+                        if n in users else (_ for _ in ()).throw(KeyError(n)))
+    assert privs.resolve("svc").uid == 999
     with pytest.raises(ValueError, match="root"):
         privs.resolve("toor")
     with pytest.raises(ValueError, match="does not exist"):
         privs.resolve("ghost")
+
+
+def test_kill_all_signals_only_processes_of_that_uid(monkeypatch):
+    from burn_cli.runner import privs
+    killed = []
+    monkeypatch.setattr(privs.os, "listdir", lambda p: ["1", "20", "21", "self"])
+    monkeypatch.setattr(privs.os, "stat", lambda p: type("S", (), {"st_uid": 100500 if p.endswith(("/20", "/21")) else 0})())
+    monkeypatch.setattr(privs.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    privs.kill_all(100500)
+    assert killed == [(20, privs.signal.SIGKILL), (21, privs.signal.SIGKILL)]
 
 
 def test_not_root_runs_the_agent_as_the_same_user(monkeypatch):
@@ -596,3 +637,39 @@ def test_token_stdin_conflicts_with_token_and_needs_a_token(stack, capsys, monke
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert cli(["run", "--role", "worker", "--token-stdin", "--", "true"]) == 2
     assert "join token is required" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="needs root to switch users")
+def test_real_process_one_agent_cannot_read_anothers_environment(stack, capfd):
+    """A child of a weaker role must not read its parent's credentials, and both run in one container."""
+    import tempfile
+    import threading
+    from burn_cli.runner import privs
+    shared = tempfile.mkdtemp()
+    os.chmod(shared, 0o777)
+    first = f"""
+        import os, time
+        open({shared + '/pid'!r}, "w").write(str(os.getpid()))
+        open({shared + '/uid'!r}, "w").write(str(os.getuid()))
+        while not os.path.exists({shared + '/done'!r}):
+            time.sleep(0.05)"""
+    second = f"""
+        import json, os, time
+        while not os.path.exists({shared + '/uid'!r}):
+            time.sleep(0.05)
+        pid = int(open({shared + '/pid'!r}).read())
+        try:
+            open(f"/proc/{{pid}}/environ", "rb").read(); readable = True
+        except OSError:
+            readable = False
+        open({shared + '/done'!r}, "w").write("x")
+        print(json.dumps({{"mine": os.getuid(), "theirs": int(open({shared + '/uid'!r}).read()), "readable": readable}}))"""
+    a, b = instance(stack, py(first), drop=privs.resolve(None)), instance(stack, py(second), drop=privs.resolve(None))
+    t = threading.Thread(target=a.run)
+    t.start()
+    assert b.run() == 0
+    t.join(10)
+    result = json.loads(capfd.readouterr().out.strip().splitlines()[-1])
+    assert b.drop.uid != a.drop.uid and result["mine"] == b.drop.uid and result["theirs"] == a.drop.uid
+    assert result["readable"] is False
+

@@ -17,6 +17,7 @@ from .badge import BadgeToken
 from .credentials import CredentialSource
 from .env import child_env
 from .mcp_proxy import McpProxy
+from . import privs
 from .privs import Drop
 from .spawn_endpoint import SpawnEndpoint
 
@@ -83,6 +84,7 @@ class Instance:
             self._exit()
             mcp.stop(), spawn.stop()
             shutil.rmtree(home, ignore_errors=True)
+            privs.release(self.drop)
             return 127
         beat = threading.Thread(target=self._heartbeat_loop, daemon=True)
         beat.start()
@@ -94,7 +96,10 @@ class Instance:
             self._restore_signals(previous)
             mcp.stop(), spawn.stop()
             self._stop_children()
+            if self.drop:
+                privs.kill_all(self.drop.uid)  # nothing the agent started outlives the instance
             shutil.rmtree(home, ignore_errors=True)  # last, so a child cannot recreate it behind us
+            privs.release(self.drop)
         if self._stopped_by_api:
             log("the instance was burned or has exited; the agent was stopped")
             return EXIT_STOPPED
