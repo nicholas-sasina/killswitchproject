@@ -128,6 +128,18 @@ def badge_secret_agent_ids(secrets) -> list[str]:
         kwargs["NextToken"] = page["NextToken"]
 
 
+def referenced_agent_ids(dynamodb) -> set[str]:
+    """Agent ids whose badge secret something may still read: every agent with a session row (any status,
+    role instance or scenario agent) and every agent of the loaded scenario."""
+    table, ids, kwargs = dynamodb.Table(names.SESSIONS_TABLE), set(), {"ProjectionExpression": "agent_id"}
+    while True:
+        page = table.scan(**kwargs)
+        ids.update(i["agent_id"] for i in page["Items"] if "agent_id" in i)
+        if "LastEvaluatedKey" not in page:
+            return ids | set(loaded_agent_ids(dynamodb))
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
 def remove_orphaned_badge_secrets(secrets, keep_agent_ids: set[str]) -> list[str]:
     """Delete badge secrets no session row points at any more. Returns the agent ids.
 
@@ -208,10 +220,8 @@ if __name__ == "__main__":
     if "--orphans-only" in sys.argv:
         dynamodb = boto3.resource("dynamodb", region_name=REGION)
         _remove_badges_live(remaining_client_ids(dynamodb))
-        # Keep anything still referenced: a session row, or the loaded scenario.
-        keep = set(instance_agent_ids(dynamodb)) | set(loaded_agent_ids(dynamodb))
         swept = remove_orphaned_badge_secrets(
-            boto3.client("secretsmanager", region_name=REGION), keep)
+            boto3.client("secretsmanager", region_name=REGION), referenced_agent_ids(dynamodb))
         print(f"{len(swept)} orphaned badge secret(s) deleted: {', '.join(swept) or '-'}")
     else:
         reset()
