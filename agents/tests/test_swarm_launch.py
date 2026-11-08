@@ -178,6 +178,8 @@ def test_real_swarm_reads_the_environment_and_needs_the_stack(monkeypatch):
     for name in ("BURN_API_URL", "BURN_DEMO_TOKEN", "BURN_GATEWAY_URL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(run_swarm, "load_dotenv", lambda: None)
+    # Signing in is the next tests' subject. Here it must not ask AWS whether the stack requires it.
+    monkeypatch.setattr(run_swarm, "automation_headers", lambda: {"authorization": "Bearer automation-id"})
     with pytest.raises(SystemExit, match="make env"):
         run_main(monkeypatch)
     monkeypatch.setenv("BURN_API_URL", "https://api.example.com")
