@@ -151,6 +151,18 @@ def test_join_tokens_parse_and_are_caught_by_gitleaks():
     assert re.search(rule["regex"], f"export BURN_JOIN_TOKEN={token}")
 
 
+def test_session_tokens_are_recognized_and_caught_by_gitleaks():
+    import secrets
+    import tomllib
+    token = names.SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    assert names.is_session_token(token)
+    for bad in [None, "", "bst_short", token[:-1], token + "x", "bjt_" + token[4:], token + "\n"]:
+        assert not names.is_session_token(bad)
+    rules = tomllib.loads((ROOT.parent / ".gitleaks.toml").read_text())["rules"]
+    rule = next(r for r in rules if r["id"] == "burn-session-token")
+    assert re.search(rule["regex"], f"Authorization: Bearer {token}")
+
+
 def test_instance_events_are_schema_valid():
     started = events.make_event(
         agent_id="agent-worker-3fa91c", source="instance", action="started",
