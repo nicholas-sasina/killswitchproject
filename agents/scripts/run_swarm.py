@@ -23,7 +23,8 @@ from urllib.parse import urlsplit
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
 from burn_contracts.automation import AutomationAuthError, automation_headers
 from burn_contracts.names import DEMO_TOKEN_HEADER, MAX_PROGRESS_ITEMS
-from swarm_launch import NETWORK, InstanceApi, PersonApi, ProxyCaError, fetch_proxy_ca, image_tag, start_workers
+from swarm_launch import (IMAGE_NAME, NETWORK, InstanceApi, PersonApi, ProxyCaError, fetch_proxy_ca, image_tag,
+                          start_workers)
 
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
@@ -39,6 +40,29 @@ def docker(argv: list[str], env: dict | None = None) -> subprocess.CompletedProc
     if result.returncode:
         sys.exit(f"{' '.join(argv[:3])} failed: {result.stderr.strip()}")
     return result
+
+
+def remove_other_images(keep: str, run=subprocess.run) -> list[str]:
+    """Remove the swarm worker images that older code or other checkouts left behind, keeping `keep`. Returns them.
+
+    Each code change builds a new tag, so they pile up. A tag that any container (running or stopped) was created from
+    is left alone: another checkout's swarm still starts its replacements from it. (`docker rmi` alone would only refuse
+    an image's last tag; an image with two tags loses one even while a container uses it.) Nothing is forced.
+    """
+    listed = run(["docker", "image", "ls", IMAGE_NAME, "--format", "{{.Repository}}:{{.Tag}}"],
+                 capture_output=True, text=True)
+    if listed.returncode:
+        return []
+    removed = []
+    for tag in listed.stdout.split():
+        if tag == keep or tag.endswith(":<none>"):
+            continue
+        users = run(["docker", "ps", "-a", "-q", "--filter", f"ancestor={tag}"], capture_output=True, text=True)
+        if users.returncode or users.stdout.strip():
+            continue  # in use, or docker could not say: keep it
+        if run(["docker", "rmi", tag], capture_output=True, text=True).returncode == 0:
+            removed.append(tag)
+    return removed
 
 
 def tail_logs(name: str) -> None:
@@ -124,6 +148,9 @@ def main() -> int:
                               items=args.items)
         task = f", {args.items} item(s) each" if args.items else ""
         print(f"started {len(swarm.names)} worker(s) of role {args.role}{task}; Ctrl-C stops them")
+        removed = remove_other_images(image)  # now: this swarm's containers hold its own image
+        if removed:
+            print(f"removed {len(removed)} unused swarm image(s) built from other code", flush=True)
         follow(swarm.names, swarm.on_exit)
     except KeyboardInterrupt:
         pass

@@ -228,9 +228,12 @@ def run_main(monkeypatch, *args):
             return None
 
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", "--mock", *args])
+    events = captured.setdefault("events", [])
     monkeypatch.setattr(run_swarm, "docker", lambda argv, env=None: captured.setdefault("built", argv))
     monkeypatch.setattr(run_swarm, "image_tag", lambda: IMAGE)
-    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(kw) or Started())
+    monkeypatch.setattr(run_swarm, "remove_other_images", lambda keep: events.append(("clean", keep)) or [])
+    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: (
+        events.append("start"), captured.update(kw))[0] or Started())
     run_swarm.main()
     return captured
 
@@ -278,3 +281,42 @@ def test_the_image_tag_is_a_hash_of_what_the_image_is_built_from(tmp_path):
     (two / "agents/burn_agents/swarm_worker.py").write_text("w")
     (two / "cli/a.py").rename(two / "cli/c.py")
     assert image_tag(two) != tag  # a rename too
+
+
+# --- removing the images other code left behind -------------------------------------------------------------------
+
+def fake_docker(listing, used=(), refused=(), list_fails=False):
+    from types import SimpleNamespace
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        if argv[:3] == ["docker", "image", "ls"]:
+            return SimpleNamespace(returncode=1 if list_fails else 0, stdout="".join(f"{tag}\n" for tag in listing))
+        if argv[:2] == ["docker", "ps"]:
+            tag = argv[-1].removeprefix("ancestor=")
+            return SimpleNamespace(returncode=0, stdout="0123abcd\n" if tag in used else "")
+        return SimpleNamespace(returncode=1 if argv[-1] in refused else 0, stdout="")
+
+    return run, calls
+
+
+def test_other_swarm_images_are_removed_unless_a_container_uses_them_and_never_forced():
+    old, used, refused = (f"burn-swarm-worker:{c * 12}" for c in "abc")
+    run, calls = fake_docker([IMAGE, old, used, refused, "burn-swarm-worker:<none>"], used=(used,), refused=(refused,))
+    assert run_swarm.remove_other_images(IMAGE, run=run) == [old]
+    assert calls[0][:4] == ["docker", "image", "ls", "burn-swarm-worker"]
+    # a tag any container (running or stopped) was created from is left alone, even if docker would only untag it
+    assert ["docker", "ps", "-a", "-q", "--filter", f"ancestor={used}"] in calls
+    assert [c for c in calls if c[:2] == ["docker", "rmi"]] == [["docker", "rmi", old], ["docker", "rmi", refused]]
+    assert not any(c[:2] == ["docker", "ps"] and c[-1] == f"ancestor={IMAGE}" for c in calls)  # its own: not even asked
+    assert not any("-f" in c or "--force" in c for c in calls)
+
+
+def test_when_docker_cannot_list_images_nothing_is_removed():
+    run, calls = fake_docker([], list_fails=True)
+    assert run_swarm.remove_other_images(IMAGE, run=run) == [] and len(calls) == 1
+
+
+def test_the_cleanup_runs_once_the_workers_have_started_and_keeps_their_image(monkeypatch):
+    assert run_main(monkeypatch)["events"] == ["start", ("clean", IMAGE)]
