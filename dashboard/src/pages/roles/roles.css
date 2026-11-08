@@ -75,20 +75,32 @@
   table-layout: fixed;
 }
 
+/* The board's grid: agent 1.2fr, started 150, last call 130, keys 1fr,
+   action 96, with 12px gaps (here, each cell's right padding). */
 .role-table .role-col-started {
-  width: 150px;
+  width: 162px;
 }
 
 .role-table .role-col-last {
-  width: 130px;
+  width: 142px;
 }
 
 .role-table .role-col-keys {
-  width: 26%;
+  width: 24%;
 }
 
 .role-table .role-col-action {
-  width: 84px;
+  width: 96px;
+}
+
+/* Beside the right column on a laptop, the times give the names room. */
+@media (min-width: 1100px) and (max-width: 1360px) {
+  .role-table .role-col-started {
+    width: 112px;
+  }
+  .role-table .role-col-last {
+    width: 104px;
+  }
 }
 
 .role-table td {
@@ -144,4 +156,77 @@
   .role-table .role-col-keys {
     width: 30%;
   }
+}
+
+/* ---------- What a role may do ---------- */
+
+.role-may-section {
+  padding-top: 14px;
+}
+
+.role-may-label {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--muted-2);
+}
+
+.role-may-value {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.role-keys-list li + li {
+  margin-top: 2px;
+}
+
+.role-muted {
+  color: var(--muted-2);
+}
+
+/* ---------- Protections ---------- */
+
+.role-protections .facts-row {
+  padding: 11px 0;
+}
+
+.role-protections .facts dd {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------- Join tokens ---------- */
+
+.role-token {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0 0;
+}
+
+.role-token + .role-token {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline-soft);
+}
+
+.role-token-id {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.role-token-line {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-2);
 }

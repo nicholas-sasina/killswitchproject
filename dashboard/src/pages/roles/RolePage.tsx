@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import { BurnDialog, type BurnTarget } from "../../features/burn/BurnDialog";
 import { joinable } from "../../fleet";
@@ -6,7 +6,15 @@ import { roleCounts, type ConsoleAgent } from "../../model";
 import { useHashParam } from "../../router";
 import { Columns, EmptyState, Hero } from "../../ui";
 import { AgentsCard } from "./AgentsCard";
-import { filterOf, managedIn, rolePlural, type Filter } from "./model";
+import { JoinTokensCard } from "./JoinTokensCard";
+import { MayDoCard, ProtectionsCard } from "./RoleCards";
+import {
+  filterOf,
+  managedIn,
+  rolePlural,
+  sharedKeys,
+  type Filter,
+} from "./model";
 import "./roles.css";
 
 /** The hero's paragraph: what a role is, who owns it, where it's defined. */
@@ -43,7 +51,8 @@ function Lede({
  * do, its protections and its join tokens. Built from the Roles board.
  */
 export function RolePage({ name }: { name: string }) {
-  const { model, rolesLoaded, instancesLoaded, openAddAgents } = useConsole();
+  const { model, events, rolesLoaded, instancesLoaded, openAddAgents } =
+    useConsole();
   const [show, setShow] = useHashParam("show");
   const filter = filterOf(show);
   const onFilter = useCallback(
@@ -62,6 +71,12 @@ export function RolePage({ name }: { name: string }) {
   const plural = rolePlural(name);
   const canAdd = role ? joinable(role) : Boolean(group);
   const missing = rolesLoaded && instancesLoaded && !group;
+  const agents = group?.agents;
+  const shared = useMemo(
+    () =>
+      sharedKeys(events, new Set((agents ?? []).map((agent) => agent.agentId))),
+    [events, agents],
+  );
 
   if (missing)
     return (
@@ -123,7 +138,25 @@ export function RolePage({ name }: { name: string }) {
         }
         className="role-hero"
       />
-      <Columns>
+      <Columns
+        aside={
+          <>
+            <MayDoCard
+              name={name}
+              role={role}
+              loaded={rolesLoaded}
+              shared={shared}
+            />
+            <ProtectionsCard role={role} />
+            <JoinTokensCard
+              role={name}
+              agents={agents ?? []}
+              canAdd={canAdd}
+              canMint={role?.managed_by === "ui"}
+            />
+          </>
+        }
+      >
         <AgentsCard
           role={name}
           counts={counts}

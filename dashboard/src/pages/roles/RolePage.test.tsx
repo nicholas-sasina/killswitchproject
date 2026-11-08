@@ -13,6 +13,7 @@ import { createApi, type ApiConfig } from "../../api";
 import type { Instance, LedgerEntry, LedgerEvent, Role } from "../../contracts";
 import { ConsoleDataProvider } from "../../data/ConsoleData";
 import { RolePage } from "./RolePage";
+import { forgetTokens } from "./tokens";
 
 const config: ApiConfig = {
   burnUrl: "https://burn.example.test",
@@ -87,27 +88,42 @@ function setup({
   instances = swarm,
   events = [] as LedgerEvent[],
   failInstances = false,
+  failRevoke = false,
   hang = false,
 } = {}) {
-  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-    const path = new URL(String(input)).pathname;
-    if (hang) return new Promise<Response>(() => {});
-    let body: unknown;
-    if (path === "/events") body = { events, agents: [] };
-    else if (path === "/instances")
-      return failInstances
-        ? new Response("down", { status: 503 })
-        : new Response(JSON.stringify({ instances }));
-    else if (path === "/roles") body = { roles };
-    else if (path === "/flags") body = { flags: [] };
-    else if (path.startsWith("/agents/") && path.endsWith("/ledger"))
-      body = {
-        agent_id: path.split("/")[2],
-        entries: path.includes("w3") ? ledger(1, 3) : ledger(0, 4),
-      };
-    else throw new Error(`Unexpected endpoint ${path}`);
-    return new Response(JSON.stringify(body));
-  });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (hang) return new Promise<Response>(() => {});
+      let body: unknown;
+      if (path.startsWith("/tokens/") && init?.method === "DELETE") {
+        if (failRevoke) return new Response("down", { status: 503 });
+        body = {
+          token_id: path.split("/")[2],
+          role: "worker",
+          uses: 20,
+          uses_left: 14,
+          expires_at: minutesAgo(-60),
+          created_at: minutesAgo(50),
+          created_by: "priya@example.test",
+          status: "revoked",
+        };
+      } else if (path === "/events") body = { events, agents: [] };
+      else if (path === "/instances")
+        return failInstances
+          ? new Response("down", { status: 503 })
+          : new Response(JSON.stringify({ instances }));
+      else if (path === "/roles") body = { roles };
+      else if (path === "/flags") body = { flags: [] };
+      else if (path.startsWith("/agents/") && path.endsWith("/ledger"))
+        body = {
+          agent_id: path.split("/")[2],
+          entries: path.includes("w3") ? ledger(1, 3) : ledger(0, 4),
+        };
+      else throw new Error(`Unexpected endpoint ${path}`);
+      return new Response(JSON.stringify(body));
+    });
   vi.stubGlobal("fetch", fetcher);
   const calls = (pattern: RegExp) =>
     fetcher.mock.calls.filter(([input]) =>
@@ -160,6 +176,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  forgetTokens();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   window.history.replaceState(null, "", "/");
@@ -345,5 +362,114 @@ describe("the role page's other states", () => {
     expect(
       screen.getByRole("link", { name: "See every role" }).getAttribute("href"),
     ).toBe("#/roles");
+  });
+});
+
+describe("what the role may do, its protections and its join tokens", () => {
+  const TOKEN = "7ff596f9431cd7eb";
+  const joined = [
+    instance("w3", "worker", "active", 20, { token_id: TOKEN }),
+    instance("w4", "worker", "active", 10, { token_id: TOKEN }),
+  ];
+  const sawShared: LedgerEvent = {
+    event_id: "evt_01",
+    ts: minutesAgo(1),
+    agent_id: "agent-worker-w3",
+    session_id: "w3",
+    source: "tool_response",
+    action: "recorded",
+    secret_ref: "burn/shared/crm_db_url",
+    owner: "shared",
+  };
+  const card = (name: RegExp) => screen.getByRole("region", { name });
+
+  it("lists its tools, its own and shared keys, its reach and the roles it may start", async () => {
+    setup({ instances: joined, events: [sawShared] });
+    await show();
+    const may = card(/What a worker may do/i);
+    expect(
+      within(may)
+        .getAllByText(/^(read_ticket|send_message)$/)
+        .map((chip) => chip.textContent),
+    ).toEqual(["read_ticket", "send_message"]);
+    expect(may.textContent).toContain(
+      "api_key, aws_key each worker gets its own copy",
+    );
+    expect(may.textContent).toContain(
+      "crm_db_url shared, delivered as a reference",
+    );
+    expect(may.textContent).toContain(
+      "The default allowlist and Burn's Gateway.",
+    );
+    expect(may.textContent).toContain(
+      "reader agents, with at most a worker's tools",
+    );
+    expect(
+      within(may).getByRole("link", { name: "reader" }).getAttribute("href"),
+    ).toBe("#/roles/reader");
+  });
+
+  it("states each protection in words, with the API's defaults", async () => {
+    setup();
+    await show();
+    const protections = card(/Protections/i);
+    expect(
+      [...protections.querySelectorAll("dd")].map((dd) => dd.textContent),
+    ).toEqual(["On", "On", "On", "On"]);
+    expect(protections.textContent).toContain("Replace a burned worker");
+  });
+
+  it("lists the token its workers joined with, and revokes it", async () => {
+    const fixture = setup({ instances: joined });
+    await show();
+    const tokens = card(/Join tokens/i);
+    expect(tokens.textContent).toContain("7ff596f9");
+    expect(tokens.textContent).toMatch(/2 workers joined with it, first at/);
+    // A role managed in code takes tokens from Add workers, not New token.
+    expect(
+      within(tokens).queryByRole("button", { name: "New token" }),
+    ).toBeNull();
+    await act(async () => {
+      fireEvent.click(
+        within(tokens).getByRole("button", { name: "Revoke token 7ff596f9" }),
+      );
+    });
+    expect(fixture.calls(new RegExp(`/tokens/${TOKEN}$`))).toHaveLength(1);
+    expect(card(/Join tokens/i).textContent).toContain("priya@example.test");
+    expect(card(/Join tokens/i).textContent).toContain("Revoked.");
+    expect(
+      within(card(/Join tokens/i)).queryByRole("button", { name: /Revoke/ }),
+    ).toBeNull();
+  });
+
+  it("says plainly when a revoke did not go through", async () => {
+    setup({ instances: joined, failRevoke: true });
+    await show();
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Revoke token 7ff596f9" }),
+      );
+    });
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Token 7ff596f9 was not revoked.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Revoke token 7ff596f9" }),
+    ).toBeTruthy();
+  });
+
+  it("offers New token for a role made in the dashboard", async () => {
+    setup({ roles: [{ ...worker, managed_by: "ui" }], instances: [] });
+    await show();
+    const tokens = card(/Join tokens/i);
+    expect(tokens.textContent).toContain(
+      "No join tokens used yet. Add workers to make one.",
+    );
+    await act(async () => {
+      fireEvent.click(
+        within(tokens).getByRole("button", { name: "New token" }),
+      );
+    });
+    expect(screen.getByText("Adding to worker")).toBeTruthy();
   });
 });
