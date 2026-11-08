@@ -26,6 +26,9 @@ class FakeMinter:
             raise MinterThrottled("slow down")
         if method == "DELETE":
             return {"deleted": []}
+        if m := re.fullmatch(r"/sessions/([^/]+)/canary", path):
+            return {"canary_ref": names.canary_secret_ref(body["agent_id"], m[1]), "status": "active",
+                    "secret_type": "canary", "owner": "agent"}
         if m := re.fullmatch(r"/agents/([^/]+)/credentials", path):
             return {"credentials": [
                 {"secret_ref": names.agent_secret_ref(m[1], t), "type": t, "owner": "agent", "version": 1}

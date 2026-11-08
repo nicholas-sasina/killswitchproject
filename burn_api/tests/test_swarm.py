@@ -457,7 +457,7 @@ def test_failure_after_the_badge_exists_deletes_the_badge_too(env, monkeypatch):
     with pytest.raises(RuntimeError):
         call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
     assert len(env.badges.created) == 1 and len(env.badges.deleted) == 1
-    assert [c[0] for c in env.minter.calls] == ["POST", "DELETE"]
+    assert [c[0] for c in env.minter.calls] == ["POST", "POST", "DELETE"]  # credentials, canary, cleanup
     monkeypatch.setattr(sessions, "_store_badge", real_store)
     assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201
 
@@ -657,3 +657,77 @@ def test_a_heartbeat_between_the_sweep_scan_and_its_update_wins(env, monkeypatch
     assert exited == [sids[1]]
     assert session_row(env, sids[0])["status"] == "active" and session_row(env, sids[1])["status"] == "exited"
     assert ("DELETE", f"/agents/{session_row(env, sids[0])['agent_id']}/credentials", None) not in env.minter.calls
+
+
+# --- canaries and auto_burn on roles -----------------------------------------------------------
+
+def canary_calls(env):
+    return [c for c in env.minter.calls if c[1].endswith("/canary")]
+
+
+def test_role_canary_flags_are_stored_returned_and_validated(env):
+    assert make_role(env, WORKER)["canaries"] is True and make_role(env, HELPER)["auto_burn"] is True  # defaults
+    quiet = make_role(env, {"name": "quiet", "tools": [], "auto_burn": False, "canaries": False})
+    assert quiet["auto_burn"] is False and quiet["canaries"] is False
+    row = env.ddb.Table("burn-roles").get_item(Key={"name": "quiet"})["Item"]
+    assert row["auto_burn"] is False and row["canaries"] is False
+    got = call(env, "GET", "/roles/quiet")[1]
+    assert got["auto_burn"] is False and got["canaries"] is False
+    status, saved = call(env, "PUT", "/roles/quiet", {"name": "quiet", "tools": [], "auto_burn": True})
+    assert status == 200 and saved["auto_burn"] is True and saved["canaries"] is True
+    assert call(env, "POST", "/roles", {"name": "x", "tools": [], "auto_burn": "no"})[0] == 400
+    assert call(env, "POST", "/roles", {"name": "x", "tools": [], "canaries": 1})[0] == 400
+    roles = {r["name"]: r for r in call(env, "GET", "/roles")[1]["roles"]}
+    assert roles["a"]["canaries"] is True and roles["a"]["auto_burn"] is True  # scenario roles
+
+
+def test_a_role_stored_without_the_flags_reads_as_on(env):
+    env.ddb.Table("burn-roles").put_item(Item={"name": "old", "tools": [], "managed_by": "ui"})
+    got = call(env, "GET", "/roles/old")[1]
+    assert got["canaries"] is True and got["auto_burn"] is True
+
+
+def test_each_join_and_scenario_start_issues_exactly_one_canary(env):
+    make_role(env, WORKER)
+    body = join(env, "worker")[1]
+    issued = canary_calls(env)
+    assert len(issued) == 1 and issued[0][1] == f"/sessions/{body['session_id']}/canary"
+    assert issued[0][2] == {"agent_id": body["agent_id"]}
+    scenario = call(env, "POST", "/sessions", {"agent_id": "agent-a"})[1]
+    issued = canary_calls(env)
+    assert len(issued) == 2 and issued[1][1] == f"/sessions/{scenario['session_id']}/canary"
+
+
+def test_a_spawned_child_gets_its_own_canary(env):
+    make_role(env, WORKER); make_role(env, HELPER)
+    parent = join(env, "worker")[1]
+    child = spawn(env, parent["session_id"], "helper")[1]
+    assert [c[1] for c in canary_calls(env)] == [f"/sessions/{parent['session_id']}/canary",
+                                                 f"/sessions/{child['session_id']}/canary"]
+
+
+def test_a_role_with_canaries_off_issues_none(env):
+    make_role(env, {"name": "plain", "tools": ["notify"], "canaries": False})
+    assert join(env, "plain")[0] == 201
+    assert canary_calls(env) == []
+
+
+def test_a_failed_canary_leaves_no_session_and_cleans_up(env):
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 1})[1]["token"]
+    real = env.minter.__call__
+
+    def canary_fails(method, path, body=None, query=None):
+        if path.endswith("/canary"):
+            raise minter_client.MinterError("canary failed")
+        return real(method, path, body, query)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(minter_client, "call", canary_fails)
+    try:
+        assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 502
+    finally:
+        monkey.undo()
+    assert env.ddb.Table("burn-sessions").scan()["Items"] == [] and env.badges.created == []
+    assert [c for c in env.minter.calls if c[0] == "DELETE"]  # the minted credentials were removed
+    assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201  # use refunded

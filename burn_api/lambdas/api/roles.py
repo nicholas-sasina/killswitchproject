@@ -51,13 +51,19 @@ def parse_spec(body: dict) -> dict:
     owner = body.get("owner")
     if owner is not None and not isinstance(owner, str):
         raise _bad("owner must be a string")
+    flags = {}
+    for key in ("canaries", "auto_burn"):
+        value = body.get(key, True)
+        if not isinstance(value, bool):
+            raise _bad(f"{key} must be true or false")
+        flags[key] = value
     return {
         "name": body["name"], "managed_by": managed_by,
         "tools": _string_list(body, "tools"),
         "credentials": _string_list(body, "credentials", lambda c: c in CREDENTIAL_TYPES),
         "may_message": _string_list(body, "may_message", names.is_role_name),
         "may_spawn": _string_list(body, "may_spawn", names.is_role_name),
-        "egress": egress, "owner": owner,
+        "egress": egress, "owner": owner, **flags,
     }
 
 
@@ -74,7 +80,8 @@ def _scenario_role(agent: dict) -> dict:
         "name": names.scenario_role_name(agent["id"]), "tools": list(agent.get("tools", [])),
         "credentials": list(agent.get("credentials", [])),
         "may_message": [r for r in map(role_name, agent.get("send_to", [])) if r],
-        "may_spawn": [], "egress": None, "owner": None, "managed_by": "scenario",
+        "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
+        "managed_by": "scenario",
     }
 
 
@@ -107,7 +114,8 @@ def lookup(name: str) -> dict:
 
 
 def _view(role: dict, active: int) -> dict:
-    return {**{k: v for k, v in role.items()}, "active_instances": active}
+    # Rows stored before these fields existed mean "on", like canary.role_policy reads them.
+    return {"canaries": True, "auto_burn": True, **role, "active_instances": active}
 
 
 def _active_counts() -> dict[str, int]:
