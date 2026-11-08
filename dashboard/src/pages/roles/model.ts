@@ -10,6 +10,7 @@ import type {
   LedgerEntry,
   LedgerEvent,
   Role,
+  RoleSpec,
 } from "../../contracts";
 import type { AgentState, ConsoleAgent, ConsoleModel } from "../../model";
 import { ago, dayTime, keyName, personLabel } from "../../model";
@@ -497,7 +498,7 @@ export interface ListSquare {
 
 export interface ListRow {
   name: string;
-  /** "Support automation · managed in burn.yaml" */
+  /** "Full access · Support automation · managed in burn.yaml" */
   line: string;
   /** A square per agent running now and per agent burned today. */
   squares: ListSquare[];
@@ -520,9 +521,11 @@ export function rolesList(model: ConsoleModel): ListRow[] {
       group.agents.find((agent) => agent.owner)?.owner ??
       "";
     const where = managedIn(group.role);
-    const line = owner
-      ? [owner, where && `managed in ${where}`].filter(Boolean).join(" · ")
-      : where && `Managed in ${where}`;
+    const access = group.role ? accessLevel(group.role) : "";
+    const line = [access, owner, where && `managed in ${where}`]
+      .filter(Boolean)
+      .join(" · ")
+      .replace(/^m/, "M");
     const squares: ListSquare[] = group.agents
       .filter((agent) => agent.state === "running" || agent.burnedToday)
       .map((agent) => ({
@@ -548,4 +551,53 @@ export function rolesList(model: ConsoleModel): ListRow[] {
       hot: burnedToday > 0,
     };
   });
+}
+
+// ---------------------------------------------------------------- access
+
+/**
+ * Every tool in contracts/mcp-tools.json, by name. A Full access role lists
+ * them all, because the gateway allows only the tools a role names. A test
+ * fails if this copy drifts from the contract.
+ */
+export const FULL_ACCESS_TOOLS: readonly string[] = [
+  "list_tickets",
+  "read_ticket",
+  "read_config",
+  "query_customers",
+  "send_message",
+  "read_inbox",
+  "notify",
+];
+
+/**
+ * The body that creates a Full access role, the same one `burn run`
+ * creates when it names a role after the command: every tool, its own AWS
+ * key (which also reaches its model), no narrowing and the API's default
+ * protections.
+ */
+export function fullAccessRole(name: string): RoleSpec {
+  return {
+    name,
+    tools: [...FULL_ACCESS_TOOLS],
+    credentials: ["aws_key"],
+    may_message: [],
+    may_spawn: [],
+    egress: null,
+    owner: null,
+    canaries: true,
+    auto_burn: true,
+    replace_on_burn: false,
+  };
+}
+
+export type Access = "Full access" | "Limited";
+
+/** "Full access" when a role has every tool and no egress list; "Limited" otherwise. */
+export function accessLevel(role: Pick<Role, "tools" | "egress">): Access {
+  const tools = new Set(role.tools);
+  const every =
+    tools.size === FULL_ACCESS_TOOLS.length &&
+    FULL_ACCESS_TOOLS.every((tool) => tools.has(tool));
+  return every && role.egress == null ? "Full access" : "Limited";
 }

@@ -1,45 +1,266 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useConsole } from "../../data/ConsoleData";
-import type { Role } from "../../contracts";
-import { AddAgent } from "./AddAgent";
-import { rememberToken } from "./tokens";
+import { joinable } from "../../fleet";
+import { CONNECT_GUIDE_URL } from "../../join";
+import { agentHref } from "../../router";
+import { Dialog, Segmented } from "../../ui";
+import {
+  HARNESSES,
+  agentGets,
+  firstNewAgent,
+  harnessOf,
+  nextAgentName,
+  noRoleLabel,
+  runCommand,
+  setupCommands,
+  targetRole,
+  type Harness,
+} from "./connect";
+import { accessLevel } from "./model";
+import type { AddStep } from "./AddAgent";
+import { TokenDialog } from "./TokenDialog";
+import "./add-agents.css";
 
 export interface AddAgentsDialogProps {
-  /** Mint a join token for this existing role; otherwise create a role. */
+  /** Preselect this role; otherwise the agent is grouped by its harness. */
   role?: string;
   onClose: () => void;
 }
 
+/** A command in a block, with a Copy button that copies only that text. */
+function Command({ label, text }: { label: string; text: string }) {
+  const [status, setStatus] = useState("");
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Copied.");
+    } catch {
+      setStatus("Copy unavailable. Select and copy the command.");
+    }
+  }
+  return (
+    <div className="connect-command">
+      <pre className="add-code" aria-label={label}>
+        <code>{text}</code>
+      </pre>
+      <button
+        className="btn btn-sm"
+        type="button"
+        aria-label={`Copy ${label.toLowerCase()}`}
+        onClick={() => void copy()}
+      >
+        Copy
+      </button>
+      <span className="visually-hidden" role="status">
+        {status}
+      </span>
+    </div>
+  );
+}
+
 /**
- * Add agents, as the navigation and a role page open it: the AddAgent flow
- * with the console's roles, agents and join URLs.
+ * Connect an agent, as the navigation and a role page open it. The default
+ * path has no form: install burn and sign in once, then `burn run` the
+ * harness, with a role only if one is chosen. It waits on the console's
+ * shared /instances poll for the first new agent. For CI, containers and
+ * swarms, a disclosure holds the join token flow.
  */
 export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
-  const { api, roles, instances, joinUrls, refreshRoles } = useConsole();
-  // A role known only from its agents still takes a token by name.
-  const target = useMemo<Role | undefined>(
-    () =>
-      role
-        ? (roles.find((item) => item.name === role) ?? {
-            name: role,
-            tools: [],
-            managed_by: "code",
-          })
-        : undefined,
-    // The role is chosen once, when the dialog opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [role],
+  const { roles, model, instancesLoaded, joinUrls, config } = useConsole();
+  const titleId = useId();
+  const tokenSelect = useId();
+  const roleSelect = useId();
+  const [harness, setHarness] = useState<Harness>("claude");
+  const [chosen, setChosen] = useState(role ?? "");
+  const [tokenRole, setTokenRole] = useState(role ?? "");
+  const [tokens, setTokens] = useState(false);
+  // The token flow's request and step: while it is creating, nothing may
+  // close it; once a token is shown, changing its role would discard it.
+  const [flow, setFlow] = useState<{ busy: boolean; step: AddStep }>({
+    busy: false,
+    step: "form",
+  });
+  const onFlow = useCallback(
+    (state: { busy: boolean; step: AddStep }) => setFlow(state),
+    [],
   );
+  const [openedAt] = useState(() => Date.now());
+  const [known, setKnown] = useState<ReadonlySet<string> | undefined>(() =>
+    instancesLoaded
+      ? new Set(model.agents.map((agent) => agent.key))
+      : undefined,
+  );
+  useEffect(() => {
+    if (!known && instancesLoaded)
+      setKnown(new Set(model.agents.map((agent) => agent.key)));
+  }, [known, instancesLoaded, model.agents]);
+
+  // A role opened from its page stays chosen even when /roles has not
+  // listed it (yet), so the select and the command always agree.
+  const choices = useMemo(() => {
+    const joinRoles = roles.filter(joinable);
+    return role && !joinRoles.some((item) => item.name === role)
+      ? [...joinRoles, { name: role, tools: [], managed_by: "code" as const }]
+      : joinRoles;
+  }, [roles, role]);
+  const listed = (name: string) => roles.find((item) => item.name === name);
+  const label = (name: string) => {
+    const known = listed(name);
+    return known ? `${name} · ${accessLevel(known)}` : name;
+  };
+  const group = harnessOf(harness).group;
+  const derived = listed(group);
+  const record = chosen ? listed(chosen) : derived;
+  const target = targetRole(harness, chosen);
+  const name = nextAgentName(model, target);
+  const connected = firstNewAgent(
+    model.agents,
+    target,
+    openedAt,
+    known ?? new Set(),
+  );
+
   return (
-    <AddAgent
-      api={api}
-      roles={roles}
-      instances={instances}
-      role={target}
-      joinUrls={joinUrls}
-      onCreated={() => refreshRoles()}
-      onToken={rememberToken}
+    <Dialog
+      labelledBy={titleId}
       onClose={onClose}
-    />
+      busy={flow.busy}
+      width={640}
+      className="add-agents connect"
+    >
+      <div className="add-head">
+        <div>
+          <p className="cap add-eyebrow">From your own harness</p>
+          <h2 id={titleId} className="dialog-title">
+            Connect an agent
+          </h2>
+        </div>
+        <button
+          className="btn btn-sm"
+          type="button"
+          disabled={flow.busy}
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
+      <div className="add-form">
+        <p className="dialog-body">
+          Run your agent under <span className="id">burn run</span>. No role is
+          needed; choose one only to narrow what it may do. Other harnesses,
+          such as Codex, need their own setup: the CLI&apos;s guide has{" "}
+          <a
+            className="text-link"
+            href={CONNECT_GUIDE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            the full steps
+          </a>
+          .
+        </p>
+        <section className="connect-step" aria-labelledby={`${titleId}-once`}>
+          <h3 id={`${titleId}-once`} className="add-label">
+            Once per machine
+          </h3>
+          <Command
+            label="Setup commands"
+            text={setupCommands(joinUrls, {
+              domain: config.peopleDomain,
+              clientId: config.peopleClientId,
+              localDev: config.localDev,
+            })}
+          />
+        </section>
+        <section className="connect-step" aria-labelledby={`${titleId}-run`}>
+          <h3 id={`${titleId}-run`} className="add-label">
+            Run your agent
+          </h3>
+          <Segmented
+            label="Harness"
+            options={HARNESSES.map(({ value, label }) => ({ value, label }))}
+            value={harness}
+            onChange={setHarness}
+          />
+          <div className="add-field">
+            <label className="add-label" htmlFor={roleSelect}>
+              Role (optional)
+            </label>
+            <select
+              id={roleSelect}
+              className="add-input"
+              value={chosen}
+              onChange={(event) => setChosen(event.target.value)}
+            >
+              <option value="">{noRoleLabel(group, derived)}</option>
+              {choices.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {label(item.name)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Command label="Run command" text={runCommand(harness, chosen)} />
+          <p className="add-hint connect-gets">
+            {agentGets(harness, name, record)}
+          </p>
+          <p className="connect-wait" role="status">
+            {connected ? (
+              <>
+                Connected ·{" "}
+                <a className="text-link" href={agentHref(connected.key)}>
+                  {connected.name}
+                </a>
+              </>
+            ) : (
+              `Waiting for the first new ${target} agent…`
+            )}
+          </p>
+        </section>
+        <section className="connect-tokens">
+          <button
+            className="add-disclosure"
+            type="button"
+            aria-expanded={tokens}
+            onClick={() => setTokens((open) => !open)}
+          >
+            For CI, containers or swarms: use a join token
+            <span className="add-disclosure-mark" aria-hidden="true">
+              {tokens ? "\u2212" : "+"}
+            </span>
+          </button>
+          {tokens && (
+            <div className="connect-token-flow">
+              <div className="add-field">
+                <label className="add-label" htmlFor={tokenSelect}>
+                  Role for the token
+                </label>
+                <select
+                  id={tokenSelect}
+                  className="add-input"
+                  disabled={flow.busy || flow.step !== "form"}
+                  value={tokenRole}
+                  onChange={(event) => setTokenRole(event.target.value)}
+                >
+                  <option value="">A new role</option>
+                  {choices.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {label(item.name)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <TokenDialog
+                key={tokenRole}
+                role={tokenRole || undefined}
+                onClose={onClose}
+                bare
+                onState={onFlow}
+              />
+            </div>
+          )}
+        </section>
+      </div>
+    </Dialog>
   );
 }

@@ -26,6 +26,7 @@ class FakeApi:
         self.issued: list[dict] = []  # every secrets object handed out, so tests can look for leaks
         self.session_tokens: dict[str, str] = {}  # session id -> its bst_ token (what the real API keeps hashed)
         self.heartbeat_status = 200  # set to 409 to simulate a burn
+        self.person_token = ""  # a signed-in person's ID token the API accepts, as the real one does with sign-in on
         self.lock = threading.Lock()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
@@ -41,6 +42,8 @@ class FakeApi:
     # -- auth: the same rules as the real API (an admin header, or the instance's own authority) -----------
     def authorized(self, method, path, headers, body) -> bool:
         if headers.get("x-burn-demo-token") == API_TOKEN:
+            return True
+        if self.person_token and headers.get("authorization") == f"Bearer {self.person_token}":
             return True
         if method != "POST":
             return False
@@ -63,6 +66,16 @@ class FakeApi:
         parts = path.strip("/").split("/")
         if (method, path) == ("GET", "/roles"):
             return 200, {"roles": list(self.roles.values())}
+        if method == "GET" and len(parts) == 2 and parts[0] == "roles":
+            return (200, self.roles[parts[1]]) if parts[1] in self.roles else (404, {"error": "Unknown role"})
+        if (method, path) == ("POST", "/roles"):
+            name = body.get("name", "")
+            if name == "eval" or name.startswith("eval-"):
+                return 400, {"error": "role names 'eval' and 'eval-*' are reserved for the eval harness"}
+            if name in self.roles:
+                return 409, {"error": "Role exists"}
+            self.roles[name] = {**body, "managed_by": body.get("managed_by", "ui")}
+            return 201, self.roles[name]
         if method == "PUT" and parts[0] == "roles":
             existing = self.roles.get(parts[1])
             if existing and existing["managed_by"] != body.get("managed_by", "ui"):

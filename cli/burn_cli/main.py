@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config, render, signin, spec
+from . import config, render, roles, signin, spec
 from .api import Api, ApiError
 from .runner.credentials import MissingSecrets
 from .runner.instance_api import InstanceApi
@@ -14,15 +14,25 @@ from .runner.instance_api import InstanceApi
 CLOUDTRAIL_NOTE = "CloudTrail event history can lag 5-15 minutes behind real activity."
 
 
-RUN_HELP = """Run COMMAND as one Burn instance: burn run --role worker -- python agent.py
+RUN_HELP = """Run COMMAND as one Burn instance: burn run claude, or burn run --role worker -- python agent.py
 
-burn run joins with a join token (--token or BURN_JOIN_TOKEN), fetches the instance's own credentials, and
+Without --role, the role is named after the command (for python, node, uv, npx and other launchers, after the
+script). Without a join token, a person signed in with `burn login` needs none: burn run reuses the role, or
+creates it with full access (every tool, its own AWS key) when it named the role itself, and gets a one-use join
+token. A --role that names no role is an error, never created. In CI and
+containers, give a join token instead (--token, --token-stdin or BURN_JOIN_TOKEN); it always wins.
+
+burn run joins with the join token, fetches the instance's own credentials, and
 starts COMMAND with only those, and with only an allow-list of your environment (PATH, LANG, LC_*, TZ, TERM,
-the AWS region and CA-bundle variables): every other variable, credentials included, is removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
+the AWS region and CA-bundle variables): every other variable, credentials included, is removed unless you pass
+it with --allow-env NAME, before the command (a burn cannot revoke what you pass). The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
 (POST {role, command} to start a child instance), BURN_PROGRESS_URL (POST {item, state} to report task
 progress; a start is answered once Burn has recorded it), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE. BURN_TASK and BURN_RESUME
 are passed on from your environment only if they hold item ids; otherwise burn run refuses to start.
 It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
+
+For `claude`, burn run also sets up Claude Code in the instance's new HOME: Burn's tools, no first-run prompts,
+the current directory trusted, and Bedrock with the instance's own AWS key when the role has aws_key.
 
 HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved clients route through the
 egress proxy. They are not containment: a process can ignore them. Containment is the network rule in the
@@ -39,6 +49,14 @@ agent then needs a container or a separate user.
 
 class UsageError(Exception):
     pass
+
+
+def _pass_through(name: str) -> str:
+    from .runner.env import pass_through_name
+    try:
+        return pass_through_name(name)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--ttl", type=int, default=3600, help="seconds until it expires (default 3600)")
     run_p = sub.add_parser("run", help="run a command as a Burn instance", description=RUN_HELP,
                            formatter_class=argparse.RawDescriptionHelpFormatter)
-    run_p.add_argument("--role", required=True)
+    run_p.add_argument("--role", help="the instance's role (default: named after the command)")
     run_p.add_argument("--token", help="join token (prefer the BURN_JOIN_TOKEN environment variable: "
                                        "command lines are visible to other users)")
     run_p.add_argument("--token-stdin", action="store_true",
@@ -82,6 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--user", help="when burn run is root, run the agent as this existing user "
                                       "(default: a uid of its own for each instance)")
     run_p.add_argument("--adopt", help=argparse.SUPPRESS)  # a child whose session its parent already started
+    run_p.add_argument("--allow-env", action="append", default=[], metavar="NAME", type=_pass_through,
+                       help="pass this variable from your environment to the agent (repeatable), such as a provider "
+                            "key. A burn cannot revoke it. Names burn run sets itself are refused")
     run_p.add_argument("cmd", nargs=argparse.REMAINDER, metavar="-- COMMAND")
     env_p = sub.add_parser("env", help="show the environment `burn run` gives an instance")
     env_p.add_argument("--show", action="store_true", help="show the values of the kept variables")
@@ -248,19 +269,55 @@ def cmd_token_create(api, args):
           f"  pbpaste | burn run --role {r['role']} --token-stdin -- <command>")
 
 
+NO_WAY_TO_JOIN = ("burn run needs a sign-in or a join token: run `burn login` and burn run gets its own join token, "
+                  "or (in CI and containers) set BURN_JOIN_TOKEN or pass --token or --token-stdin")
+
+
+def _person_api(args) -> Api:
+    """The signed-in person's client, for a run given no join token. Without a sign-in, the error names both ways."""
+    try:
+        url, demo = config.load(args.dotenv)
+    except config.ConfigError:
+        raise UsageError(NO_WAY_TO_JOIN) from None
+    if not demo and signin.load_cache() is None:
+        raise UsageError(NO_WAY_TO_JOIN)
+    return Api(url, demo)
+
+
+def _join_token(api: Api, role: str, derived: bool) -> str:
+    """Reuse the role or create it with full access, then mint a one-use join token for this run. Never printed."""
+    try:
+        found, created = roles.get_or_create(api, role, derived)
+    except roles.RoleError as exc:
+        raise UsageError(str(exc)) from None
+    if created:
+        print(f'burn: created role "{role}" with full access (every tool, its own AWS key)', file=sys.stderr)
+    else:
+        print(f'burn: reusing role "{role}" as it is ({roles.describe(found)})', file=sys.stderr)
+    return roles.mint_join_token(api, found.get("name") or role)
+
+
 def cmd_run(args):
     from .runner import privs
     from .runner.env import BadTask
     from .runner.run import ADOPT_SECRETS, Instance
     command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not command:
-        raise UsageError("give the command to run after --, e.g. burn run --role worker -- python agent.py")
+        raise UsageError("give the command to run, e.g. burn run claude, or burn run --role worker -- python agent.py")
     if args.token_stdin and args.token:
         raise UsageError("use either --token or --token-stdin")
     token = (sys.stdin.readline().strip() if args.token_stdin else args.token) or os.environ.get("BURN_JOIN_TOKEN", "")
     session = json.loads(args.adopt) if args.adopt else None
-    if not token and not session:
-        raise UsageError("a join token is required: set BURN_JOIN_TOKEN or pass --token")
+    if args.token_stdin and not token:
+        raise UsageError("a join token is required: --token-stdin read none")
+    role = args.role
+    if not role:
+        try:
+            role = roles.name_for(command)
+        except roles.RoleError as exc:
+            raise UsageError(str(exc)) from None
+        print(f'burn: role "{role}" (named after the command; pass --role to choose)', file=sys.stderr)
+    person = None if token or session else _person_api(args)
     gateway = config.get("BURN_GATEWAY_URL", args.dotenv)
     if not gateway:
         raise UsageError("BURN_GATEWAY_URL not set (run `make env`, or export it)")
@@ -280,11 +337,13 @@ def cmd_run(args):
     api_url = config.get("BURN_API_URL", args.dotenv)
     if not api_url:
         raise UsageError("BURN_API_URL not set (run `make env`, or export it)")
+    if person:
+        token = _join_token(person, role, derived=not args.role)
     try:
-        instance = Instance(InstanceApi(api_url), args.role, command, secrets=secrets, gateway_url=gateway.rstrip("/"),
+        instance = Instance(InstanceApi(api_url), role, command, secrets=secrets, gateway_url=gateway.rstrip("/"),
                             enroll_token=token, session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv),
-                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin,
-                            # read only so no task item can carry it; burn run never sends it
+                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin, allow_env=args.allow_env,
+                            # read only so no task item can carry it; the agent never gets it
                             held_secrets=(config.get("BURN_DEMO_TOKEN", args.dotenv),))
     except BadTask as exc:
         if session and isinstance(secrets, dict) and secrets.get("session_token"):

@@ -11,8 +11,86 @@
   display: grid;
   grid-template-columns:
     minmax(0, 1.3fr) minmax(0, 1.6fr) minmax(0, 1.4fr)
-    130px;
+    130px 16px;
   gap: 16px;
+}
+
+/* ---------- Search, and opening every row at once ---------- */
+
+.incidents-page .inc-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 14px 0 6px;
+}
+
+.incidents-page .inc-search {
+  position: relative;
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.incidents-page .inc-search input {
+  display: block;
+  width: 100%;
+  height: 34px;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 13.5px/1 var(--font-sans);
+}
+
+.incidents-page .inc-search input::placeholder {
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-search input:hover {
+  border-color: var(--muted-2);
+}
+
+.incidents-page .inc-search input:focus-visible {
+  border-color: var(--ink);
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.incidents-page .inc-search-key {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
+  min-width: 18px;
+  padding: 2px 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  font: 500 11px/1 var(--font-mono);
+  color: var(--muted-2);
+  text-align: center;
+  pointer-events: none;
+}
+
+.incidents-page .inc-search input:focus + .inc-search-key,
+.incidents-page .inc-search input:not(:placeholder-shown) + .inc-search-key {
+  display: none;
+}
+
+.incidents-page .inc-tools-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+/* Expand all and Collapse all stay focusable when there's nothing to do. */
+.incidents-page .inc-tools-buttons .btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.incidents-page .inc-tools-buttons .btn[aria-disabled="true"]:hover {
+  border-color: var(--border);
 }
 
 .incidents-page .inc-head {
@@ -22,17 +100,166 @@
   color: var(--muted-2);
 }
 
+/* A row is the button that opens it. */
 .incidents-page .inc-row {
+  width: 100%;
   align-items: center;
   padding: 16px 0;
+  border: 0;
   border-bottom: 1px solid var(--hairline-soft);
+  background: none;
   color: var(--ink);
-  text-decoration: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
+/* The ring sits outside the row, clear of the square and the chevron. */
 .incidents-page .inc-row:focus-visible {
-  outline-offset: -2px;
+  outline-offset: 2px;
   border-radius: 6px;
+}
+
+.incidents-page .inc-item.is-open .inc-row {
+  border-bottom-color: transparent;
+}
+
+/* A chevron drawn from two borders: right when shut, down when open. */
+.incidents-page .inc-chevron {
+  justify-self: end;
+  margin-right: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--muted-2);
+  border-bottom: 1.5px solid var(--muted-2);
+  transform: rotate(-45deg);
+}
+
+.incidents-page .inc-item.is-open .inc-chevron {
+  transform: rotate(45deg);
+}
+
+.incidents-page .inc-row:hover .inc-chevron {
+  border-color: var(--ink);
+}
+
+/* ---------- An open row ---------- */
+
+.incidents-page .inc-detail-body {
+  padding: 4px 0 18px 26px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.incidents-page .inc-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px 24px;
+}
+
+.incidents-page .inc-part-title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-part p,
+.incidents-page .inc-part-list {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.incidents-page .inc-part-list {
+  padding: 0;
+  list-style: none;
+}
+
+.incidents-page .inc-part-list li + li {
+  margin-top: 6px;
+}
+
+.incidents-page .inc-part .id {
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.incidents-page .inc-quiet,
+.incidents-page .inc-part .inc-quiet {
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-saw li {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 8px;
+}
+
+.incidents-page .inc-saw-ev {
+  color: var(--muted);
+}
+
+/* Evidence against it reads in ink, as on its page; leaked plain text in ember. */
+.incidents-page .inc-saw-ev.is-hot {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.incidents-page .inc-saw-ev.is-plain {
+  color: var(--ember-ink);
+}
+
+.incidents-page .inc-saw-from {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-detail-tag {
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-open-keys li {
+  display: grid;
+  gap: 4px;
+}
+
+.incidents-page .inc-open-keys li + li {
+  margin-top: 12px;
+}
+
+.incidents-page .inc-open-keys .flag-actions {
+  margin-top: 4px;
+}
+
+.incidents-page .inc-part .notice {
+  margin: 0;
+}
+
+.incidents-page .inc-retry {
+  margin-top: 8px;
+}
+
+.incidents-page .inc-detail-link {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Opening is instant; with motion allowed, the contents fade in. */
+@media (prefers-reduced-motion: no-preference) {
+  .incidents-page .inc-detail-body {
+    animation: inc-detail-in 140ms ease-out both;
+  }
+}
+
+@keyframes inc-detail-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .incidents-page .inc-agent {
@@ -149,12 +376,29 @@
   }
 
   .incidents-page .inc-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto 16px;
     grid-template-areas:
-      "agent status"
-      "why why"
-      "did did";
+      "agent status chevron"
+      "why why why"
+      "did did did";
     gap: 10px 16px;
+  }
+
+  .incidents-page .inc-chevron {
+    grid-area: chevron;
+  }
+
+  .incidents-page .inc-detail-body {
+    padding-left: 0;
+  }
+
+  /* Open, the row's details say what Burn did, step by step. */
+  .incidents-page .inc-item.is-open .inc-did {
+    display: none;
+  }
+
+  .incidents-page .inc-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .incidents-page .inc-agent {
@@ -178,5 +422,11 @@
     margin-bottom: 2px;
     font-size: 10px;
     color: var(--muted-2);
+  }
+}
+
+@media (max-width: 560px) {
+  .incidents-page .inc-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

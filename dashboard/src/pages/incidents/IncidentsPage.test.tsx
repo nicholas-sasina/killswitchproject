@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BurnApi } from "../../api";
+import type { LedgerResponse } from "../../contracts";
 import type { ConsoleData } from "../../data/ConsoleData";
 import {
   consoleValue,
@@ -35,7 +39,10 @@ function show(value: ConsoleData) {
 const SHARED = "burn/shared/crm_db_url";
 
 /** worker-07 burned by a person with one shared key open; reader-01 burned before the loaded events. */
-function burnedWithOpenKey(flags = [flag({ flag_level: "reported" })]) {
+function burnedWithOpenKey(
+  flags = [flag({ flag_level: "reported" })],
+  api: Partial<BurnApi> = {},
+) {
   const workers = Array.from({ length: 8 }, (_, index) =>
     instance(`s${index + 1}`, index === 6 ? "revoked" : "active", {
       created_at: today(1, index),
@@ -85,7 +92,15 @@ function burnedWithOpenKey(flags = [flag({ flag_level: "reported" })]) {
       }),
     ],
     flags,
+    api,
   });
+}
+
+/** The rows of the Burned agents list: each is the button that opens it. */
+function rowsIn(list: HTMLElement): HTMLElement[] {
+  return within(list)
+    .getAllByRole("button")
+    .filter((button) => button.hasAttribute("aria-expanded"));
 }
 
 describe("Incidents", () => {
@@ -122,10 +137,10 @@ describe("Incidents", () => {
       "1 agent burned today.1 key waits on its owner.",
     );
     const list = screen.getByRole("region", { name: /Burned agents/i });
-    const rows = within(list).getAllByRole("link");
+    const rows = rowsIn(list);
     expect(rows).toHaveLength(2);
     const worker = rows[0];
-    expect(worker.getAttribute("href")).toBe("#/agents/s7");
+    expect(worker.getAttribute("aria-expanded")).toBe("false");
     expect(worker.textContent).toContain("worker-07");
     expect(worker.textContent).toContain(
       "Burned by priya.nair@example.com: read an unverified vendor page",
@@ -168,12 +183,12 @@ describe("Incidents", () => {
     const list = screen.getByRole("region", { name: /Burned agents/i });
 
     fireEvent.click(within(filter).getByRole("button", { name: "Open 1" }));
-    expect(within(list).getAllByRole("link")).toHaveLength(1);
-    expect(within(list).getByRole("link").textContent).toContain("worker-07");
+    expect(rowsIn(list)).toHaveLength(1);
+    expect(rowsIn(list)[0].textContent).toContain("worker-07");
     expect(window.location.hash).toBe("#/incidents?show=open");
 
     fireEvent.click(within(filter).getByRole("button", { name: "Burned 1" }));
-    expect(within(list).getByRole("link").textContent).toContain("reader-01");
+    expect(rowsIn(list)[0].textContent).toContain("reader-01");
     expect(window.location.hash).toBe("#/incidents?show=burned");
 
     fireEvent.click(within(filter).getByRole("button", { name: "All 2" }));
@@ -201,6 +216,305 @@ describe("Incidents", () => {
     const open = screen.getByRole("region", { name: /Still open/i });
     expect(within(open).getByRole("alert").textContent).toBe(
       "Flagged keys could not be loaded: API request failed (HTTP 500). Burn retries every 5 seconds.",
+    );
+  });
+});
+
+/** What worker-07's ledger says: the shared key in plain text, its own key by reference. */
+function ledgerOf(agentId: string): LedgerResponse {
+  return {
+    agent_id: agentId,
+    entries: [
+      {
+        secret_ref: SHARED,
+        fingerprint: "f1",
+        secret_type: "other",
+        owner: "shared",
+        source: "tool_response",
+        source_ref: "read_config:crm",
+        first_seen: today(1, 5),
+        status: "flagged",
+        exposure: "seen",
+      },
+      {
+        secret_ref: `burn/${agentId}/api_key`,
+        fingerprint: "f2",
+        secret_type: "api_key",
+        owner: "agent",
+        owner_agent_id: agentId,
+        source: "tool_response",
+        first_seen: today(1, 6),
+        status: "rotated",
+        exposure: "referenced",
+      },
+    ],
+  };
+}
+
+describe("Incidents: search and rows that open", () => {
+  it("keeps the query in the hash and reads it back", async () => {
+    window.history.replaceState(null, "", "/#/incidents?show=burned&q=reader");
+    show(burnedWithOpenKey());
+    const box = screen.getByRole("searchbox", { name: "Search incidents" });
+    expect((box as HTMLInputElement).value).toBe("reader");
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    expect(rowsIn(list).map((row) => row.textContent)).toEqual([
+      expect.stringContaining("reader-01"),
+    ]);
+
+    fireEvent.change(box, { target: { value: "Worker" } });
+    // The list follows at once; the hash a moment after the last key.
+    expect(window.location.hash).toBe("#/incidents?show=burned&q=reader");
+    await waitFor(() =>
+      expect(window.location.hash).toBe("#/incidents?show=burned&q=Worker"),
+    );
+    // worker-07 matches but is open, so Burned shows none of them.
+    expect(
+      within(list).getByText("No burned incidents match “Worker”."),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^All 1/ }));
+    expect(window.location.hash).toBe("#/incidents?q=Worker");
+    expect(rowsIn(list)).toHaveLength(1);
+
+    fireEvent.change(box, { target: { value: "" } });
+    await waitFor(() => expect(window.location.hash).toBe("#/incidents"));
+    expect(window.location.search).toBe("");
+    expect(rowsIn(list)).toHaveLength(2);
+  });
+
+  it("says when nothing matches, and Clear brings every row back", () => {
+    window.history.replaceState(null, "", "/#/incidents?q=nothing-like-this");
+    show(burnedWithOpenKey());
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    expect(
+      within(list).getByText("No incidents match “nothing-like-this”."),
+    ).toBeTruthy();
+    fireEvent.click(within(list).getByRole("button", { name: "Clear" }));
+    expect(window.location.hash).toBe("#/incidents");
+    expect(rowsIn(list)).toHaveLength(2);
+    expect(document.activeElement).toBe(
+      screen.getByRole("searchbox", { name: "Search incidents" }),
+    );
+  });
+
+  it("keeps every count in step with the tabs and the navigation", () => {
+    const value = burnedWithOpenKey();
+    show(value);
+    const tabs = () =>
+      within(screen.getByRole("group", { name: "Show" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+    // No search: the tabs are the console's own counts, as in the navigation.
+    const { all, open, closed } = value.incidentCounts;
+    expect(tabs()).toEqual([`All ${all}`, `Open ${open}`, `Burned ${closed}`]);
+
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "crm_db_url" },
+    });
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    expect(tabs()).toEqual(["All 1", "Open 1", "Burned 0"]);
+    expect(rowsIn(list)).toHaveLength(1);
+    expect(list.querySelector("h2")?.textContent).toContain("1 of 2 match");
+    // The navigation still counts every open incident, search or not.
+    expect(value.incidentCounts.open).toBe(1);
+  });
+
+  it("puts the cursor in the search box on '/', unless it's already in a field", () => {
+    show(burnedWithOpenKey());
+    const box = screen.getByRole("searchbox", { name: "Search incidents" });
+    fireEvent.keyDown(document.body, { key: "/" });
+    expect(document.activeElement).toBe(box);
+
+    const other = document.createElement("textarea");
+    document.body.append(other);
+    other.focus();
+    fireEvent.keyDown(other, { key: "/" });
+    expect(document.activeElement).toBe(other);
+    other.remove();
+  });
+
+  it("opens a row in place and asks for its ledger once", async () => {
+    const ledger = vi.fn((agentId: string) =>
+      Promise.resolve(ledgerOf(agentId)),
+    );
+    show(burnedWithOpenKey(undefined, { ledger }));
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    const [worker] = rowsIn(list);
+    const panel = document.getElementById(
+      worker.getAttribute("aria-controls")!,
+    )!;
+    expect(panel.hidden).toBe(true);
+
+    fireEvent.click(worker);
+    expect(worker.getAttribute("aria-expanded")).toBe("true");
+    expect(panel.hidden).toBe(false);
+    expect(within(panel).getByText("Loading what worker-07 saw…")).toBeTruthy();
+    await act(async () => {});
+    expect(ledger).toHaveBeenCalledTimes(1);
+    expect(ledger.mock.calls[0][0]).toBe("agent-worker-s7");
+
+    const saw = within(panel)
+      .getByRole("heading", { name: "What it saw" })
+      .closest("section")!;
+    expect(within(saw).getByText("crm_db_url").className).toContain("id");
+    // Leaked plain text reads in ember; nothing else in the row does.
+    expect(within(saw).getByText("Plain text").className).toContain("is-plain");
+    expect(panel.querySelectorAll(".is-plain")).toHaveLength(1);
+    expect(within(panel).getByText("Shared key / reported").className).toBe(
+      "cap inc-detail-tag",
+    );
+    const did = within(panel)
+      .getByRole("heading", { name: "What Burn did" })
+      .closest("section")!;
+    expect(did.textContent).toContain("Badge revoked");
+    expect(did.textContent).toContain(
+      "crm_db_url flagged for its owner, still open",
+    );
+    const stillOpen = within(panel)
+      .getByRole("heading", { name: "Still open" })
+      .closest("section")!;
+    expect(
+      within(stillOpen).getByRole("button", { name: "Rotate crm_db_url" }),
+    ).toBeTruthy();
+    expect(
+      within(panel)
+        .getByRole("link", { name: "Open worker-07" })
+        .getAttribute("href"),
+    ).toBe("#/agents/s7");
+
+    // Shut and open again: the ledger is kept, not asked for again.
+    fireEvent.click(worker);
+    expect(panel.hidden).toBe(true);
+    fireEvent.click(worker);
+    await act(async () => {});
+    expect(ledger).toHaveBeenCalledTimes(1);
+    expect(within(panel).getByText("Plain text")).toBeTruthy();
+  });
+
+  it("says plainly when a ledger fails, and tries again on request", async () => {
+    const ledger = vi
+      .fn<(agentId: string) => Promise<LedgerResponse>>()
+      .mockRejectedValueOnce(new Error("API request failed (HTTP 503)."))
+      .mockImplementation((agentId) => Promise.resolve(ledgerOf(agentId)));
+    show(burnedWithOpenKey(undefined, { ledger }));
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    fireEvent.click(rowsIn(list)[0]);
+    await act(async () => {});
+    const alert = within(list).getByRole("alert");
+    expect(alert.textContent).toBe(
+      "Its ledger could not be loaded: API request failed (HTTP 503).",
+    );
+    expect(alert.className).not.toMatch(/ember/);
+    const again = within(list).getByRole("button", { name: "Try again" });
+    again.focus();
+    fireEvent.click(again);
+    // The button gives way to "Loading…"; focus stays in its section.
+    expect(document.activeElement).toBe(
+      within(list).getByRole("heading", { name: "What it saw" }),
+    );
+    await act(async () => {});
+    expect(ledger).toHaveBeenCalledTimes(2);
+    expect(within(list).getByText("Plain text")).toBeTruthy();
+  });
+
+  it("expands and collapses every row, asking for ledgers four at a time", async () => {
+    const pending: Array<() => void> = [];
+    const ledger = vi.fn(
+      (agentId: string) =>
+        new Promise<LedgerResponse>((resolve) =>
+          pending.push(() => resolve(ledgerOf(agentId))),
+        ),
+    );
+    const value = consoleValue({
+      instances: Array.from({ length: 6 }, (_, index) =>
+        instance(`s${index + 1}`, "revoked", { created_at: today(1, index) }),
+      ),
+      api: { ledger },
+    });
+    show(value);
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    expect(rowsIn(list)).toHaveLength(6);
+    const collapse = within(list).getByRole("button", { name: "Collapse all" });
+    const expand = within(list).getByRole("button", { name: "Expand all" });
+    expect(collapse.getAttribute("aria-disabled")).toBe("true");
+
+    expand.focus();
+    fireEvent.click(expand);
+    expect(
+      rowsIn(list).every((row) => row.getAttribute("aria-expanded") === "true"),
+    ).toBe(true);
+    // Used up, it says so but keeps focus.
+    expect(expand.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(expand);
+    expect(collapse.getAttribute("aria-disabled")).toBe("false");
+    await act(async () => {});
+    expect(ledger).toHaveBeenCalledTimes(4);
+
+    await act(async () => pending.shift()!());
+    expect(ledger).toHaveBeenCalledTimes(5);
+    await act(async () => {
+      while (pending.length) pending.shift()!();
+    });
+    await act(async () => {
+      while (pending.length) pending.shift()!();
+    });
+    expect(ledger).toHaveBeenCalledTimes(6);
+    expect(new Set(ledger.mock.calls.map(([id]) => id)).size).toBe(6);
+
+    collapse.focus();
+    fireEvent.click(collapse);
+    expect(
+      rowsIn(list).every(
+        (row) => row.getAttribute("aria-expanded") === "false",
+      ),
+    ).toBe(true);
+    expect(document.activeElement).toBe(collapse);
+    expect(collapse.getAttribute("aria-disabled")).toBe("true");
+    // Pressed again, it does nothing.
+    fireEvent.click(collapse);
+    expect(rowsIn(list)[0].getAttribute("aria-expanded")).toBe("false");
+    // Opening them all again uses the ledgers already loaded.
+    fireEvent.click(within(list).getByRole("button", { name: "Expand all" }));
+    await act(async () => {});
+    expect(ledger).toHaveBeenCalledTimes(6);
+  });
+
+  it("moves focus to the list's heading when a decided key takes its row off the list", async () => {
+    window.history.replaceState(null, "", "/#/incidents?show=open");
+    const resolveFlag = vi.fn(() =>
+      Promise.resolve({ flag: flag({ state: "dismissed" }) }),
+    );
+    const api = {
+      resolveFlag,
+      ledger: vi.fn(() => new Promise<LedgerResponse>(() => {})),
+    };
+    const { rerender } = show(burnedWithOpenKey(undefined, api));
+    const list = screen.getByRole("region", { name: /Burned agents/i });
+    fireEvent.click(rowsIn(list)[0]);
+    fireEvent.click(
+      within(list).getByRole("button", { name: "Dismiss for crm_db_url" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox"), {
+      target: { value: "a test fixture, never live" },
+    });
+    await act(async () => {
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: /^Dismiss the flag/ }),
+      );
+    });
+    // The console now has the flag dismissed: worker-07 leaves the Open tab.
+    rerender(
+      <WithConsole
+        value={burnedWithOpenKey([flag({ state: "dismissed" })], api)}
+      >
+        <IncidentsPage />
+      </WithConsole>,
+    );
+    expect(rowsIn(list)).toHaveLength(0);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(list.querySelector("h2")),
     );
   });
 });

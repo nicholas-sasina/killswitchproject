@@ -4,8 +4,11 @@ The console is where people see what their agents are doing and burn one when it
 continues from the website: the same night stage, white cards, Geist type and one signal colour,
 ember, which only ever means a burn.
 
-Two words carry the model. A **role** is a kind of agent: its tools, permissions and keys. An
-**agent** is one running copy of a role, named `<role>-NN` in the order it started (`worker-07`).
+Two words carry the model. An **agent** is one running copy of a program, with its own identity,
+keys and canary, named `<role>-NN` in the order it started (`claude-07`). A **role** groups agents
+and can narrow what they may do. Roles are optional and reusable: an agent connected without one
+has Full access and is grouped under its harness (`claude`), and a role takes as many agents as
+you connect to it.
 A burned agent's replacement takes the next number. The console never says "instance" or
 "session" in a list or heading; a session id appears only in an agent's Identity card.
 
@@ -19,11 +22,14 @@ Each page is a bookmarkable hash route. Old links still work: `#/burned` opens I
   with a square per agent; a square dims briefly when its agent makes a call. Beside it: what
   needs a person (flagged shared keys, unknown callers, canary uses), today's burns and the live
   feed, each event written as a sentence.
-- **Roles** (`#/roles`) lists every role, with a square per agent running or burned today. A
-  **role page** (`#/roles/<name>`) shows its agents by state (Running, Burned, Finished, All; the
-  filter is kept in the address), with an agent another one started indented under it. Beside them:
-  what the role may do, its protections, and the join tokens its agents joined with, which can be
-  revoked there. **Burn** on a row burns one agent; **Burn every <role>** burns them all.
+- **Roles** (`#/roles`) lists every role, with a square per agent running or burned today, and
+  says whether each has **Full access** (every tool, no narrowing) or is **Limited**. **New role**
+  makes one: Full access unless narrowed to chosen tools, keys and websites, with its protections
+  under More. A **role page** (`#/roles/<name>`) shows its agents by state (Running, Burned,
+  Finished, All; the filter is kept in the address), with an agent another one started indented
+  under it. Beside them: what the role may do, its protections, and its join tokens with their uses
+  and expiry, which can be revoked there. **Connect more agents** adds agents to the role; **Burn**
+  on a row burns one agent; **Burn every <role>** burns them all.
 - **Agent** (`#/agents/<session_id>`): one agent's exposure ledger, its timeline, and a
   containment card that shows what a burn will do before it and ticks through what it did after.
   A burned agent also shows its replacement and its AWS keys' blast radius. **Replay the burn**
@@ -33,11 +39,18 @@ Each page is a bookmarkable hash route. Old links still work: `#/burned` opens I
 - **Credentials** (`#/credentials`): shared keys an agent saw, flagged for their owners, who
   **Rotate** them or **Dismiss** the flag with a reason.
 
-**Add agents** in the navigation creates a role or mints a join token for an existing one; on a
-role page, **Add <role>s** mints one for that role. The dialog shows the token once, with Copy
-token, and the `burn run` commands. The commands never contain the token: they read it with a
-hidden prompt or from the clipboard, so its value stays out of shell history. The dialog then waits
-until the first new agent connects.
+**Connect an agent** in the navigation connects an agent from the harness you already use. Once
+per machine: install the `burn` CLI, set the API and gateway URLs and the console's own sign-in
+(`BURN_PEOPLE_ENABLED=on`, `BURN_PEOPLE_DOMAIN`, `BURN_PEOPLE_CLIENT_ID`), and run `burn login`.
+Then `burn run claude` or `burn run python agent.py`; choosing a role adds `--role <name>`. Without
+one, `burn run` groups the agent under the harness's name, and the dialog says whether that role
+already exists and has Full access. It says what the agent gets (its own identity, keys and canary;
+burning it also revokes its AWS key, which its model uses) and waits until the first new agent
+connects. Other harnesses, such as Codex, need their own setup, described in the CLI's guide. For
+CI, containers or swarms, a disclosure holds the join token flow: pick or create a role and mint a
+token. The token is shown once, with Copy token, and the commands never contain it: they read it
+with a hidden prompt or from the clipboard, so its value stays out of shell history. A role page's
+**Connect more agents** opens the same dialog with that role chosen.
 
 ## Sign-in
 

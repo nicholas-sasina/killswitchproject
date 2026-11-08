@@ -16,9 +16,9 @@ from the same repository, which uv finds through the CLI's `[tool.uv.sources]` a
 checkout, `make burn ARGS="..."` runs the same CLI.
 
 ## Connect your agent
-`burn run` turns any command into a Burn instance. It joins with a join token, gives the command the instance's
-own credentials and a local MCP endpoint for its tools, and stops it when the instance is burned. Any harness that
-speaks MCP over HTTP works, with any model the instance's own AWS key can call.
+`burn run` turns any command into a Burn instance: `burn run claude`, `burn run opencode`, `burn run python agent.py`.
+It gives the command the instance's own credentials and a local MCP endpoint for its tools, and stops it when the
+instance is burned. Any harness that speaks MCP over HTTP works, with any model the instance's own AWS key can call.
 
 1. **Point `burn` at your stack.** Whoever runs it has these values (`make env` writes all but `BURN_PROXY_URL`, the
    egress proxy's address, to the repository's `.env`). The dashboard's join commands set the first two for you:
@@ -31,7 +31,28 @@ speaks MCP over HTTP works, with any model the instance's own AWS key can call.
    Without `BURN_PEOPLE_ENABLED=on`, `burn` asks AWS whether the stack requires sign-in. With no AWS access it
    assumes not, and then asks for a `BURN_DEMO_TOKEN` you should not have.
 2. **Sign in** with `burn login`.
-3. **Make a role**, in the dashboard or in code: `burn init` writes a starter `burn.yaml`, which you edit and
+3. **Run your agent:**
+   ```bash
+   burn run claude                                # interactive; Burn's tools need no approval, its own still ask
+   burn run claude -p "Summarise ticket T-1"      # headless
+   burn run python agent.py
+   ```
+   Everything after the command is the command's own, flags included, so `--` is optional.
+   - **The role** is named after the command, or after the script for `python`, `node`, `uv`, `npx` and other
+     launchers: `burn run python agent.py` runs as role `agent`. A name that would be `eval` or `eval-*` (kept for
+     the eval harness) or a scenario agent's is refused, and so is a command with no usable name, such as
+     `python -c ...`. Pass `--role` to choose an existing role instead; one that does not exist is an error, never
+     created.
+   - **A role it named and cannot find is created with full access:** every tool, the instance's own AWS key,
+     and no egress limits of its own.
+   - **An existing role is reused as it is.** `burn run` says on stderr whether it is Full access or Limited, so a
+     role someone narrowed is never mistaken for full access.
+   - **No join token:** as a signed-in person, `burn run` mints a one-use token for the run and joins with it. The
+     token is never printed, logged, put on a command line or given to the agent.
+
+### In CI and containers
+Where nobody signs in, give `burn run` a join token. A join token always wins over a sign-in.
+1. **Make a role**, in the dashboard or in code: `burn init` writes a starter `burn.yaml`, which you edit and
    `burn apply`. A role sets an instance's tools, credentials and egress. For a model on Bedrock, give it an AWS
    key and, behind the egress proxy, the Bedrock endpoint:
    ```yaml
@@ -43,8 +64,8 @@ speaks MCP over HTTP works, with any model the instance's own AWS key can call.
        credentials: [api_key, aws_key]
        egress: [bedrock-runtime.us-east-1.amazonaws.com]
    ```
-4. **Get a join token**, in the dashboard or with `burn token create coder --uses 1 --ttl 3600`. It is shown once.
-5. **Run your agent:**
+2. **Get a join token**, in the dashboard or with `burn token create coder --uses 1 --ttl 3600`. It is shown once.
+3. **Run your agent:**
    ```bash
    read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN    # paste the token; nothing lands in shell history
    burn run --role coder -- <any command>
@@ -56,21 +77,39 @@ speaks MCP over HTTP works, with any model the instance's own AWS key can call.
 | `BURN_MCP_URL` | Burn's tools: MCP over streamable HTTP, on 127.0.0.1 |
 | `BURN_LOCAL_TOKEN` | The bearer the local endpoints require |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | The instance's own AWS key, when the role has `aws_key` |
+| `AWS_EC2_METADATA_DISABLED` | `true`, so no AWS SDK falls back to the host's instance role |
 | `BURN_API_KEY` | The instance's own provider key, when the role has `api_key` |
 | `BURN_SPAWN_URL`, `BURN_PROGRESS_URL` | Start a child instance; report task progress (see [`burn run`](#burn-run)) |
 | `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE` | Who it is |
 | `BURN_TASK`, `BURN_RESUME` | Its task and where to resume, when a launcher sets them |
 
 Nothing else from your environment reaches it except an allow-list: `PATH`, locale and terminal settings, `TMPDIR`,
-`AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables. Its `HOME` is a new, empty directory. `burn env`
-names everything that would be removed.
+`AWS_REGION`/`AWS_DEFAULT_REGION` and the CA-bundle variables, plus what you pass with `--allow-env` (see
+[Models](#models)). Its `HOME` is a new, empty directory, apart from a harness preset's files (see Claude Code
+below). `burn env` names everything that would be removed.
 
 ### Connect your harness
 Every harness connects the same way: MCP over streamable HTTP at `$BURN_MCP_URL`, sending
 `Authorization: Bearer $BURN_LOCAL_TOKEN`. `burn run` swaps that bearer for the instance's badge token on the way to
 the Gateway, so the agent never holds the badge.
 
-**Claude Code**: a `.mcp.json` in the directory it runs in. Claude Code expands `${VAR}` in `url` and `headers`.
+**Claude Code**: `burn run` sets it up when the command is `claude`, so there is nothing to configure:
+```bash
+burn run claude                                  # interactive
+burn run claude -p "Summarise ticket T-1"        # one prompt; Burn's tools need no flag
+```
+It runs on Bedrock with the instance's own AWS key (see [Models](#models)). A role without `aws_key` gets Burn's
+tools but no model settings, so Claude Code never reaches for another AWS credential. In the instance's new `HOME`, `burn run`
+writes a `.claude.json` that connects Burn's MCP server, skips onboarding and trusts the current directory, and a
+`.claude/settings.json` that allows the `mcp__burn` tools, which the role already limits. The server's entry says
+`${BURN_MCP_URL}` and `Bearer ${BURN_LOCAL_TOKEN}`, which Claude Code expands, so no token is written to a file.
+Your own `~/.claude` is never read or changed. Because the directory is trusted, a project's own `.claude`
+settings, its hooks and permission rules included, apply without the trust prompt, so start it only in a directory
+you trust.
+
+Under another command, such as a wrapper script, no preset applies. Then put the server in a `.mcp.json` in the
+directory it runs in (Claude Code expands `${VAR}` in `url` and `headers`), and allow its tools with
+`--allowedTools mcp__burn` after the prompt; an interactive session asks you to approve the server on every run.
 ```json
 {
   "mcpServers": {
@@ -82,17 +121,15 @@ the Gateway, so the agent never holds the badge.
   }
 }
 ```
-`claude -p` loads it at once, but under `burn run` it starts with no settings, so it is denied every call to Burn's
-tools unless you allow them: add `--allowedTools mcp__burn` after the prompt (the flag takes a list, so it would
-read a prompt placed after it as a tool name). An interactive session asks you to approve the server first, on every
-run, because `HOME` is new each time.
+The flag takes a list, so it would read a prompt placed after it as a tool name.
 
 **Codex CLI**: `config.toml` does not expand variables, so pass the server on the command line, through a shell
 that does:
 ```bash
 burn run --role coder -- sh -c 'exec codex -c mcp_servers.burn.url="$BURN_MCP_URL" -c mcp_servers.burn.bearer_token_env_var=BURN_LOCAL_TOKEN'
 ```
-This gives Codex Burn's tools but not a model: under `burn run` its sign-in and `OPENAI_API_KEY` do not reach it.
+This gives Codex Burn's tools but not a model: under `burn run` its sign-in does not reach it, and `OPENAI_API_KEY`
+reaches it only if you pass it with `--allow-env` (see [Models](#models)).
 
 **OpenAI Agents SDK** (`pip install "openai-agents[litellm]"`):
 ```python
@@ -157,15 +194,25 @@ The instance's own AWS key calls Bedrock, so every harness above can use it, and
 from the model as well as its tools. That key may call only the models the stack allows: this repository's stack
 allows Claude Haiku 4.5, `us.anthropic.claude-haiku-4-5-20251001-v1:0`, in us-east-1.
 
-`burn run` strips the environment, so set non-secret settings inside the command:
+`burn run` sets this up for `claude` when the instance has its own AWS key: `CLAUDE_CODE_USE_BEDROCK=1`,
+`AWS_REGION=us-east-1`, and Haiku 4.5 as `ANTHROPIC_MODEL` and every model alias, so a subagent never asks for a
+model the key may not call. For other
+commands, `burn run` strips the environment, so set non-secret settings inside the command:
 ```bash
-burn run --role coder -- env CLAUDE_CODE_USE_BEDROCK=1 AWS_REGION=us-east-1 \
-  ANTHROPIC_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0 claude -p "Summarise ticket T-1" --allowedTools mcp__burn
 burn run --role coder -- env AWS_REGION_NAME=us-east-1 python agent.py   # LiteLLM, for the Agents SDK
 ```
-Other providers' keys, such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, are removed like any other secret, and
-`burn run` has no way to pass one through. Codex connects to Burn's tools as above, but a model for it is not
-covered here: its sign-in and `OPENAI_API_KEY` do not reach it.
+Other providers' keys, such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, are removed like any other secret.
+`--allow-env NAME` (repeatable) passes one through, and `burn run` warns about each one. It goes before the command,
+since everything after the command is the command's own:
+```bash
+burn run --allow-env OPENAI_API_KEY python agent.py
+# burn: OPENAI_API_KEY passes through to the agent; a burn cannot revoke it
+```
+That is the trade-off: a burn revokes the instance's own keys, not yours, so an agent that copied your key keeps
+it after the burn. Rotate it yourself after an incident. A pass-through wins over a preset's setting of the same
+name. Names `burn run` sets itself (`BURN_*`, `AWS_*`, `XDG_*`, `*_PROXY`, `HOME` and `PATH`, in any case) are
+refused, and a child started with `burn.spawn` gets none of them. Codex connects to Burn's tools as above, but a
+model for it is not covered here.
 
 ### Containment
 On a laptop `burn run` is not root, so the agent runs as you. It can read your files, your `burn login` session in
@@ -199,6 +246,7 @@ Real isolation takes two things:
 | `burn_cli/retry.py` | Exponential backoff with jitter |
 | `burn_cli/runner/run.py` | `burn run`: session, lifecycle, heartbeat, stop on burn |
 | `burn_cli/runner/env.py` | Scrubbing the host environment and building the instance's |
+| `burn_cli/runner/harness.py` | Presets for well-known harnesses (`claude`): settings and files for the new `HOME` |
 | `burn_cli/runner/credentials.py` | The instance's own values, taken from the join reply's `secrets` |
 | `burn_cli/runner/badge.py` | Badge token minting and refresh |
 | `burn_cli/runner/mcp_proxy.py` | The local MCP endpoint |
@@ -227,19 +275,25 @@ until `burn apply` takes it over; after that the dashboard shows it read-only.
 
 ### `burn run`
 ```bash
+burn run claude                                        # signed in: role "claude", reused or created with full access
 read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN     # paste the token; nothing lands in shell history
 burn run --role worker -- python agent.py
 pbpaste | burn run --role worker --token-stdin -- python agent.py   # or read it from stdin
 burn env            # what an instance's environment would hold (values hidden; --show reveals the kept ones)
 ```
 `burn run` starts one instance:
+0. Without a join token, as the signed-in person (or with the local-development token): `GET /roles/{name}`; when
+   a role named after the command is missing, `POST /roles` with the full-access body (a 409 means another run
+   created it first, so it is read again and reused), while a missing `--role` is an error; then
+   `POST /roles/{name}/tokens {"uses": 1, "ttl": 300}`. The token stays inside `burn run`.
 1. `POST /instances {role, enroll_token}` with no auth header (the join token is the authority), retrying 429, 5xx and network errors with exponential backoff and
    jitter (new IAM keys take seconds to work, and 20 parallel spawns hit rate limits).
 2. Takes the instance's own badge, AWS key and provider key from the `secrets` field of that reply, which the API
    returns once, along with the instance's session token (`bst_...`). The session token authenticates the
    supervisor's heartbeat, exit and spawn calls (`Authorization: Bearer ...`) and stays in the supervisor: never in
    the agent's environment or any argv, and `burn run` refuses to pass on anything that looks like one. `burn run`
-   never uses or forwards your sign-in or the local-development token (`BURN_DEMO_TOKEN`); it needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
+   uses your sign-in or the local-development token (`BURN_DEMO_TOKEN`) only for step 0, never when it is given a
+   join token, and never forwards either. It needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
    not a reason to look elsewhere. A child started with `burn.spawn` gets its values from its parent's reply and
    receives them in its supervisor's exec environment (`BURN_ADOPT_SECRETS`), never on a command line, where every
    user in the container could read them.
@@ -340,14 +394,17 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
   gets "HTTP 401" says which of the two to do.
 - **Where is my sign-in kept, and who can read it?** In `~/.config/burn/credentials.json`, readable only by you.
   `burn logout` revokes the session and deletes the file.
-- **Does `burn run` need me to sign in?** No. An instance authenticates as itself with the join token and then
-  its own session token. Your sign-in is never sent from `burn run`, even when you are signed in on that machine.
+- **Does `burn run` need me to sign in?** Only when you give it no join token. Then your sign-in reads or creates
+  the role and mints a one-use join token, and nothing else. The instance itself authenticates with that token and
+  then its own session token. Given a join token, `burn run` never sends your sign-in, even when you are signed in
+  on that machine.
 - **Can I sign in on a machine without a browser?** `burn login` prints the sign-in address when it cannot open
   a browser. The reply comes back to `localhost:8976`, so open it on the same machine (or forward that port).
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
 - **Why can't my agent use my `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`?** `burn run` passes on only an allow-list of
   your environment, and a provider key is a secret like any other. A key the agent took from your shell would
-  outlive a burn; the instance's own AWS key does not. Use Bedrock with that key (see [Models](#models)).
+  outlive a burn; the instance's own AWS key does not. Use Bedrock with that key, or pass yours with
+  `--allow-env NAME` and accept that a burn cannot revoke it (see [Models](#models)).
 - **What is task progress for?** When an instance of a role with "replace on burn" is burned, its launcher starts
   a clean replacement, which skips the items finished before the breach. Progress is how Burn knows which those
   are: the agent posts item ids to `BURN_PROGRESS_URL` and they reach Burn with the next heartbeat, stamped with

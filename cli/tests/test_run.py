@@ -73,7 +73,9 @@ def test_child_gets_its_own_values_and_none_of_the_hosts(stack):
     env = json.loads(out.read_text())
     for name, value in HOST_SECRETS.items():
         assert name not in env or env[name] != value, name
-    assert not [k for k in env if k.startswith("AWS_") and k not in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION")]
+    assert not [k for k in env if k.startswith("AWS_") and k not in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION",
+                                                                   "AWS_EC2_METADATA_DISABLED")]
+    assert env["AWS_EC2_METADATA_DISABLED"] == "true"  # no SDK falls back to the host's instance role
     assert env["AWS_ACCESS_KEY_ID"].startswith("AKIA") and env["AWS_ACCESS_KEY_ID"] != HOST_SECRETS["AWS_ACCESS_KEY_ID"]
     assert env["AWS_SECRET_ACCESS_KEY"] != "host-secret" and env["BURN_API_KEY"].startswith("mpk_live_")
     session = stack.calls("POST", "/instances")[0]
@@ -409,11 +411,12 @@ def test_burn_run_never_prints_the_join_or_api_token(stack, capfd, monkeypatch):
     assert stack.token not in out.out + out.err and API_TOKEN not in out.out + out.err
 
 
-def test_burn_run_needs_a_command_and_a_token(stack, capsys, monkeypatch):
+def test_burn_run_needs_a_command_and_a_token_or_a_sign_in(stack, capsys, monkeypatch):
     assert cli(["run", "--role", "worker"]) == 2
     monkeypatch.delenv("BURN_JOIN_TOKEN")
+    monkeypatch.delenv("BURN_DEMO_TOKEN")  # with it, local development joins as the person (tests/test_roles.py)
     assert cli(["run", "--role", "worker", "--", "true"]) == 2
-    assert "join token is required" in capsys.readouterr().err
+    assert "needs a sign-in or a join token" in capsys.readouterr().err
 
 
 def test_burn_run_needs_a_gateway(stack, capsys, monkeypatch):
