@@ -226,11 +226,20 @@ class Instance:
             return 200
 
     def _flush_progress(self) -> None:
-        """Send the progress still queued when the agent exits, so the instance's record is complete."""
+        """Send the progress still queued when the agent exits, so the instance's record is complete.
+
+        A transient failure (network, 5xx, a 429 when progress changed while the API saved it) is tried again,
+        up to three times in a row.
+        """
+        failures = 0
         while self._progress.pending():
-            if self._beat() not in (200, 400):
+            status = self._beat()
+            failures = 0 if status in (200, 400) else failures + 1
+            if status in (404, 409) or failures == 3:
                 log(f"{self._progress.pending()} progress events could not be sent before the exit")
                 return
+            if failures:
+                self._sleep(retry.delay(failures))
 
     def _stop_agent(self) -> None:
         """SIGTERM the agent's whole group, then SIGKILL whatever is left after the grace period."""

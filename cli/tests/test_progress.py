@@ -225,6 +225,23 @@ def test_a_transient_failure_keeps_the_batch_for_the_next_heartbeat(status):
     assert api.bodies == [[ev("a")], [ev("a")]]
 
 
+def test_progress_left_at_exit_is_retried_through_a_busy_api():
+    api = RecordingApi(429, 503, 200)  # 429: progress changed while the API was saving it
+    inst = supervisor(api)
+    inst._progress.add(ev("a", "done"))
+    inst._flush_progress()
+    assert api.bodies == [[ev("a", "done")]] * 3 and inst._progress.pending() == 0
+
+
+def test_progress_left_at_exit_is_given_up_after_three_tries_or_a_409(capsys):
+    for statuses, calls in (((503, 503, 503, 200), 3), ((409,), 1)):
+        api = RecordingApi(*statuses)
+        inst = supervisor(api)
+        inst._progress.add(ev("a", "done"))
+        inst._flush_progress()
+        assert len(api.bodies) == calls and "1 progress events could not be sent" in capsys.readouterr().err
+
+
 REPORT = """
     import json, os, sys, time, urllib.request
     def report(item, state):
@@ -439,3 +456,22 @@ def test_the_help_lists_the_progress_endpoint_and_the_task_variables(capsys):
     out = " ".join(capsys.readouterr().out.split())
     assert "BURN_PROGRESS_URL (POST {item, state}" in out and "BURN_TASK and BURN_RESUME" in out
 
+
+def test_a_429_keeps_the_progress_for_the_next_heartbeat_and_is_not_a_burn(stack, capfd):
+    original, busy = stack.handle, []
+
+    def busy_once(method, path, query, body):
+        if path.endswith("/heartbeat") and body.get("progress") and not busy:
+            busy.append(1)
+            return 429, {"error": "progress changed while it was being saved; retry"}
+        return original(method, path, query, body)
+
+    stack.handle = busy_once
+    seen = timed(stack)
+    code = REPORT + """
+    report("item-01", "started")
+    time.sleep(1.0)"""
+    assert instance(stack, py(code), heartbeat_every=0.3, min_heartbeat_gap=0.1).run() == 0
+    assert [batch for _, batch in progress_beats(seen)] == [[ev("item-01")], [ev("item-01")]]
+    assert "dropped" not in capfd.readouterr().err
+    assert next(iter(stack.instances.values()))["status"] == "exited"
