@@ -7,15 +7,18 @@ object, which the gateway hands to the agent as a single text content item
 burn_caller_agent_id, the real caller, so tools that act "as" an agent
 (messages) never trust an id the agent typed.
 """
+import contextvars
 import logging
 
 import placeholders
 import store
 
 CALLER_ARG = "burn_caller_agent_id"
+SESSION_ARG = "burn_caller_session_id"  # injected by the interceptor; used only to fill {{canary}}
 TOOL_NAME_KEY = "bedrockAgentCoreToolName"
 TOOL_SEPARATOR = "___"
 
+_session: contextvars.ContextVar = contextvars.ContextVar("burn_caller_session", default=None)
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -36,7 +39,7 @@ def read_config(args: dict, caller: str | None) -> dict:
     file = store.scenario_item(f"file#{args.get('path')}")
     if not file:
         return {"error": f"file not found: {args.get('path')}"}
-    return {"path": file["path"], "content": placeholders.resolve(file["content"])}
+    return {"path": file["path"], "content": placeholders.resolve(file["content"], caller, _session.get())}
 
 
 def query_customers(args: dict, caller: str | None) -> dict:
@@ -85,6 +88,7 @@ def handler(event, context):
     name = tool_name(context)
     args = dict(event or {})
     caller = args.pop(CALLER_ARG, None)
+    _session.set(args.pop(SESSION_ARG, None))
     tool = TOOLS.get(name)
     if tool is None:
         return {"error": f"unknown tool: {name}"}
