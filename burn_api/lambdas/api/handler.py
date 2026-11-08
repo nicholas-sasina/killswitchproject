@@ -114,6 +114,8 @@ def _swarm_route(method: str, path: str, query: dict, body: dict):
             return 200, instances.heartbeat(session_id, body)
         case ("POST", ["instances", session_id, "exit"]):
             return 200, instances.exit_instance(session_id)
+        case ("POST", ["instances", session_id, "replace"]):
+            return 200, instances.replace_instance(session_id, body)
         case ("POST", ["burns"]):
             return 200, burn_scopes.burn_scope(str(body.get("scope") or ""), body.get("id"),
                                                str(body.get("reason") or "")[:200])

@@ -176,3 +176,170 @@ def test_a_burned_instance_always_learns_it_is_burned_even_with_bad_progress(env
     call(env, "POST", "/burns", {"scope": "instance", "id": sid})
     status, body = beat(env, sid, raw=raw)
     assert status == 409 and "revoked" in body["error"]
+
+
+# --- linking a replacement -------------------------------------------------------------------------
+
+def test_a_pending_replacement_is_linked_once_in_one_transaction(env):
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"], done=["w01-item-01"], quarantined=["w01-item-02"])
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    status, linked = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]})
+    assert status == 200, linked
+    assert linked == {"replaces": old["session_id"], "session_id": new["session_id"], "generation": 1,
+                      "cutoff": "2026-11-07T10:00:00.000Z", "cutoff_source": "burn_time",
+                      "done": ["w01-item-01"], "quarantined": ["w01-item-02"]}
+    old_view = call(env, "GET", f"/instances/{old['session_id']}")[1]
+    new_view = call(env, "GET", f"/instances/{new['session_id']}")[1]
+    assert old_view["replacement"]["status"] == "linked" and old_view["replaced_by"] == new["session_id"]
+    assert new_view["replaces"] == old["session_id"] and new_view["generation"] == 1
+    again = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": fresh(env)["session_id"]})
+    assert again[0] == 409 and "linked" in again[1]["error"]
+
+    replaced, resumed = events(env, "replaced"), events(env, "resumed")
+    assert [(e["agent_id"], e["session_id"], e["replaced_by"], e["detail"]) for e in replaced] == [
+        (old["agent_id"], old["session_id"], new["session_id"], f"replaced by {new['agent_id']}")]
+    assert [(e["agent_id"], e["session_id"], e["replaces"], e["detail"]) for e in resumed] == [
+        (new["agent_id"], new["session_id"], old["session_id"], "1 done, 1 quarantined")]
+    assert {e["source"] for e in replaced + resumed} == {"instance"}
+    assert {e["role"] for e in replaced + resumed} == {"crawler"}
+
+
+def test_the_generation_counts_up_from_the_burned_instance(env):
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"], generation=2)
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    status, linked = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]})
+    assert status == 200 and linked["generation"] == 3
+    assert call(env, "GET", f"/instances/{new['session_id']}")[1]["generation"] == 3
+
+
+@pytest.mark.parametrize("state", ["linked", "needs_person", None, "never-burned"])
+def test_only_a_pending_replacement_can_be_linked(env, state):
+    make_role(env, ROLE)
+    old = fresh(env)
+    if state == "never-burned":
+        pass
+    elif state is None:
+        call(env, "POST", "/burns", {"scope": "instance", "id": old["session_id"]})  # no record yet at this layer
+        env.ddb.Table("burn-sessions").update_item(Key={"session_id": old["session_id"]},
+                                                   UpdateExpression="REMOVE replacement")
+    else:
+        mark_burned(env, old["session_id"], status=state)
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    status, body = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]})
+    assert status == 409 and "pending" in body["error"]
+    assert session_row(env, new["session_id"]).get("replaces") is None
+
+
+def test_the_new_instance_must_be_a_fresh_active_instance_of_the_same_role(env):
+    make_role(env, ROLE)
+    make_role(env, ROLE | {"name": "other"})
+    early = fresh(env)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])  # burned at 10:00; early joined before that
+    backdate(env, early["session_id"], "2026-11-07T09:59:00.000Z")
+    backdate(env, old["session_id"], "2026-11-07T09:58:00.000Z")
+    gone = fresh(env)
+    call(env, "POST", f"/instances/{gone['session_id']}/exit")
+    other = fresh(env, "other")
+    cases = {early["session_id"]: "after", old["session_id"]: "burned one", gone["session_id"]: "active",
+             other["session_id"]: "same role", "sess_missing": "does not exist"}
+    for new_id, rule in cases.items():
+        status, body = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new_id})
+        assert status == 400 and rule in body["error"], (new_id, body)
+    for bad in ({}, {"session_id": 5}, {"session_id": "a b"}, {"session_id": "x", "extra": 1}):
+        assert call(env, "POST", f"/instances/{old['session_id']}/replace", bad)[0] == 400
+    second = fresh(env)
+    other_old = fresh(env)
+    mark_burned(env, other_old["session_id"])
+    backdate(env, other_old["session_id"], "2026-11-07T09:58:00.000Z")
+    assert call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": second["session_id"]})[0] == 200
+    status, body = call(env, "POST", f"/instances/{other_old['session_id']}/replace",
+                        {"session_id": second["session_id"]})
+    assert status == 400 and "already" in body["error"]
+    assert call(env, "POST", "/instances/sess_missing/replace", {"session_id": second["session_id"]})[0] == 404
+    assert session_row(env, old["session_id"])["replacement"]["status"] == "linked"
+    assert session_row(env, other_old["session_id"])["replacement"]["status"] == "pending"
+
+
+def test_linking_needs_a_person_never_an_instance_token(env):
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    for token in (new["secrets"]["session_token"], old["secrets"]["session_token"]):
+        status, _ = as_instance(env, "POST", f"/instances/{old['session_id']}/replace", token,
+                                {"session_id": new["session_id"]})
+        assert status == 401
+    assert call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]},
+                token="")[0] == 401
+    assert session_row(env, old["session_id"])["replacement"]["status"] == "pending"
+
+
+def test_two_launchers_racing_link_exactly_one_replacement(env):
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])
+    backdate(env, old["session_id"])
+    candidates = [fresh(env)["session_id"] for _ in range(6)]
+    results, barrier = {}, threading.Barrier(len(candidates))
+
+    def link(new_id):
+        barrier.wait()
+        results[new_id] = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new_id})
+
+    threads = [threading.Thread(target=link, args=(c,)) for c in candidates]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    winners = [c for c, (status, _) in results.items() if status == 200]
+    assert len(winners) == 1, results
+    assert {status for c, (status, _) in results.items() if c not in winners} == {409}
+    assert session_row(env, old["session_id"])["replaced_by"] == winners[0]
+    assert [c for c in candidates if session_row(env, c).get("replaces")] == winners
+    assert len(events(env, "replaced")) == len(events(env, "resumed")) == 1
+
+
+def test_a_link_that_loses_the_race_after_its_checks_is_refused_by_the_transaction(env, monkeypatch):
+    """Both callers read `pending`; the transaction, not the read, decides."""
+    import instances
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])
+    backdate(env, old["session_id"])
+    first, second = fresh(env)["session_id"], fresh(env)["session_id"]
+    real_get, raced = instances.get_session, []
+
+    def stale(session_id, consistent=False):
+        row = real_get(session_id, consistent)
+        if session_id == old["session_id"] and not raced:
+            raced.append(True)
+            assert call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": first})[0] == 200
+        return row
+
+    monkeypatch.setattr(instances, "get_session", stale)
+    status, body = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": second})
+    assert status == 409, body
+    assert session_row(env, old["session_id"])["replaced_by"] == first
+    assert session_row(env, second).get("replaces") is None and session_row(env, second).get("generation") is None
+
+
+def test_a_failed_event_write_does_not_undo_the_link(env, monkeypatch):
+    import db
+    make_role(env, ROLE)
+    old = fresh(env)
+    mark_burned(env, old["session_id"])
+    backdate(env, old["session_id"])
+    new = fresh(env)
+    monkeypatch.setattr(db, "write_event", lambda **_: (_ for _ in ()).throw(RuntimeError("events down")))
+    status, linked = call(env, "POST", f"/instances/{old['session_id']}/replace", {"session_id": new["session_id"]})
+    assert status == 200 and linked["generation"] == 1
+    assert session_row(env, old["session_id"])["replaced_by"] == new["session_id"]

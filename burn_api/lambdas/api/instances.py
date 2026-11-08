@@ -1,4 +1,4 @@
-"""Instances: one per session. Listing, heartbeat, clean exit and the idle sweep.
+"""Instances: one per session. Listing, heartbeat with task progress, clean exit, idle sweep, replacement links.
 
 An instance is a burn-sessions row. Role instances carry `role`; a scenario agent's session has
 no `role` column and its role is derived from the agent id (agent-reader -> reader).
@@ -248,3 +248,99 @@ def sweep_idle(limit: int = SWEEP_LIMIT, budget: float = SWEEP_BUDGET_SECONDS) -
 
 def _iso(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+# --- replace on burn: linking a replacement ----------------------------------------------------
+# When one instance of a role with replace_on_burn is burned, the burn leaves a `replacement` record on it (status
+# pending, the clean cut-off, and which task items are done or quarantined). Burn never starts the replacement and
+# never holds the task: whatever launched the instance joins a fresh one the normal way, then calls
+# POST /instances/{old}/replace with it. One TransactWriteItems flips old pending -> linked and gives the new
+# instance its `replaces` and `generation`, both on conditions, so exactly one replacement is ever linked however
+# many launchers race. The reply tells the launcher what the new instance must skip.
+
+def _unfit_replacement(old: dict, new: dict | None) -> str | None:
+    """Why `new` may not replace `old`, or None. The transaction re-checks what can change (status, replaces)."""
+    if new is None:
+        return "the new instance does not exist"
+    if new["session_id"] == old["session_id"]:
+        return "the new instance is the burned one"
+    if not new.get("role") or new.get("role") != old.get("role"):
+        return "the new instance must be of the same role"
+    if new["status"] != "active":
+        return "the new instance must be active"
+    burned_at = old.get("revoked_at")
+    if burned_at and task_progress.parse_time(new["created_at"]) < task_progress.parse_time(burned_at):
+        return "the new instance must be created after the old one was burned"  # the same instant counts as after
+    if new.get("replaces"):
+        return "the new instance is already a replacement"
+    return None
+
+
+def _link_replacement(old: dict, new: dict, generation: int):
+    client = db.resource().meta.client
+    try:
+        client.transact_write_items(TransactItems=[
+            {"Update": {
+                "TableName": names.SESSIONS_TABLE, "Key": {"session_id": old["session_id"]},
+                "UpdateExpression": "SET replacement.#st = :linked, replaced_by = :new",
+                "ConditionExpression": "replacement.#st = :pending AND attribute_not_exists(replaced_by)",
+                "ExpressionAttributeNames": {"#st": "status"},
+                "ExpressionAttributeValues": {":linked": "linked", ":pending": "pending",
+                                              ":new": new["session_id"]}}},
+            {"Update": {
+                "TableName": names.SESSIONS_TABLE, "Key": {"session_id": new["session_id"]},
+                "UpdateExpression": "SET replaces = :old, generation = :g",
+                "ConditionExpression": "attribute_not_exists(replaces) AND #s = :active AND #r = :role",
+                "ExpressionAttributeNames": {"#s": "status", "#r": "role"},
+                "ExpressionAttributeValues": {":old": old["session_id"], ":g": generation, ":active": "active",
+                                              ":role": old["role"]}}},
+        ])
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] != "TransactionCanceledException":
+            raise
+        reasons = [r.get("Code") for r in exc.response.get("CancellationReasons", [])]
+        if reasons[:1] == ["ConditionalCheckFailed"]:
+            raise errors.ApiError(409, "Instance has no pending replacement (linked by another caller)") from None
+        if reasons[1:2] == ["ConditionalCheckFailed"]:
+            raise errors.ApiError(400, "the new instance is no longer active, or became a replacement meanwhile") from None
+        if "TransactionConflict" in reasons:  # another link of one of these rows is in flight right now
+            raise errors.ApiError(409, "Another link for this instance is in progress; read the instance again") from None
+        raise
+
+
+def _replacement_events(old: dict, new: dict, record: dict):
+    """Best-effort: the link is already committed, and a retried call would only get 409."""
+    role = old["role"]
+    for fields in (
+        {"agent_id": old["agent_id"], "session_id": old["session_id"], "action": "replaced",
+         "replaced_by": new["session_id"], "detail": f"replaced by {new['agent_id']}"},
+        {"agent_id": new["agent_id"], "session_id": new["session_id"], "action": "resumed",
+         "replaces": old["session_id"],
+         "detail": f"{len(record['done'])} done, {len(record['quarantined'])} quarantined"},
+    ):
+        try:
+            db.write_event(source="instance", role=role, **fields)
+        except Exception as exc:
+            print(f"replace: {fields['action']} event not written for {fields['session_id']}: {type(exc).__name__}")
+
+
+def replace_instance(old_id: str, body: dict) -> dict:
+    """POST /instances/{old_id}/replace {"session_id": <new>}: 404, then 409, then 400, as the contract orders."""
+    new_id = body.get("session_id")
+    if set(body) != {"session_id"} or not isinstance(new_id, str) or not names.SESSION_ID_RE.fullmatch(new_id):
+        raise errors.ApiError(400, "send exactly {\"session_id\": <the new instance>}")
+    old = get_session(old_id, consistent=True)  # 404
+    record = old.get("replacement")
+    if not record or record.get("status") != "pending":
+        state = record.get("status") if record else "none"
+        raise errors.ApiError(409, f"Instance has no pending replacement ({state})")
+    new = get_session_or_none(new_id, consistent=True)
+    problem = _unfit_replacement(old, new)
+    if problem:
+        raise errors.ApiError(400, problem)
+    generation = int(old.get("generation", 0)) + 1
+    _link_replacement(old, new, generation)
+    _replacement_events(old, new, record)
+    return {"replaces": old_id, "session_id": new_id, "generation": generation,
+            "cutoff": record["cutoff"], "cutoff_source": record["cutoff_source"],
+            "done": list(record["done"]), "quarantined": list(record["quarantined"])}
