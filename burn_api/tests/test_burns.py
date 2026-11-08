@@ -31,6 +31,17 @@ def test_instance_scope(env):
     assert ("POST", f"/agents/{child['agent_id']}/rotate") in [(c[0], c[1]) for c in env.minter.calls]
 
 
+def test_scoped_burn_event_counts_the_sessions_it_revoked(env):
+    """The scope revokes its targets before burn_agent runs, so the event counts those, not burn_agent's own 0."""
+    _, _, _, child, _ = tree(env)
+    out = call(env, "POST", "/burns", {"scope": "instance", "id": child["session_id"], "reason": "r"})[1]
+    assert out["burned"][0]["revoked"] is True
+    assert out["burned"][0]["sessions_revoked"] == [child["session_id"]]
+    events = [e for e in call(env, "GET", "/events")[1]["events"]
+              if e["action"] == "revoked" and e["agent_id"] == child["agent_id"]]
+    assert [(e["detail"], e["session_id"]) for e in events] == [("1 session(s) revoked (r)", child["session_id"])]
+
+
 def test_role_scope_burns_every_instance_of_the_role_only(env):
     _, root, other, child, grandchild = tree(env)
     out = call(env, "POST", "/burns", {"scope": "role", "id": "helper"})[1]
@@ -100,7 +111,7 @@ def test_slow_burns_are_cut_off_at_the_budget(env, monkeypatch):
     make_role(env, WORKER)
     for _ in range(3):
         join(env, "worker")
-    monkeypatch.setattr(burn, "burn_agent", lambda agent_id, reason="": time.sleep(4))
+    monkeypatch.setattr(burn, "burn_agent", lambda agent_id, reason="", **_: time.sleep(4))
     started = time.monotonic()
     out = burn_scopes.burn_scope("role", "worker", budget=1.5)
     assert time.monotonic() - started < 3
@@ -116,7 +127,7 @@ def test_twenty_instances_burn_in_one_call(env):
     assert sorted(b["agent_id"] for b in out["burned"]) == sorted(ids) and out["failed"] == []
     assert all(b["revoked"] for b in out["burned"])
     revoked = [e for e in call(env, "GET", "/events", query={"limit": 500})[1]["events"] if e["action"] == "revoked"]
-    assert len(revoked) == 20
+    assert len(revoked) == 20 and all(e["detail"] == "1 session(s) revoked" and e["session_id"] for e in revoked)
 
 
 def test_burn_validation_and_404s(env):
