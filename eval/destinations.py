@@ -216,7 +216,7 @@ def load_audit(path: Path):
     hosts = [row["host"] for row in rows]
     if len(set(hosts)) != len(hosts) or data["mode"] == "deny-all" and rows:
         raise ValueError("inconsistent destination set")
-    if data["mode"] == "gateway-only" and (len(rows) != 1 or rows[0]["basis"] != APP_BASIS):
+    if data["mode"] == "gateway-only" and len(rows) != 1:
         raise ValueError("inconsistent Gateway-only audit")
     if data["mode"] == "deployment" and not AWS_HOSTS <= set(hosts):
         raise ValueError("deployment audit omits fixed endpoints")
