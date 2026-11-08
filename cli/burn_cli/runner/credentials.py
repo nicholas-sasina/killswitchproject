@@ -19,14 +19,25 @@ class Credentials:
 
 
 class MissingSecrets(Exception):
-    """The API's reply to POST /sessions carried no `secrets` for this role instance."""
+    """The join reply carried no `secrets`, or no session token, for this role instance."""
 
-    def __init__(self):
-        super().__init__("API too old: no secrets in the join reply")
+    def __init__(self, what: str = "secrets"):
+        super().__init__(f"API too old: no {what} in the join reply")
+
+
+def session_token_of(secrets: dict | None) -> str:
+    """The instance's own session token (bst_...). It authenticates the supervisor's calls and goes nowhere else."""
+    token = (secrets or {}).get("session_token")
+    if not token:
+        raise MissingSecrets("session token")
+    return token
 
 
 def from_secrets(secrets: dict | None) -> Credentials:
-    """Credentials from the `secrets` field of a POST /sessions reply (badge, and api_key / aws_key if minted)."""
+    """Credentials for the agent from a join reply's `secrets` (badge, and api_key / aws_key if minted).
+
+    The session token is deliberately not part of them: the agent never gets it.
+    """
     if not secrets or "badge" not in secrets:
         raise MissingSecrets()
     badge = secrets["badge"]

@@ -4,6 +4,7 @@ It follows contracts/burn-api.openapi.yaml for the routes the CLI uses. `fail` q
 for a route so tests can exercise retries.
 """
 import json
+import hmac
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,7 @@ class FakeApi:
         self.badge_url = ""  # where issued badges say tokens are minted (tests point it at a fake issuer)
         self.omit_secrets = False  # simulate an API that predates the `secrets` field
         self.issued: list[dict] = []  # every secrets object handed out, so tests can look for leaks
+        self.session_tokens: dict[str, str] = {}  # session id -> its bst_ token (what the real API keeps hashed)
         self.heartbeat_status = 200  # set to 409 to simulate a burn
         self.lock = threading.Lock()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
@@ -33,6 +35,26 @@ class FakeApi:
 
     def calls(self, method, path):
         return [r for r in self.requests if r[0] == method and r[1].split("?")[0] == path]
+
+    # -- auth: the same rules as the real API (an admin header, or the instance's own authority) -----------
+    def authorized(self, method, path, headers, body) -> bool:
+        if headers.get("x-burn-demo-token") == API_TOKEN:
+            return True
+        if method != "POST":
+            return False
+        if path in ("/instances", "/sessions") and set(body) == {"role", "enroll_token"}:
+            return True  # the join token in the body is the authority; the route checks it
+        parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "instances" and parts[2] in ("heartbeat", "exit"):
+            return self._owns(parts[1], headers)
+        if path in ("/instances", "/sessions") and set(body) == {"role", "parent_session"}:
+            return self._owns(body["parent_session"], headers)
+        return False
+
+    def _owns(self, session_id, headers) -> bool:
+        scheme, _, token = (headers.get("authorization") or "").partition(" ")
+        stored = self.session_tokens.get(session_id)
+        return scheme.lower() == "bearer" and stored is not None and hmac.compare_digest(token, stored)
 
     # -- routing -----------------------------------------------------------------------------
     def handle(self, method, path, query, body):
@@ -62,7 +84,7 @@ class FakeApi:
         if (method, path) == ("POST", "/burn"):
             return 200, {"agent_id": body["agent_id"], "revoked": True, "sessions_revoked": [],
                          "rotated": [f"burn/{body['agent_id']}/api_key"], "flagged": []}
-        if (method, path) == ("POST", "/sessions"):
+        if (method, path) in (("POST", "/sessions"), ("POST", "/instances")):
             return self._session(body)
         if method == "POST" and parts[0] == "instances" and parts[-1] == "heartbeat":
             return self.heartbeat_status, {"error": "instance is not active"} if self.heartbeat_status == 409 else {}
@@ -77,6 +99,7 @@ class FakeApi:
             "session_id": session_id, "agent_id": f"agent-{role}-{secrets.token_hex(3)}", "role": role,
             "status": status, "parent_session": parent, "token_id": token_id,
             "created_at": "2026-01-01T00:00:00Z", "last_seen": "2026-01-01T00:00:01Z"}
+        self.session_tokens[session_id] = "bst_" + secrets.token_urlsafe(32)
         return self.instances[session_id]
 
     def _session(self, body):
@@ -112,6 +135,8 @@ class FakeApi:
         if "aws_key" in credentials:
             out["aws_key"] = {"access_key_id": "AKIA" + secrets.token_hex(8).upper(),
                               "secret_access_key": "aws-secret-" + secrets.token_hex(12)}
+        out["session_token"] = "bst_" + secrets.token_urlsafe(32)
+        self.session_tokens[inst["session_id"]] = out["session_token"]
         self.issued.append(out)
         return out
 
@@ -150,8 +175,8 @@ class FakeApi:
                 body = json.loads(self.rfile.read(length) or b"{}")
                 with outer.lock:
                     outer.requests.append((self.command, self.path, body, dict(self.headers)))
-                    if self.headers.get("x-burn-demo-token") != API_TOKEN:
-                        return self._send(401, {"error": "missing or invalid x-burn-demo-token"})
+                    if not outer.authorized(self.command, path, self.headers, body):
+                        return self._send(401, {"error": "missing or invalid credentials"})
                     queue = outer.fail.get((self.command, path))
                     if queue:
                         return self._send(queue.pop(0), {"error": "injected failure"})

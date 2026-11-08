@@ -3,6 +3,7 @@
 import json
 
 import jsonschema
+import pytest
 from burn_contracts.names import JOIN_TOKEN_RE, is_session_token, scenario_role_name
 
 from mock_data import CONTRACTS
@@ -186,3 +187,89 @@ def test_post_instances_starts_the_same_role_instances_as_post_sessions(client):
     assert client.post("/instances", json={"agent_id": "agent-reader"}).status_code == 400
     assert client.post("/instances", json={"role": "worker"}).status_code == 400
     assert client.post("/instances", json={"role": "worker", "enroll_token": "x", "parent_session": "y"}).status_code == 400
+
+
+# -- instance auth: the mock enforces the same rules as the real API -----------------------------------------
+@pytest.fixture
+def anon(client):
+    """The same app and state, but with no admin header: what a worker host sends."""
+    from fastapi.testclient import TestClient
+    with TestClient(client.app) as anonymous:
+        yield anonymous
+
+
+def bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def start_pair(client, anon):
+    """A planner that may spawn workers, two joined planners (siblings) and their session tokens."""
+    make_role(client, {**PLANNER, "may_spawn": ["worker"]})
+    make_role(client, WORKER)
+    sessions = []
+    for _ in range(2):
+        token = token_for(client, "planner")["token"]
+        reply = anon.post("/instances", json={"role": "planner", "enroll_token": token})
+        assert reply.status_code == 201
+        sessions.append(reply.json())
+    return sessions
+
+
+def test_a_join_needs_no_admin_header_but_exactly_role_and_enroll_token(client, anon):
+    make_role(client, WORKER)
+    token = token_for(client, "worker")["token"]
+    for path in ("/instances", "/sessions"):
+        assert anon.post(path, json={"role": "worker", "enroll_token": token, "x": 1}).status_code == 401
+        assert anon.post(path, json={"agent_id": "agent-reader"}).status_code == 401
+        assert anon.post(path, json={"role": "worker", "parent_session": "session_x"}).status_code == 401
+    assert anon.post("/instances", json={"role": "worker", "enroll_token": token}).status_code == 201
+
+
+def test_everything_else_needs_the_admin_header(client, anon):
+    assert anon.get("/roles").status_code == 401 and anon.get("/instances").status_code == 401
+    assert anon.post("/burns", json={"scope": "role", "id": "worker"}).status_code == 401
+    assert anon.post("/roles/worker/tokens", json={}).status_code == 401
+    assert client.get("/roles").status_code == 200
+    assert anon.post("/mock-token").status_code == 401  # reaches its own check: client credentials, not the gate
+
+
+def test_heartbeat_and_exit_need_that_instances_own_token(client, anon):
+    first, second = start_pair(client, anon)
+    for action in ("heartbeat", "exit"):
+        path = f"/instances/{first['session_id']}/{action}"
+        assert anon.post(path).status_code == 401
+        assert anon.post(path, headers=bearer("bst_" + "A" * 43)).status_code == 401
+        assert anon.post(path, headers=bearer(second["secrets"]["session_token"])).status_code == 401  # a sibling's
+    assert anon.post(f"/instances/{first['session_id']}/heartbeat",
+                     headers=bearer(first["secrets"]["session_token"])).status_code == 200
+    assert anon.post(f"/instances/{first['session_id']}/exit",
+                     headers=bearer(first["secrets"]["session_token"])).status_code == 200
+
+
+def test_a_burned_instances_heartbeat_with_its_own_token_is_409(client, anon):
+    first, _ = start_pair(client, anon)
+    assert client.post("/burns", json={"scope": "instance", "id": first["session_id"]}).status_code == 200
+    reply = anon.post(f"/instances/{first['session_id']}/heartbeat", headers=bearer(first["secrets"]["session_token"]))
+    assert reply.status_code == 409
+
+
+def test_a_spawn_needs_exactly_role_and_parent_session_and_the_parents_token(client, anon):
+    parent, sibling = start_pair(client, anon)
+    body = {"role": "worker", "parent_session": parent["session_id"]}
+    ok = anon.post("/instances", json=body, headers=bearer(parent["secrets"]["session_token"]))
+    assert ok.status_code == 201 and ok.json()["parent_session"] == parent["session_id"]
+    assert ok.json()["secrets"]["session_token"] != parent["secrets"]["session_token"]  # the child has its own
+    assert anon.post("/instances", json=body, headers=bearer(sibling["secrets"]["session_token"])).status_code == 401
+    assert anon.post("/instances", json=body).status_code == 401
+    assert anon.post("/instances", json={**body, "extra": 1},
+                     headers=bearer(parent["secrets"]["session_token"])).status_code == 401
+    child_token = ok.json()["secrets"]["session_token"]
+    assert anon.post("/instances", json=body, headers=bearer(child_token)).status_code == 401  # not the parent's
+
+
+def test_only_the_hash_of_a_session_token_is_kept(client, anon):
+    import hashlib
+    first, _ = start_pair(client, anon)
+    row = client.app.state.mock.sessions[first["session_id"]]
+    token = first["secrets"]["session_token"]
+    assert token not in json.dumps(row) and row["session_token_sha256"] == hashlib.sha256(token.encode()).hexdigest()

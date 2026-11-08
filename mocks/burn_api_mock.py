@@ -10,8 +10,8 @@ from typing import Literal
 
 from burn_contracts import tools
 from burn_contracts.events import utc_now_iso
-from burn_contracts.names import MOCK_HEADER, ROLE_NAME_RE, agent_secret_ref
-from fastapi import FastAPI, Header, HTTPException, Query
+from burn_contracts.names import DEMO_TOKEN_HEADER, MOCK_HEADER, ROLE_NAME_RE, agent_secret_ref
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -108,7 +108,37 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
                 with suppress(asyncio.CancelledError):
                     await task
 
-    app = FastAPI(title="Burn development mock", lifespan=lifespan)
+    # Same rules as the real API (burn_api/lambdas/api/auth.py). The mock accepts any admin token VALUE, but a
+    # request with no admin header must carry its own authority: a join token for a join, or the instance's
+    # session token for its heartbeat, exit and spawns. A missing or wrong bearer is a 401.
+    start_paths = ("/sessions", "/instances")
+    instance_call = re.compile(r"^/instances/([^/]+)/(heartbeat|exit)$")
+
+    async def gate(request: Request):
+        path = request.url.path
+        if (request.method == "OPTIONS" or path == "/mock-token" or request.headers.get(DEMO_TOKEN_HEADER)
+                or (request.method == "POST" and (path in start_paths or instance_call.match(path)))):
+            return  # the last two kinds check their own authority in the route
+        raise HTTPException(401, "Missing or invalid " + DEMO_TOKEN_HEADER)
+
+    async def authorize_start(request: Request):
+        """POST /sessions or /instances without the admin header: exactly {role, enroll_token}, or exactly
+        {role, parent_session} with the parent's session token."""
+        if request.headers.get(DEMO_TOKEN_HEADER):
+            return
+        keys = set(await request.json())
+        if keys == {"role", "enroll_token"}:
+            return
+        if keys == {"role", "parent_session"} and swarm.owns((await request.json())["parent_session"],
+                                                              request.headers.get("authorization")):
+            return
+        raise HTTPException(401, "No valid authority for this request")
+
+    def authorize_instance(request: Request, session_id: str):
+        if not request.headers.get(DEMO_TOKEN_HEADER) and not swarm.owns(session_id, request.headers.get("authorization")):
+            raise HTTPException(401, "That session's own token is required")
+
+    app = FastAPI(title="Burn development mock", lifespan=lifespan, dependencies=[Depends(gate)])
     app.state.mock = state
     app.state.swarm = swarm
     app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173"],
@@ -130,7 +160,7 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
             raise HTTPException(404, "Unknown scenario agent")
 
     @app.post("/sessions", status_code=201)
-    async def session(body: SessionRequest):
+    async def session(body: SessionRequest, _=Depends(authorize_start)):
         if body.agent_id is None:
             if body.role is None or (body.enroll_token is None) == (body.parent_session is None):
                 raise HTTPException(400, "Send agent_id, or role with exactly one of enroll_token or parent_session")
@@ -146,7 +176,7 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
                 "badge_ref": agent_secret_ref(body.agent_id, "badge"), **result}
 
     @app.post("/instances", status_code=201)
-    async def start_instance(body: SessionRequest):
+    async def start_instance(body: SessionRequest, _=Depends(authorize_start)):
         """The two role forms of POST /sessions on a path of their own (same behaviour and reply)."""
         if body.agent_id is not None or body.role is None or (body.enroll_token is None) == (body.parent_session is None):
             raise HTTPException(400, "Send role with exactly one of enroll_token or parent_session")
@@ -276,11 +306,13 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
         return {"instances": swarm.list_instances(role, status)}
 
     @app.post("/instances/{session_id}/heartbeat")
-    async def heartbeat(session_id: str):
+    async def heartbeat(session_id: str, request: Request):
+        authorize_instance(request, session_id)
         return swarm.heartbeat(session_id)
 
     @app.post("/instances/{session_id}/exit")
-    async def exit_instance(session_id: str):
+    async def exit_instance(session_id: str, request: Request):
+        authorize_instance(request, session_id)
         return swarm.exit(session_id)
 
     @app.post("/burns")
