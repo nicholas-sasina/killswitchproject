@@ -15,15 +15,18 @@ is replaced by a fresh instance that resumes its task (when the role has replace
 """
 import argparse
 import os
+import re
 import subprocess
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
 from burn_contracts.automation import AutomationAuthError, automation_headers
 from burn_contracts.names import DEMO_TOKEN_HEADER, MAX_PROGRESS_ITEMS
-from swarm_launch import NETWORK, InstanceApi, PersonApi, ProxyCaError, fetch_proxy_ca, image_tag, start_workers
+from swarm_launch import (IMAGE_NAME, NETWORK, InstanceApi, PersonApi, ProxyCaError, fetch_proxy_ca, image_tag,
+                          start_workers)
 
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
@@ -39,6 +42,60 @@ def docker(argv: list[str], env: dict | None = None) -> subprocess.CompletedProc
     if result.returncode:
         sys.exit(f"{' '.join(argv[:3])} failed: {result.stderr.strip()}")
     return result
+
+
+FRESH = timedelta(minutes=10)  # a tag built or tagged this recently may be another checkout's, about to run it
+DOCKER_TIME = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d:\d\d)(\.\d+)?\s*(Z|[+-]\d\d:?\d\d)?")
+
+
+def last_built(inspected: str) -> datetime | None:
+    """The later of an image's Created and Metadata.LastTagTime, as `docker image inspect` prints them, or None.
+
+    Both count: a fully cached build keeps the image's old Created, but giving it a new tag moves LastTagTime.
+    """
+    found = []
+    for value in inspected.strip().split("|"):
+        match = DOCKER_TIME.match(value.strip())
+        if not match:
+            continue
+        day, clock, fraction, zone = match.groups()
+        zone = "+00:00" if zone in (None, "Z") else zone if ":" in zone else f"{zone[:3]}:{zone[3:]}"
+        try:  # at most microseconds: docker prints nanoseconds
+            found.append(datetime.fromisoformat(f"{day}T{clock}{(fraction or '')[:7]}{zone}"))
+        except ValueError:
+            continue
+    return max(found) if found else None
+
+
+def remove_other_images(keep: str, run=subprocess.run, now: datetime | None = None) -> list[str]:
+    """Remove the swarm worker images that older code or other checkouts left behind, keeping `keep`. Returns them.
+
+    Each code change builds a new tag, so they pile up. Left alone: a tag that any container (running or stopped) was
+    created from, since another checkout's swarm still starts its replacements from it (`docker rmi` alone would only
+    refuse an image's last tag; an image with two tags loses one even while a container uses it); and a tag built or
+    tagged in the last ten minutes, which another checkout may be about to run. When docker cannot say, the tag is kept.
+    Nothing is forced.
+    """
+    now = now or datetime.now(timezone.utc)
+    listed = run(["docker", "image", "ls", IMAGE_NAME, "--format", "{{.Repository}}:{{.Tag}}"],
+                 capture_output=True, text=True)
+    if listed.returncode:
+        return []
+    removed = []
+    for tag in listed.stdout.split():
+        if tag == keep or tag.endswith(":<none>"):
+            continue
+        users = run(["docker", "ps", "-a", "-q", "--filter", f"ancestor={tag}"], capture_output=True, text=True)
+        if users.returncode or users.stdout.strip():
+            continue  # in use, or docker could not say: keep it
+        inspected = run(["docker", "image", "inspect", "-f", "{{.Created}}|{{.Metadata.LastTagTime}}", tag],
+                        capture_output=True, text=True)
+        built = None if inspected.returncode else last_built(inspected.stdout)
+        if built is None or now - built < FRESH:
+            continue
+        if run(["docker", "rmi", tag], capture_output=True, text=True).returncode == 0:
+            removed.append(tag)
+    return removed
 
 
 def tail_logs(name: str) -> None:
@@ -124,6 +181,9 @@ def main() -> int:
                               items=args.items)
         task = f", {args.items} item(s) each" if args.items else ""
         print(f"started {len(swarm.names)} worker(s) of role {args.role}{task}; Ctrl-C stops them")
+        removed = remove_other_images(image)  # now: this swarm's containers hold its own image
+        if removed:
+            print(f"removed {len(removed)} unused swarm image(s) built from other code", flush=True)
         follow(swarm.names, swarm.on_exit)
     except KeyboardInterrupt:
         pass

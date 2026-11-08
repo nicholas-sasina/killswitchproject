@@ -152,6 +152,7 @@ def run_main(monkeypatch, *args):
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", *args])
     monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
     monkeypatch.setattr(run_swarm, "fetch_proxy_ca", lambda docker_out, into: captured.setdefault("ca_into", into) and "/fetched/ca")
+    monkeypatch.setattr(run_swarm, "remove_other_images", lambda keep: [])  # never touch this machine's images
     monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(
         kw, api=api, instances=instances) or swarm_launch.Swarm(None, role, docker=None, **{
             k: kw[k] for k in ("api_url", "gateway_url", "mock", "interval", "certs_dir", "image")}))

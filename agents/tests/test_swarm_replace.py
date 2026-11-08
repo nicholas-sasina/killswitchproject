@@ -123,6 +123,7 @@ def test_a_burned_worker_with_a_pending_replacement_is_replaced_once_with_the_sa
     argv, env = docker.runs[-1]
     assert argv[argv.index("--name") + 1] == new and new != old and len(docker.runs) == 2
     assert argv[argv.index(IMAGE) + 1:argv.index(IMAGE) + 3] == ["burn", "run"]  # the image this launcher built
+    assert argv[argv.index("--pull") + 1] == "never"  # and only that: a missing image fails, it is never pulled
     assert json.loads(env["BURN_TASK"]) == OLD_TASK
     assert json.loads(env["BURN_RESUME"]) == {"done": ["w01-item-01", "w01-item-02"], "quarantined": ["w01-item-03"]}
     assert json.loads(env[ADOPT_SECRETS])["session_token"] == "bst_" + "2" * 43  # its own fresh credentials
@@ -227,9 +228,12 @@ def run_main(monkeypatch, *args):
             return None
 
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", "--mock", *args])
+    events = captured.setdefault("events", [])
     monkeypatch.setattr(run_swarm, "docker", lambda argv, env=None: captured.setdefault("built", argv))
     monkeypatch.setattr(run_swarm, "image_tag", lambda: IMAGE)
-    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(kw) or Started())
+    monkeypatch.setattr(run_swarm, "remove_other_images", lambda keep: events.append(("clean", keep)) or [])
+    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: (
+        events.append("start"), captured.update(kw))[0] or Started())
     run_swarm.main()
     return captured
 
@@ -277,3 +281,67 @@ def test_the_image_tag_is_a_hash_of_what_the_image_is_built_from(tmp_path):
     (two / "agents/burn_agents/swarm_worker.py").write_text("w")
     (two / "cli/a.py").rename(two / "cli/c.py")
     assert image_tag(two) != tag  # a rename too
+
+
+# --- removing the images other code left behind -------------------------------------------------------------------
+
+NOW = "2026-11-08T08:00:00+00:00"
+# How `docker image inspect -f '{{.Created}}|{{.Metadata.LastTagTime}}'` prints an image built and tagged long ago.
+LONG_AGO = "2026-11-07T23:27:47.197413016-08:00|2026-11-08 07:27:47.351216437 +0000 UTC"
+
+
+def fake_docker(listing, used=(), refused=(), list_fails=False, times=None):
+    from types import SimpleNamespace
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        if argv[:3] == ["docker", "image", "ls"]:
+            return SimpleNamespace(returncode=1 if list_fails else 0, stdout="".join(f"{tag}\n" for tag in listing))
+        if argv[:2] == ["docker", "ps"]:
+            tag = argv[-1].removeprefix("ancestor=")
+            return SimpleNamespace(returncode=0, stdout="0123abcd\n" if tag in used else "")
+        if argv[:3] == ["docker", "image", "inspect"]:
+            stamp = (times or {}).get(argv[-1], LONG_AGO)
+            return SimpleNamespace(returncode=1 if stamp is None else 0, stdout=f"{stamp}\n" if stamp else "")
+        return SimpleNamespace(returncode=1 if argv[-1] in refused else 0, stdout="")
+
+    return run, calls
+
+
+def remove_other_images(keep, run):
+    from datetime import datetime
+    return run_swarm.remove_other_images(keep, run=run, now=datetime.fromisoformat(NOW))
+
+
+def test_other_swarm_images_are_removed_unless_a_container_uses_them_and_never_forced():
+    old, used, refused = (f"burn-swarm-worker:{c * 12}" for c in "abc")
+    run, calls = fake_docker([IMAGE, old, used, refused, "burn-swarm-worker:<none>"], used=(used,), refused=(refused,))
+    assert remove_other_images(IMAGE, run) == [old]
+    assert calls[0][:4] == ["docker", "image", "ls", "burn-swarm-worker"]
+    # a tag any container (running or stopped) was created from is left alone, even if docker would only untag it
+    assert ["docker", "ps", "-a", "-q", "--filter", f"ancestor={used}"] in calls
+    assert [c for c in calls if c[:2] == ["docker", "rmi"]] == [["docker", "rmi", old], ["docker", "rmi", refused]]
+    assert not any(c[:2] == ["docker", "ps"] and c[-1] == f"ancestor={IMAGE}" for c in calls)  # its own: not even asked
+    assert not any("-f" in c or "--force" in c for c in calls if c[:2] == ["docker", "rmi"])  # never forced
+
+
+def test_a_tag_built_or_tagged_in_the_last_ten_minutes_is_kept_for_the_checkout_about_to_run_it():
+    old, built, tagged, unknown = (f"burn-swarm-worker:{c * 12}" for c in "defa")
+    run, calls = fake_docker([old, built, tagged, unknown], times={
+        built: "2026-11-08T07:55:00.123456789Z|0001-01-01 00:00:00 +0000 UTC",  # built 5 minutes ago
+        # a cached build keeps the image's old Created, but tagging it moves LastTagTime
+        tagged: "2026-11-07T10:00:00Z|2026-11-08 07:58:00.5 +0000 UTC",
+        unknown: None,  # docker could not say: keep it
+    })
+    assert remove_other_images(IMAGE, run) == [old]
+    assert [c[-1] for c in calls if c[:2] == ["docker", "rmi"]] == [old]
+
+
+def test_when_docker_cannot_list_images_nothing_is_removed():
+    run, calls = fake_docker([], list_fails=True)
+    assert remove_other_images(IMAGE, run) == [] and len(calls) == 1
+
+
+def test_the_cleanup_runs_once_the_workers_have_started_and_keeps_their_image(monkeypatch):
+    assert run_main(monkeypatch)["events"] == ["start", ("clean", IMAGE)]
