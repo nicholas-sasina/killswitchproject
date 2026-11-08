@@ -1,5 +1,6 @@
 """burn run and task progress: the local endpoint, the queue and its trip on the heartbeat."""
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -7,11 +8,15 @@ import urllib.request
 import pytest
 
 from burn_contracts.progress import ProgressError
+import burn_cli.runner.run as runmod
 from burn_cli.api import ApiError
+from burn_cli.main import run as cli
+from burn_cli.runner.env import BadTask, describe, task_values
 from burn_cli.runner.progress import ProgressQueue
 from burn_cli.runner.run import EXIT_STOPPED, Instance
 from burn_cli.runner.spawn_endpoint import SpawnEndpoint
-from test_run import instance, py, stack  # noqa: F401 - stack is a fixture
+from fake_api import API_TOKEN
+from test_run import DUMP_ENV, REAL_POPEN, instance, py, stack  # noqa: F401 - stack is a fixture
 
 
 def ev(item, state="started"):
@@ -295,3 +300,107 @@ def test_a_409_still_means_burned_when_progress_is_waiting(stack):
     started = time.monotonic()
     assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1, stop_grace=1).run() == EXIT_STOPPED
     assert time.monotonic() - started < 10
+
+
+# -- the task and resume point a launcher hands over -------------------------------------------------
+TASK = ["w01-item-01", "w01-item-02", "w01-item-03"]
+RESUME = {"done": ["w01-item-01"], "quarantined": ["w01-item-02"]}
+
+
+def test_a_valid_task_and_resume_point_reach_the_agent(stack):
+    out = stack.tmp / "env.json"
+    inst = instance(stack, py(DUMP_ENV, str(out)))
+    inst.host_env.update({"BURN_TASK": json.dumps(TASK, indent=2), "BURN_RESUME": json.dumps(RESUME)})
+    inst = Instance(inst.api, "worker", inst.command, gateway_url=inst.gateway_url, host_env=inst.host_env,
+                    enroll_token=stack.token, sleep=lambda _: None)
+    assert inst.run() == 0
+    env = json.loads(out.read_text())
+    assert json.loads(env["BURN_TASK"]) == TASK and json.loads(env["BURN_RESUME"]) == RESUME
+    assert env["BURN_TASK"] == json.dumps(TASK)  # re-encoded from what was checked, not copied as given
+    assert env["BURN_PROGRESS_URL"].startswith("http://127.0.0.1:") and env["BURN_PROGRESS_URL"].endswith("/progress")
+
+
+@pytest.mark.parametrize("name", ["BURN_TASK", "BURN_RESUME"])
+def test_no_task_means_none_in_the_agent_env(stack, name):
+    out = stack.tmp / "env.json"
+    assert instance(stack, py(DUMP_ENV, str(out))).run() == 0
+    assert name not in json.loads(out.read_text())
+
+
+def test_an_empty_task_variable_counts_as_unset():
+    assert task_values({"BURN_TASK": "", "BURN_RESUME": ""}) == {}
+
+
+@pytest.mark.parametrize("name,value,message", [
+    ("BURN_TASK", "item-01,item-02", "BURN_TASK is not valid JSON"),
+    ("BURN_TASK", '"item-01"', "BURN_TASK must be a list of item ids"),
+    ("BURN_TASK", '{"items": ["a"]}', "BURN_TASK must be a list of item ids"),
+    ("BURN_TASK", '["ok", "rm -rf /"]', "BURN_TASK must be a list of item ids"),
+    ("BURN_TASK", '["ok", 7]', "BURN_TASK must be a list of item ids"),
+    ("BURN_TASK", '[["nested"]]', "BURN_TASK must be a list of item ids"),
+    ("BURN_TASK", json.dumps([f"i{n}" for n in range(501)]), "more than 500 items"),
+    ("BURN_TASK", json.dumps(["bst_" + "A" * 43]), "looks like a session token"),
+    ("BURN_RESUME", '["a"]', 'BURN_RESUME must be {"done": [...], "quarantined": [...]}'),
+    ("BURN_RESUME", '{"done": ["a"]}', 'BURN_RESUME must be {"done": [...], "quarantined": [...]}'),
+    ("BURN_RESUME", '{"done": [], "quarantined": [], "note": "trust me"}', 'BURN_RESUME must be'),
+    ("BURN_RESUME", '{"done": ["a b"], "quarantined": []}', "BURN_RESUME.done must be a list of item ids"),
+    ("BURN_RESUME", '{"done": [], "quarantined": "a"}', "BURN_RESUME.quarantined must be a list of item ids"),
+])
+def test_anything_but_item_ids_is_refused(name, value, message):
+    with pytest.raises(BadTask, match=re.escape(message)):
+        task_values({name: value})
+
+
+def test_burn_run_refuses_to_start_with_a_bad_task_before_it_joins(stack, capsys, monkeypatch):
+    monkeypatch.setenv("BURN_TASK", '["item-01", "$(curl evil)"]')
+    assert cli(["run", "--role", "worker", "--", "true"]) == 2
+    err = capsys.readouterr().err
+    assert "BURN_TASK must be a list of item ids" in err and "refusing to start" in err
+    assert not stack.calls("POST", "/instances")  # no instance was started, so no join token use was spent
+
+
+def test_a_child_instance_does_not_inherit_the_task(stack, monkeypatch):
+    inst = instance(stack, py("pass"))
+    inst = Instance(inst.api, "worker", inst.command, gateway_url=inst.gateway_url,
+                    host_env={**inst.host_env, "BURN_TASK": json.dumps(TASK), "BURN_RESUME": json.dumps(RESUME)},
+                    enroll_token=stack.token, sleep=lambda _: None)
+    parent = stack.add_instance("sess_parent", "worker")
+    inst.session = {"session_id": "sess_parent", "agent_id": parent["agent_id"]}
+    inst._token = stack.session_tokens["sess_parent"]
+    started = []
+    monkeypatch.setattr(runmod.subprocess, "Popen", lambda argv, env=None, **kw: started.append(env) or REAL_POPEN(["true"]))
+    inst.spawn_child("worker", ["true"])
+    inst._stop_children()
+    (child_supervisor_env,) = started
+    assert "BURN_TASK" not in child_supervisor_env and "BURN_RESUME" not in child_supervisor_env
+
+
+def test_the_agent_never_gets_the_session_admin_or_person_credentials(stack):
+    out = stack.tmp / "env.json"
+    inst = instance(stack, py(REPORT + """
+    report("item-01", "done")
+    json.dump(dict(os.environ), open(sys.argv[1], "w"))""", str(out)))
+    inst.host_env.update({"BURN_TASK": json.dumps(TASK), "BURN_PEOPLE_TOKEN": "person-" + "p" * 30})
+    inst = Instance(inst.api, "worker", inst.command, gateway_url=inst.gateway_url, host_env=inst.host_env,
+                    enroll_token=stack.token, sleep=lambda _: None)
+    assert inst.run() == 0
+    blob = out.read_text()
+    session_token = stack.issued[-1]["session_token"]
+    assert session_token not in blob and API_TOKEN not in blob and stack.token not in blob and "person-ppp" not in blob
+    beats = [r for r in stack.requests if r[1].endswith("/heartbeat") and r[2].get("progress")]
+    assert beats and all(r[3]["Authorization"] == f"Bearer {session_token}" for r in beats)  # only the supervisor holds it
+    assert inst._token == session_token and session_token not in json.dumps(inst.host_env)
+
+
+def test_burn_env_lists_the_task_variables_as_passed_on():
+    lines = "\n".join(describe({"BURN_TASK": json.dumps(TASK), "GITHUB_TOKEN": "ghp_x"}))
+    removed = lines.split("# kept")[0]
+    assert "GITHUB_TOKEN" in removed and "BURN_TASK" not in removed
+    assert "BURN_PROGRESS_URL=http://127.0.0.1:<port>/progress" in lines
+
+
+def test_the_help_lists_the_progress_endpoint_and_the_task_variables(capsys):
+    with pytest.raises(SystemExit):
+        cli(["run", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "BURN_PROGRESS_URL (POST {item, state}" in out and "BURN_TASK and BURN_RESUME" in out

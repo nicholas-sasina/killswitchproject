@@ -15,7 +15,7 @@ from .. import retry
 from ..api import ApiError
 from .badge import BadgeToken
 from . import credentials as creds_mod
-from .env import child_env
+from .env import TASK_NAMES, child_env, task_values
 from .instance_api import InstanceApi
 from .mcp_proxy import McpProxy
 from . import privs
@@ -44,6 +44,9 @@ class Instance:
         self._token = ""  # this instance's session token: supervisor memory only, never in the agent's env or argv
         self.gateway_url, self.host_env = gateway_url, dict(os.environ if host_env is None else host_env)
         self.host_env.pop("BURN_DEMO_TOKEN", None)  # an instance never uses the admin token, nor passes it on
+        self._task = task_values(self.host_env)  # raises BadTask before anything starts
+        for name in TASK_NAMES:  # the task is this instance's: a child it spawns gets none
+            self.host_env.pop(name, None)
         self.enroll_token, self.session, self.proxy_url = enroll_token, session, proxy_url
         self.heartbeat_every, self.min_gap, self.stop_grace, self._sleep = heartbeat_every, min_heartbeat_gap, stop_grace, sleep
         self._activity, self._done = threading.Event(), threading.Event()
@@ -134,7 +137,7 @@ class Instance:
         cleanups.append(lambda: shutil.rmtree(home, ignore_errors=True))  # last, so nothing recreates it behind us
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
                         spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token,
-                        progress_url=spawn.progress_url)
+                        progress_url=spawn.progress_url, task=self._task)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,

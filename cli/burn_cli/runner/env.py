@@ -1,8 +1,9 @@
 """The environment an agent process gets: an allow-list of the host's, plus its own values."""
+import json
 import re
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from burn_contracts.names import PROGRESS_URL_ENV
+from burn_contracts.names import MAX_PROGRESS_ITEMS, PROGRESS_URL_ENV, RESUME_ENV, TASK_ENV, is_item_id
 
 # The agent's environment is an allow-list: a variable reaches it only if it is listed here. A deny-list has to
 # know every credential name (PGPASSWORD, MYSQL_PWD, SENTRY_DSN, a proxy URL with a password in it...) and misses some.
@@ -21,6 +22,49 @@ LOOPBACK = "127.0.0.1,localhost"
 # A session token (bst_...) authenticates the supervisor's own calls. It must never be in the agent's environment,
 # whatever variable it is in, so this is checked by pattern on top of the allow-list.
 SESSION_TOKEN = re.compile(r"bst_[A-Za-z0-9_-]{43}")
+
+
+# The task a launcher hands an instance, and where a replacement resumes it. Neither is a secret, but both reach
+# the agent only after they are checked to hold item ids and nothing else (no free text, no session token).
+TASK_NAMES = (TASK_ENV, RESUME_ENV)
+
+
+class BadTask(ValueError):
+    """BURN_TASK or BURN_RESUME holds something other than item ids, so burn run refuses to start."""
+
+
+def _json(raw: str, name: str):
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise BadTask(f"{name} is not valid JSON") from None
+
+
+def _item_ids(value, name: str) -> list[str]:
+    if not isinstance(value, list) or not all(is_item_id(item) for item in value):
+        raise BadTask(f"{name} must be a list of item ids (each matching ^[A-Za-z0-9_.:-]{{1,64}}$)")
+    if len(value) > MAX_PROGRESS_ITEMS:
+        raise BadTask(f"{name} has more than {MAX_PROGRESS_ITEMS} items, the most one instance can report")
+    if any(SESSION_TOKEN.search(item) for item in value):
+        raise BadTask(f"{name} holds something that looks like a session token")
+    return value
+
+
+def task_values(host_env: dict) -> dict:
+    """BURN_TASK and BURN_RESUME for the agent, re-encoded from what was checked. Empty or unset: not passed on.
+
+    BURN_TASK is a JSON list of item ids; BURN_RESUME is {"done": [ids], "quarantined": [ids]}.
+    """
+    out = {}
+    if raw := host_env.get(TASK_ENV):
+        out[TASK_ENV] = json.dumps(_item_ids(_json(raw, TASK_ENV), TASK_ENV))
+    if raw := host_env.get(RESUME_ENV):
+        resume = _json(raw, RESUME_ENV)
+        if not isinstance(resume, dict) or set(resume) != {"done", "quarantined"}:
+            raise BadTask(f'{RESUME_ENV} must be {{"done": [...], "quarantined": [...]}} with item ids only')
+        out[RESUME_ENV] = json.dumps({key: _item_ids(resume[key], f"{RESUME_ENV}.{key}")
+                                      for key in ("done", "quarantined")})
+    return out
 
 
 def is_scrubbed(name: str) -> bool:
@@ -45,7 +89,8 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
-              proxy_base: str = "", home: str = "", local_token: str = "", progress_url: str = "") -> dict:
+              proxy_base: str = "", home: str = "", local_token: str = "", progress_url: str = "",
+              task: dict | None = None) -> dict:
     """Everything the agent process runs with: the allow-listed host environment plus its own values."""
     env = scrub(host_env)
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
@@ -58,6 +103,7 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
         env["BURN_LOCAL_TOKEN"] = local_token
     if progress_url:
         env[PROGRESS_URL_ENV] = progress_url
+    env.update(task or {})  # only what task_values checked; scrub() already removed the host's own copies
     if credentials.aws_access_key_id:
         env["AWS_ACCESS_KEY_ID"] = credentials.aws_access_key_id
         env["AWS_SECRET_ACCESS_KEY"] = credentials.aws_secret_access_key
@@ -78,8 +124,8 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
 
 def describe(host_env: dict, proxy_base: str = "", show: bool = False) -> list[str]:
     """Lines for `burn env`: what an instance's environment would contain, without starting one."""
-    removed = sorted(k for k in host_env if is_scrubbed(k))
-    kept = sorted(k for k in host_env if not is_scrubbed(k))
+    removed = sorted(k for k in host_env if is_scrubbed(k) and k not in TASK_NAMES)
+    kept = sorted(k for k in host_env if not is_scrubbed(k) or k in TASK_NAMES)
     lines = ["# removed from the host environment (names only)"]
     lines += [f"  {k}" for k in removed] or ["  (none)"]
     lines += ["", "# kept from the host" + ("" if show else " (values hidden; use --show)")]
@@ -89,6 +135,7 @@ def describe(host_env: dict, proxy_base: str = "", show: bool = False) -> list[s
               "  BURN_MCP_URL=http://127.0.0.1:<port>/...  (adds the badge token; the agent never sees the badge)",
               "  BURN_SPAWN_URL=http://127.0.0.1:<port>/spawn",
               f"  {PROGRESS_URL_ENV}=http://127.0.0.1:<port>/progress  (POST {{item, state}}: task progress)",
+              f"  {TASK_ENV} / {RESUME_ENV}=<passed on from the host when set, if they hold item ids only>",
               "  BURN_LOCAL_TOKEN=<random per run; the bearer both local endpoints require>",
               "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY=<its own AWS key>",
               "  BURN_API_KEY=<its own provider key>"]
