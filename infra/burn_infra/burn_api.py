@@ -67,6 +67,9 @@ class BurnApiStack(cdk.Stack):
             resources=[table_arn(names.EVENTS_TABLE), f"{table_arn(names.EVENTS_TABLE)}/index/by_agent"]))
         role.add_to_policy(iam.PolicyStatement(  # Scan: a canary incident checks no other agent holds it
             actions=["dynamodb:Query", "dynamodb:Scan"], resources=[table_arn(names.EXPOSURES_TABLE)]))
+        role.add_to_policy(iam.PolicyStatement(  # POST /burn/by-source
+            actions=["dynamodb:Query"],
+            resources=[f"{table_arn(names.EXPOSURES_TABLE)}/index/{names.EXPOSURES_BY_SOURCE_INDEX}"]))
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:{names.DEMO_TOKEN_SECRET}-*"],
