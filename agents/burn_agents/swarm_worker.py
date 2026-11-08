@@ -20,6 +20,22 @@ Call = Callable[[str, dict], Awaitable[tuple[bool, str]]]  # (tool, arguments) -
 MAX_CONSECUTIVE_FAILURES = 5
 
 
+def root_cause(exc: BaseException) -> str:
+    """The first underlying error, so an ExceptionGroup from the MCP client's task group explains itself.
+
+    Class and message only; the message of a connection error names a URL or status, never a credential.
+    """
+    seen = set()
+    while id(exc) not in seen:
+        seen.add(id(exc))
+        children = getattr(exc, "exceptions", None)
+        nxt = children[0] if children else exc.__cause__ or exc.__context__
+        if nxt is None:
+            break
+        exc = nxt
+    return f"{type(exc).__name__}: {str(exc)[:200]}"
+
+
 def start_offset(agent_id: str, interval: float) -> float:
     """Spread workers over one interval without randomness: the same agent id always starts at the same point."""
     return int(hashlib.sha256(agent_id.encode()).hexdigest()[:4], 16) / 0xFFFF * interval
@@ -41,7 +57,7 @@ async def work(call: Call, *, tool: str, interval: float, calls: int = 0, offset
                 log.info("badge revoked, stopping")
                 return 0
             failures += 1
-            log.warning("gateway call failed (%s): %s", failures, exc.__class__.__name__)
+            log.warning("gateway call failed (%s): %s", failures, root_cause(exc))
             if failures >= MAX_CONSECUTIVE_FAILURES:
                 return 1
         else:
@@ -95,7 +111,7 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         if is_refusal_text(str(exc)):
             return 0
-        log.error("stopping: %s", exc.__class__.__name__)
+        log.error("stopping: %s", root_cause(exc))
         return 1
 
 
