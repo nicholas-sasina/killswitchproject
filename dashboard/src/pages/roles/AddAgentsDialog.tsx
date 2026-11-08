@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import type { Role } from "../../contracts";
 import { AddAgent } from "./AddAgent";
+import { rememberToken } from "./tokens";
 
 export interface AddAgentsDialogProps {
   /** Mint a join token for this existing role; otherwise create a role. */
@@ -37,6 +38,7 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
       role={target}
       joinUrls={joinUrls}
       onCreated={() => refreshRoles()}
+      onToken={rememberToken}
       onClose={onClose}
     />
   );

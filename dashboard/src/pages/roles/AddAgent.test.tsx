@@ -16,6 +16,7 @@ import { createApi, type ApiConfig } from "../../api";
 import type { Instance, Role } from "../../contracts";
 import { ConsoleDataProvider, useConsole } from "../../data/ConsoleData";
 import { AddAgentsDialog } from "./AddAgentsDialog";
+import { forgetTokens, knownTokens } from "./tokens";
 
 const API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com";
 const GATEWAY_URL =
@@ -164,6 +165,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  forgetTokens();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -244,6 +246,11 @@ describe("agent enrollment", () => {
     expect(screen.getByText(/token will not be shown again/)).toBeTruthy();
     await click("Copy token");
     expect(writeText).toHaveBeenCalledWith(fixture.tokens[0]);
+    // The role page learns the token's record, never the token.
+    expect(knownTokens().map((token) => token.token_id)).toEqual([
+      fixture.tokens[0].slice(4, 20),
+    ]);
+    expect(JSON.stringify(knownTokens())).not.toContain(fixture.tokens[0]);
     await click("Continue to waiting");
     expect(screen.queryByRole("region", { name: "Join commands" })).toBeNull();
     expect(screen.queryByText(fixture.tokens[0])).toBeNull();

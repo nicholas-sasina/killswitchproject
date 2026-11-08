@@ -7,11 +7,12 @@ import {
 } from "react";
 import toolContract from "../../../../contracts/mcp-tools.json";
 import type { BurnApi } from "../../api";
-import type { Instance, Role, RoleSpec } from "../../contracts";
+import type { EnrollToken, Instance, Role, RoleSpec } from "../../contracts";
 import { CONNECT_GUIDE_URL, joinCommands, type JoinUrls } from "../../join";
 import { roleHref } from "../../router";
 import { Dialog, Notice } from "../../ui";
 import { rolePlural } from "./model";
+import { tokenRecord } from "./tokens";
 import "./add-agents.css";
 
 const rolePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -142,6 +143,7 @@ export function AddAgent({
   suggestedName,
   joinUrls,
   onCreated,
+  onToken,
   onClose,
 }: {
   api: BurnApi;
@@ -159,6 +161,8 @@ export function AddAgent({
   template?: Role;
   suggestedName?: string;
   onCreated: (role: Role) => void;
+  /** The new token's record: never the token itself. */
+  onToken?: (record: EnrollToken) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(role?.name ?? suggestedName ?? "");
@@ -279,6 +283,7 @@ export function AddAgent({
         uses: tokenUses,
         ttl: tokenTtl,
       });
+      onToken?.(tokenRecord(token));
       setJoin({
         role: target.name,
         tokenId: token.token_id,
