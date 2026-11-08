@@ -7,7 +7,7 @@ from time import monotonic, time
 import boto3
 
 from burn_contracts import names
-from burn_contracts.events import make_event
+from burn_contracts.events import for_storage, make_event
 from burn_contracts.fingerprint import key_from_hex
 
 
@@ -67,5 +67,5 @@ class AwsState:
 
     def emit(self, *, agent_id: str, action: str, **fields) -> str:
         event = make_event(agent_id=agent_id, source="egress", action=action, **fields)
-        self.events.put_item(Item={"stream": names.EVENTS_STREAM, **event})
+        self.events.put_item(Item={"stream": names.EVENTS_STREAM, **for_storage(event)})
         return event["event_id"]

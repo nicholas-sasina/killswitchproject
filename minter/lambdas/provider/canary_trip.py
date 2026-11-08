@@ -19,7 +19,7 @@ later outside presentation. The provider never revokes anything itself.
 import logging
 
 import boto3
-from burn_contracts.events import make_event, utc_now_iso
+from burn_contracts.events import for_storage, make_event, utc_now_iso
 from burn_contracts.names import CREDENTIALS_TABLE, EVENTS_STREAM, EVENTS_TABLE, REGION, is_agent_id
 
 import dispatch
@@ -33,7 +33,7 @@ def _table(name: str):
 
 
 def _put_event(event: dict) -> None:
-    _table(EVENTS_TABLE).put_item(Item={"stream": EVENTS_STREAM, **event})
+    _table(EVENTS_TABLE).put_item(Item={"stream": EVENTS_STREAM, **for_storage(event)})
 
 
 def _count_presentation(secret_ref: str, origin: str, event_id: str) -> dict | None:

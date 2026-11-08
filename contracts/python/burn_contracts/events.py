@@ -91,3 +91,49 @@ def make_event(*, agent_id: str, source: str, action: str, **fields) -> dict:
     for name in OPTIONAL_FIELDS:
         event[name] = fields.get(name)
     return event
+
+
+# --- storage representation -------------------------------------------------
+# A stored event row is the event make_event() built, with every optional field
+# present (None where unused, a DynamoDB NULL), plus one storage attribute: a
+# TTL so DynamoDB expires the row. Every field stays because readers of the raw
+# row rely on it: the notifications Pipe maps each field it forwards from the
+# stream's NewImage, and a missing attribute would reach it as an empty string.
+#
+# for_storage() adds the TTL and from_storage() takes it off again, so what the
+# API returns is unchanged. The TTL lives only in the stored row: the schema
+# sets additionalProperties: false, so it cannot be a field of the event.
+
+#: Numeric epoch-seconds attribute DynamoDB uses to expire a row. Distinct
+#: from the ISO `expires_at` on enroll tokens, which is an application check.
+TTL_ATTRIBUTE = "ttl_epoch"
+
+#: How long a ledger event is kept. Long enough that no demo, eval run or
+#: post-mortem loses history; short enough that the table does not grow
+#: without bound. Rows written before TTL was enabled have no TTL attribute
+#: and are never expired, so enabling this cannot delete existing history.
+EVENT_RETENTION_DAYS = 30
+
+
+def ttl_epoch(days: int, now: float | None = None) -> int:
+    """Epoch seconds `days` from now, for a DynamoDB TTL attribute."""
+    import time
+
+    return int((time.time() if now is None else now) + days * 86400)
+
+
+def for_storage(event: dict, retention_days: int = EVENT_RETENTION_DAYS) -> dict:
+    """The row to write: every field of the event, None ones included, plus a TTL."""
+    return {**event, TTL_ATTRIBUTE: ttl_epoch(retention_days)}
+
+
+def from_storage(row: dict) -> dict:
+    """The event as callers expect it: TTL gone, every optional field present.
+
+    A row from an older contract, before a field existed, or from a writer that
+    left None fields out, still reads back as a full event.
+    """
+    event = {key: value for key, value in row.items() if key != TTL_ATTRIBUTE}
+    for name in OPTIONAL_FIELDS:
+        event.setdefault(name, None)
+    return event

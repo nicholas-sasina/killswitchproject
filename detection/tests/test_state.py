@@ -1,11 +1,14 @@
 from collections import OrderedDict
 from decimal import Decimal
 import secrets
+import time
 from unittest.mock import Mock
 
 import pytest
 pytest.importorskip("boto3")
 
+from burn_contracts import names
+from burn_contracts.events import EVENT_RETENTION_DAYS, OPTIONAL_FIELDS, TTL_ATTRIBUTE
 from proxy.state import AwsState
 
 
@@ -57,3 +60,17 @@ def test_fingerprint_refresh_paginates_and_does_not_reuse_stale_cache_on_failure
     state.fingerprints.scan.side_effect = RuntimeError("dependency unavailable")
     with pytest.raises(RuntimeError):
         state.lookup({fp})
+
+
+def test_an_egress_event_is_stored_like_every_other_event():
+    state = AwsState.__new__(AwsState)
+    state.events = Mock()
+    agent = "agent-" + secrets.token_hex(4)
+    event_id = state.emit(agent_id=agent, action="blocked", session_id=secrets.token_hex(8),
+                          destination="paste.example", detail="credential in request body")
+    [call] = state.events.put_item.call_args_list
+    row = call.kwargs["Item"]
+    assert row["stream"] == names.EVENTS_STREAM and row["event_id"] == event_id and row["source"] == "egress"
+    assert set(OPTIONAL_FIELDS) <= set(row) and row["flag_level"] is None  # unused fields are kept
+    ttl = row[TTL_ATTRIBUTE]  # so DynamoDB expires egress events too
+    assert type(ttl) is int and abs(ttl - (time.time() + EVENT_RETENTION_DAYS * 86400)) < 60

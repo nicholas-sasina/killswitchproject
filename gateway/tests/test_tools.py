@@ -1,11 +1,14 @@
 """Mock tool handlers against moto DynamoDB and Secrets Manager."""
 import json
 import secrets
+import time
 from types import SimpleNamespace
 
 import boto3
 import pytest
+import store
 import tools
+from burn_contracts.events import EVENT_RETENTION_DAYS, TTL_ATTRIBUTE
 
 
 def context(tool: str):
@@ -88,6 +91,21 @@ def test_messages_use_the_injected_caller_and_inbox_clears(aws):
     assert call("read_inbox", caller="agent-beta")["messages"][0] | {"ts": None} == \
         {"from": "agent-alpha", "text": "hello", "ts": None}
     assert call("read_inbox", caller="agent-beta")["messages"] == []
+
+
+def test_stored_messages_expire_but_a_read_never_returns_the_ttl(aws):
+    # The TTL only reclaims mail a burned agent never collected. It is a Decimal
+    # once read back, so it must not reach the JSON tool payload.
+    call("send_message", caller="agent-alpha", to="agent-beta", text="hello")
+    call("notify", caller="agent-alpha", channel="email:dana@example.com", text="fixed")
+    for item in aws.Table("burn-messages").scan()["Items"]:
+        assert item[TTL_ATTRIBUTE] > time.time() + (EVENT_RETENTION_DAYS - 1) * 86400
+
+    [taken] = store.take_messages("agent-beta")
+    assert TTL_ATTRIBUTE not in taken and taken["text"] == "hello"
+    json.dumps(taken)
+    assert aws.Table("burn-messages").get_item(
+        Key={"to_agent": "agent-beta", "msg_id": taken["msg_id"]}).get("Item") is None
 
 
 def test_notify_goes_to_the_outbox(aws):

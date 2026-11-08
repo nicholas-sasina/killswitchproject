@@ -10,6 +10,7 @@ import functools
 import time
 
 import boto3
+from burn_contracts.events import for_storage
 from burn_contracts.names import EVENTS_STREAM, EVENTS_TABLE, REGION, SESSIONS_TABLE
 
 # GSIs are eventually consistent: a brand-new session can take a moment to
@@ -59,4 +60,5 @@ def session_for_client(client_id: str) -> dict | None:
 
 def put_event(event: dict) -> None:
     """Store an event built by burn_contracts.events.make_event."""
-    _dynamodb().Table(EVENTS_TABLE).put_item(Item={"stream": EVENTS_STREAM, **event})
+    _dynamodb().Table(EVENTS_TABLE).put_item(
+        Item={"stream": EVENTS_STREAM, **for_storage(event)})
