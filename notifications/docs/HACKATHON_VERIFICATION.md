@@ -66,7 +66,7 @@ metrics, alarms, logs) and SNS.
 | Containment summary | PASS | end to end | It reports only results recorded since the revoke ("Rotated where confirmed (1)"); a failed rotation produced a CRITICAL "NOT rotated (rotation failed)" |
 | Stream survives normal deploys | PASS | deployed | #120 merged; `cdk diff BurnData` from `main` showed "There were no differences"; stream enabled |
 | Live retries and DLQ | PASS (Retry-After not tested live) | deployed, isolated | See "Retry and DLQ" below |
-| Alarm notifications | PASS | deployed | SNS email subscription confirmed; an `ALARM: "burn-notify-queue-age"` email arrived at 09:21:25 (the alarm state was set by test, then returned to OK) |
+| Alarm notifications | PASS | deployed | SNS email subscription confirmed. An `ALARM: "burn-notify-queue-age"` email arrived at 09:21:25 (state set by test). Separately, at 09:24:01 an `ALARM: "burn-notify-permanent-failures"` email arrived from a **real metric**: the isolated DLQ test's deliberate permanent failure. Both alarms were back to OK afterwards |
 | Secret redaction | PASS | local, deployed | Fake secret markers in every sensitive field never appeared in any payload or stored provider copy; Lambda logs had 0 webhook or token strings |
 | Manual Burn on live AWS | BLOCKED | n/a | Needs a signed-in operator (people sign-in is on); deferred by the workstream owner |
 | Automatic canary containment on live AWS | BLOCKED | n/a | The deployed Gateway never puts a session's canary in tool output. The minimal fix is PR #124 (awaiting owner approval) |
@@ -100,7 +100,10 @@ not resolve, so the failure was controlled and reached no real provider.
 | 09:23:16 | 3 (+7 s backoff) | skipped | `permanently_failed: retries_exhausted`; `PermanentFailure` metric; moved to the DLQ |
 | 09:25:03 | redrive from the DLQ | skipped, so no duplicate post | skipped (already failed); message deleted |
 
-The production queue and providers were never touched. Retry-After handling was verified only in the
+The production queue and providers were never touched. The test Lambda published to the same
+`Burn/Notifications` metric namespace, so its permanent failure also tripped the production
+`burn-notify-permanent-failures` alarm (email at 09:24:01). The alarm worked, but isolated tests should
+set `BURN_NOTIFY_METRICS=0`, or use their own namespace, to avoid false alarms. Retry-After handling was verified only in the
 real-socket tests (429 with Retry-After, then success).
 
 ## Safeguards
