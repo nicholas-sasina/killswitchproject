@@ -132,8 +132,7 @@ def put_session(dynamodb, agent_id="agent-alpha", status="active",
 
 
 def events(dynamodb) -> list[dict]:
-    """Stored events as callers see them: storage bookkeeping (the TTL) removed
-    and omitted optional fields restored, which is what the Burn API returns."""
+    """Stored events as callers see them, without the TTL, which is what the Burn API returns."""
     return [from_storage(item) for item in dynamodb.Table("burn-events").scan()["Items"]]
 
 
