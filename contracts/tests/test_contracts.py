@@ -353,3 +353,19 @@ def test_references_role_field_ledger_fields_and_by_source_route():
     assert "/burn/by-source" in api["paths"]
     assert names.FINGERPRINTS_VERSION_KEY == "_version" and len(names.FINGERPRINTS_VERSION_KEY) != 64
     assert names.EXPOSURES_BY_SOURCE_INDEX == "by_source"
+
+
+@pytest.mark.parametrize("spec", ["burn-api.openapi.yaml", "leaktest.openapi.yaml"])
+def test_specs_have_no_duplicate_yaml_keys(spec):
+    """A repeated key makes YAML keep only the last one, silently dropping the first (e.g. a path's GET)."""
+    class Strict(yaml.SafeLoader):
+        pass
+
+    def mapping(loader, node):
+        keys = [loader.construct_object(k) for k, _ in node.value]
+        dupes = {k for k in keys if keys.count(k) > 1}
+        assert not dupes, f"{spec}: duplicate keys {sorted(map(str, dupes))}"
+        return loader.construct_mapping(node)
+
+    Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    yaml.load((ROOT / spec).read_text(), Loader=Strict)
