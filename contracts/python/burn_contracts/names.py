@@ -40,6 +40,9 @@ MINTER_FUNCTION = "burn-minter"
 # The BurnApi stack publishes the API's address here: https://<api id>.execute-api.<region>.amazonaws.com,
 # an origin with no path or trailing slash.
 API_URL_PARAM = "/burn/api/url"
+# The BurnGateway stack publishes the AgentCore Gateway's MCP endpoint here. `burn run` connects agents to
+# it (BURN_GATEWAY_URL), so the dashboard's join commands set it too.
+GATEWAY_URL_PARAM = "/burn/gateway/url"
 
 # Header the Burn API accepts as the admin credential. Until people sign-in is switched on for a
 # stack (PEOPLE_AUTH_ENV="1" on the API) it works as before. From then on it is local development

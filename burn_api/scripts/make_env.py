@@ -59,8 +59,10 @@ def render(values: dict[str, str], keys: list[str], rename: dict[str, str] | Non
 
 
 def dashboard_env(values: dict[str, str]) -> str:
-    """The dashboard signs people in once the stack requires it; until then it uses the admin token."""
-    keys = ["BURN_API_URL", "BURN_PEOPLE_DOMAIN", "BURN_PEOPLE_CLIENT_ID"]
+    """The dashboard signs people in once the stack requires it; until then it uses the admin token.
+
+    The gateway URL is not for the dashboard to call: its join commands show it, because burn run needs it."""
+    keys = ["BURN_API_URL", "BURN_GATEWAY_URL", "BURN_PEOPLE_DOMAIN", "BURN_PEOPLE_CLIENT_ID"]
     if values.get("BURN_PEOPLE_ENABLED") != "on":
         keys.append("BURN_DEMO_TOKEN")  # the deployed API ignores it once sign-in is on, so never ship it then
     return render(values, keys, {key: "VITE_" + key for key in keys})

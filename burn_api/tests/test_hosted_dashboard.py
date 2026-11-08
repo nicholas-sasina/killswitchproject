@@ -163,6 +163,28 @@ def test_build_uses_the_deployed_values_and_blanks_the_token_in_the_process_env(
         assert local_token not in "".join(env.values())
 
 
+GATEWAY = "https://gw-1.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
+
+
+def test_build_sets_the_gateway_url_from_ssm_for_the_join_commands(tmp_path, capsys):
+    run, calls = fake_npm()
+    ssm = FakeSsm({**SIGNED_IN, names.GATEWAY_URL_PARAM: GATEWAY})
+    hosted_dashboard.build(ssm, FakeSecrets(None), make_repo(tmp_path, token()), run)
+    assert [env["VITE_BURN_GATEWAY_URL"] for _, _, env in calls] == [GATEWAY, GATEWAY]
+    assert capsys.readouterr().err == ""
+
+
+def test_build_without_a_gateway_url_blanks_it_and_says_so(tmp_path, monkeypatch, capsys):
+    # A value from this shell (or, through Vite, from .env.local) must not reach the hosted build.
+    monkeypatch.setenv("VITE_BURN_GATEWAY_URL", "http://localhost:8701/mcp")
+    run, calls = fake_npm()
+    hosted_dashboard.build(FakeSsm(SIGNED_IN), FakeSecrets(None), make_repo(tmp_path, token()), run)
+    assert [command for command, _, _ in calls] == [["npm", "ci"], ["npm", "run", "build"]]  # still built
+    assert [env["VITE_BURN_GATEWAY_URL"] for _, _, env in calls] == ["", ""]
+    err = capsys.readouterr().err
+    assert names.GATEWAY_URL_PARAM in err and "BURN_GATEWAY_URL" in err
+
+
 def test_build_fails_when_the_bundle_still_holds_a_token(tmp_path, monkeypatch, capsys):
     local_token = token()
     repo = make_repo(tmp_path, local_token)

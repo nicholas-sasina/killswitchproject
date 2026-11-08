@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import toolContract from "../../../contracts/mcp-tools.json";
 import { createApi } from "../api";
 import type { Instance, Role } from "../contracts";
+import type { JoinUrls } from "../join";
 import { SwarmPanel } from "./SwarmPanel";
 import { roleLineage } from "./InstanceLineage";
 
@@ -131,10 +132,16 @@ function setup(
   return { state, tokens, api, fetcher, calls };
 }
 
-async function show(fixture: ReturnType<typeof setup>, enabled = true) {
+async function show(
+  fixture: ReturnType<typeof setup>,
+  enabled = true,
+  joinUrls?: JoinUrls,
+) {
   let view!: ReturnType<typeof render>;
   await act(async () => {
-    view = render(<SwarmPanel api={fixture.api} enabled={enabled} />);
+    view = render(
+      <SwarmPanel api={fixture.api} enabled={enabled} joinUrls={joinUrls} />,
+    );
   });
   return view;
 }
@@ -423,6 +430,62 @@ describe("agent enrollment", () => {
     await click("Copy token");
     expect(writeText).toHaveBeenCalledExactlyOnceWith(fixture.tokens[0]);
     expect(screen.queryByRole("button", { name: "Copy command" })).toBeNull();
+  });
+
+  const API_URL = "https://abc123.execute-api.us-east-1.amazonaws.com";
+  const GATEWAY_URL =
+    "https://gw-1.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp";
+
+  async function joinSnippets(joinUrls: JoinUrls) {
+    const fixture = setup([role("worker")]);
+    await show(fixture, true, joinUrls);
+    await click("New token for worker");
+    await click("Create token");
+    const commands = screen.getByRole("region", { name: "Join commands" });
+    const snippets = within(commands)
+      .getAllByRole("code")
+      .map((snippet) => snippet.textContent ?? "");
+    return { fixture, commands, snippets };
+  }
+
+  it("sets the API and gateway URLs in both join commands, and never the token", async () => {
+    const { fixture, snippets } = await joinSnippets({
+      api: API_URL,
+      gateway: GATEWAY_URL,
+    });
+    const exports = `export BURN_API_URL=${API_URL}\nexport BURN_GATEWAY_URL=${GATEWAY_URL}\n`;
+    expect(snippets).toEqual([
+      `${exports}read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN   # paste the token, press Enter\nburn run --role worker -- <your agent command>`,
+      `${exports}pbpaste | burn run --role worker --token-stdin -- <your agent command>`,
+    ]);
+    for (const snippet of snippets) {
+      expect(snippet).not.toContain(fixture.tokens[0]);
+      expect(snippet).not.toContain("--token ");
+    }
+  });
+
+  it("leaves the gateway line out of both commands when it is not configured", async () => {
+    const { snippets } = await joinSnippets({ api: API_URL, gateway: "" });
+    expect(snippets).toHaveLength(2);
+    for (const snippet of snippets) {
+      expect(snippet.startsWith(`export BURN_API_URL=${API_URL}\n`)).toBe(true);
+      expect(snippet).not.toContain("BURN_GATEWAY_URL");
+    }
+  });
+
+  it("links to the CLI's Connect your agent section in a new tab, so the token stays on screen", async () => {
+    const { commands } = await joinSnippets({
+      api: API_URL,
+      gateway: GATEWAY_URL,
+    });
+    const guide = within(commands).getByRole("link", {
+      name: "Connect your agent",
+    });
+    expect(guide.getAttribute("href")).toBe(
+      "https://github.com/nicholas-sasina/killswitchproject/blob/main/cli/README.md#connect-your-agent",
+    );
+    expect(guide.getAttribute("target")).toBe("_blank");
+    expect(guide.getAttribute("rel")).toContain("noopener");
   });
 });
 
