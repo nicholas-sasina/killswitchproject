@@ -47,6 +47,10 @@ Start sessions with `POST /sessions` and an `agent_id` from the loaded scenario;
 For a swarm, create a role (`POST /roles`), a join token (`POST /roles/<name>/tokens`), then start
 instances with `POST /sessions {role, enroll_token}` or spawn children with `{role, parent_session}`.
 Scenario agents appear in `GET /roles` as read-only roles with one instance.
+To try replace on burn, create the role with `"replace_on_burn": true`, send progress on an
+instance's heartbeat (`{"progress": [{"item": "w01-item-01", "state": "done"}]}`), burn it with
+`POST /burns {"scope": "instance", "id": <session_id>}`, then join a fresh instance and link it with
+`POST /instances/<old>/replace {"session_id": <new>}`. `GET /instances/<session_id>` shows the result.
 Use `Authorization: Bearer mock-<agent_id>` for MCP calls. Tool and `send_to` permissions come from
 the scenario. `POST /mock/revoke/<agent_id>` makes later MCP calls return an MCP error.
 
@@ -70,6 +74,10 @@ counts are simulated, no traffic leaves the machine, and the result is explicitl
 
 **Does an API burn revoke the standalone MCP server?** Each process has separate memory. Use
 the MCP revoke endpoint to exercise that server's badge checks. These mocks are development tools.
+
+**Where does the mock's replacement cut-off come from?** The mock has no breach evidence, so it
+always cuts off at the burn time (`cutoff_source: burn_time`). Which items count as done or
+quarantined is decided by the same shared rules the real API uses (`burn_contracts.progress`).
 
 **Can product code import these helpers?** No. Only development mocks and their tests use this folder;
 real components use the contracts and their configured service URLs.

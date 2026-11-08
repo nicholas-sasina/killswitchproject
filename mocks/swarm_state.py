@@ -9,14 +9,16 @@ import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from burn_contracts import progress as task_progress
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import (
-    SESSION_TOKEN_PREFIX, SESSION_TOKEN_RE, agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token,
-    scenario_role_name,
+    MAX_REPLACEMENT_GENERATION, SESSION_TOKEN_PREFIX, SESSION_TOKEN_RE, agent_secret_ref, instance_agent_id,
+    is_reserved_role_name, parse_join_token, scenario_role_name,
 )
 
 ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn",
-               "references")
+               "references", "replace_on_burn")
+REPLACEMENT_LINKS = ("replaces", "replaced_by", "replacement")
 
 
 class SwarmError(Exception):
@@ -51,7 +53,7 @@ class Swarm:
                 "credentials": list(agent["credentials"]),
                 "may_message": [scenario_role_name(peer) for peer in agent.get("send_to", [])],
                 "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True, "references": "replace",
-                "managed_by": "scenario"}
+                "replace_on_burn": False, "managed_by": "scenario"}
 
     def _scenario_roles(self):
         roles = {}
@@ -181,6 +183,7 @@ class Swarm:
             "session_id": session_id, "agent_id": agent_id, "status": "active", "tools": tools,
             "role": role_name, "parent_session": parent_session, "token_id": token_id,
             "owner": role["owner"], "egress": egress, "created_at": now, "last_seen": now, "exited_at": None,
+            "generation": 0, "progress": {}, **dict.fromkeys(REPLACEMENT_LINKS),
         }
         issued = self.state.minter.credentials.issue(agent_id, credentials)
         fields = {"session_id": session_id, "role": role_name, "parent_session": parent_session}
@@ -221,9 +224,13 @@ class Swarm:
                 "role": self._role_of(session), "status": session["status"],
                 "tools": session.get("tools", self.state.agents[session["agent_id"]]["tools"]),
                 **{key: session.get(key) for key in (
-                    "parent_session", "token_id", "owner", "egress", "last_seen", "exited_at")},
+                    "parent_session", "token_id", "owner", "egress", "last_seen", "exited_at", *REPLACEMENT_LINKS)},
                 "created_at": session.get("created_at") or utc_now_iso(),
-                "exposures": len(self.state.ledgers.get(session["agent_id"], {}))}
+                "exposures": len(self.state.ledgers.get(session["agent_id"], {})),
+                "generation": session.get("generation", 0), **task_progress.counts(session.get("progress"))}
+
+    def get_instance(self, session_id):
+        return self.instance(self._session(session_id))
 
     def list_instances(self, role=None, status=None):
         rows = [self.instance(s) for s in self.state.sessions.values()]
@@ -237,11 +244,18 @@ class Swarm:
             raise SwarmError(404, "Unknown session")
         return session
 
-    def heartbeat(self, session_id):
+    def heartbeat(self, session_id, progress=None):
+        """Mark the instance alive and record the progress it reported, stamped with the mock's own clock."""
         session = self._session(session_id)
         if session["status"] != "active":
             raise SwarmError(409, f"Instance is {session['status']}")
-        session["last_seen"] = utc_now_iso()
+        now = utc_now_iso()
+        try:  # all or nothing: a broken rule records nothing from this heartbeat
+            events = task_progress.check_events(progress) if progress is not None else []
+            session["progress"] = task_progress.apply(session.get("progress"), events, now)
+        except task_progress.ProgressError as exc:
+            raise SwarmError(400, str(exc)) from None
+        session["last_seen"] = now
         return self.instance(session)
 
     def exit(self, session_id):
@@ -279,9 +293,50 @@ class Swarm:
     def burn(self, scope, ident):
         targets = [s for s in self._targets(scope, ident) if s["status"] == "active"]
         agent_ids = list(dict.fromkeys(s["agent_id"] for s in targets))
-        revoked = {}
+        revoked, now = {}, utc_now_iso()
         for session in targets:  # revoke every badge first, then rotate
-            session["status"] = "revoked"
+            session["status"], session["revoked_at"] = "revoked", now
             revoked.setdefault(session["agent_id"], []).append(session["session_id"])
         burned = [self.state.burn(agent_id) | {"sessions_revoked": revoked[agent_id]} for agent_id in agent_ids]
+        if scope == "instance":  # burning one instance may replace it; a role, lineage or token burn never does
+            for session in targets:
+                self._mark_replacement(session, cutoff=now, cutoff_source="burn_time")
         return {"scope": scope, "id": ident, "burned": burned, "failed": []}
+
+    # --- replace on burn -------------------------------------------------------------------
+
+    def _mark_replacement(self, session, *, cutoff, cutoff_source):
+        """Record what a replacement may resume. The mock has no breach evidence, so it cuts off at the burn."""
+        role = self.roles.get(session.get("role") or "")
+        if not role or not role.get("replace_on_burn") or session.get("replacement"):
+            return
+        done, quarantined = task_progress.classify(session.get("progress"), cutoff)
+        status = "pending" if session.get("generation", 0) < MAX_REPLACEMENT_GENERATION else "needs_person"
+        session["replacement"] = {"status": status, "cutoff": cutoff, "cutoff_source": cutoff_source,
+                                  "done": done, "quarantined": quarantined}
+
+    def replace(self, old_id, new_id):
+        """Link a fresh instance as the replacement of a burned one (POST /instances/{old}/replace)."""
+        old = self._session(old_id)
+        record = old.get("replacement")
+        if not record or record["status"] != "pending":
+            raise SwarmError(409, f"Instance has no pending replacement ({record['status'] if record else 'none'})")
+        new = self.state.sessions.get(new_id)
+        problem = ("the new instance does not exist" if new is None
+                   else "the new instance is the burned one" if new is old
+                   else "the new instance must be of the same role" if new.get("role") != old.get("role")
+                   else "the new instance must be active" if new["status"] != "active"
+                   else "the new instance must be created after the old one was burned"
+                   if new["created_at"] < old["revoked_at"]
+                   else "the new instance is already a replacement" if new.get("replaces") else None)
+        if problem:
+            raise SwarmError(400, problem)
+        record["status"], old["replaced_by"] = "linked", new_id
+        new["replaces"], new["generation"] = old_id, old.get("generation", 0) + 1
+        role = old["role"]
+        self.state.emit(old["agent_id"], "instance", "replaced", session_id=old_id, role=role, replaced_by=new_id,
+                        actor="admin", detail=f"replaced by {new['agent_id']}")
+        self.state.emit(new["agent_id"], "instance", "resumed", session_id=new_id, role=role, replaces=old_id,
+                        actor="admin", detail=f"{len(record['done'])} done, {len(record['quarantined'])} quarantined")
+        return {"replaces": old_id, "session_id": new_id, "generation": new["generation"],
+                **{key: record[key] for key in ("cutoff", "cutoff_source", "done", "quarantined")}}
