@@ -27,17 +27,22 @@ def _load(name: str, path: pathlib.Path):
     return module
 
 
-api = _load("burn_smoke", HERE / "smoke.py")                      # request(), load_env()
+api = _load("burn_smoke", HERE / "smoke.py")                      # request(), load_env(), signed_in()
 gw = _load("gateway_smoke", REPO / "gateway" / "scripts" / "smoke.py")  # Mcp, get_token()
 
 
 def main() -> int:
     env = api.load_env()
-    base, token = env.get("BURN_API_URL", ""), env.get("BURN_DEMO_TOKEN", "")
-    if not base or not token:
+    base = env.get("BURN_API_URL", "")
+    if not base:
         print("SKIP: run burn_api/scripts/make_env.py first")
         return 0
-    _, feed = api.request(base, token, "GET", "/events?limit=1")
+    auth = api.signed_in(env)  # the automation person's headers, minted once
+    if auth is None:
+        return 1
+    status, feed = api.request(base, auth, "GET", "/events?limit=1")
+    if api.refused(status):
+        return 1
     if not feed.get("agents"):
         print("SKIP: no scenario loaded")
         return 0
@@ -49,7 +54,7 @@ def main() -> int:
         if not ok:
             failures.append(label)
 
-    status, session = api.request(base, token, "POST", "/sessions", {"agent_id": agent_id})
+    status, session = api.request(base, auth, "POST", "/sessions", {"agent_id": agent_id})
     assert status == 201, f"POST /sessions -> {status} {session}"
     badge = json.loads(boto3.client("secretsmanager", region_name="us-east-1").get_secret_value(
         SecretId=session["badge_ref"])["SecretString"])
@@ -62,10 +67,10 @@ def main() -> int:
     is_error, _ = mcp.tool(tool, {})
     check(not is_error, f"{agent_id}: {tool} works with an active badge")
 
-    status, burned = api.request(base, token, "POST", "/burn", {"agent_id": agent_id, "reason": "e2e"})
+    status, burned = api.request(base, auth, "POST", "/burn", {"agent_id": agent_id, "reason": "e2e"})
     check(status == 200 and session["session_id"] in burned["sessions_revoked"], "burn revoked the session")
     check(set(burned["rotated"]) >= {c["secret_ref"] for c in session["credentials"]}, f"rotated {burned['rotated']}")
-    check(api.request(base, token, "GET", f"/badge/{session['session_id']}")[1]["status"] == "revoked", "badge revoked")
+    check(api.request(base, auth, "GET", f"/badge/{session['session_id']}")[1]["status"] == "revoked", "badge revoked")
 
     is_error, text = mcp.tool(tool, {})
     check(is_error and text.startswith("BURN:"), "same token refused at the gateway after burn")

@@ -70,3 +70,15 @@ def test_the_people_values_come_from_their_ssm_parameters():
         else (_ for _ in ()).throw(KeyError(Name))
     values = make_env.collect(ssm, sm, sts)
     assert [values[k] for k in make_env.PEOPLE_KEYS] == ["pool", "client", "https://d.example", "https://i.example", "on"]
+
+
+def test_env_carries_the_sign_in_switch_under_the_name_the_cli_and_scripts_read(tmp_path, monkeypatch):
+    from burn_contracts import names
+    monkeypatch.setattr(make_env, "REPO", tmp_path)
+    monkeypatch.setattr(make_env.boto3, "client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(make_env, "collect", lambda *args: PEOPLE | {"BURN_PEOPLE_ENABLED": "on"})
+    make_env.main()
+    env = (tmp_path / ".env").read_text().splitlines()
+    assert f"{names.PEOPLE_ENABLED_ENV}=on" in env  # read without AWS by burn_contracts.automation and the CLI
+    assert "BURN_PEOPLE_DOMAIN=https://burn-people-x.auth.us-east-1.amazoncognito.com" in env  # burn login
+    assert "BURN_PEOPLE_CLIENT_ID=clientid123" in env

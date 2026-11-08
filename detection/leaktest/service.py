@@ -11,6 +11,7 @@ from boto3.dynamodb.conditions import Key
 import httpx
 
 from burn_contracts import names
+from burn_contracts.automation import automation_headers
 
 ENCODINGS = ("plain", "base64", "hex", "url", "reversed", "spaced", "split_across_requests", "random")
 _REASONS = {"session_required", "session_inactive", "private_destination", "destination_not_allowed",
@@ -62,8 +63,8 @@ class LeakTest:
         api = os.environ.get("BURN_API_URL")
         if api:
             with httpx.Client(trust_env=False, timeout=10) as client:
-                response = client.get(api.rstrip("/") + f"/agents/{agent}/ledger",
-                    headers={names.DEMO_TOKEN_HEADER: os.environ.get("BURN_DEMO_TOKEN", "")})
+                # as the automation person; the demo token until the stack requires sign-in
+                response = client.get(api.rstrip("/") + f"/agents/{agent}/ledger", headers=automation_headers())
                 response.raise_for_status()
                 return response.json()["entries"]
         return query_all(self.ddb.Table(names.EXPOSURES_TABLE), KeyConditionExpression=Key("agent_id").eq(agent),

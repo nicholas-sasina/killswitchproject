@@ -1,7 +1,7 @@
 """Starting swarm workers: join once per container from the host, then hand each container its own values.
 
-The launcher holds every worker's secrets in its own environment. It uses the admin token only for the one
-person-side call (creating the join token) and never gives it to a container: workers join with the join token and
+The launcher holds every worker's secrets in its own environment. It makes one person-side call (creating the join
+token), signed in as the automation person, and never gives that sign-in to a container: workers join with the join token and
 afterwards authenticate with their own session token. `docker run -e NAME` (a name
 with no value) copies each from that environment into the container, so no secret is ever on a command line (visible
 in `ps`) or in a file. The container's `burn run` receives the secrets as BURN_ADOPT_SECRETS, takes them out of its
@@ -14,11 +14,22 @@ from typing import Callable
 from urllib.parse import urlsplit, urlunsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "cli"))  # the CLI's API client (standard library only): admin auth stays in one place
+sys.path.insert(0, str(REPO_ROOT / "cli"))  # the CLI's API client (standard library only)
 
 from burn_cli import retry  # noqa: E402
 from burn_cli.api import Api  # noqa: E402
 from burn_cli.runner.instance_api import InstanceApi  # noqa: E402
+
+class PersonApi(Api):
+    """The client for the launcher's person-side call, authenticated by `headers()` (see run_swarm.py)."""
+
+    def __init__(self, base_url: str, headers: Callable[[], dict]):
+        super().__init__(base_url, "")
+        self._headers = headers
+
+    def auth_headers(self) -> dict:
+        return self._headers()
+
 
 HOST = "host.docker.internal"
 IMAGE = "burn-swarm-worker"
@@ -54,7 +65,7 @@ def container_env(*, public: dict, secrets: dict, api_url: str, gateway_url: str
         badge = {**secrets["badge"], "token_url": to_container_url(secrets["badge"]["token_url"])}
         secrets = {**secrets, "badge": badge}
     env = {
-        "BURN_API_URL": api_url,  # no admin token: the supervisor authenticates with the instance's session token
+        "BURN_API_URL": api_url,  # no person token: the supervisor authenticates with the instance's session token
         "BURN_GATEWAY_URL": gateway_url, "BURN_WORKER_INTERVAL": str(interval),
         ADOPT_SECRETS: json.dumps(secrets),
     }
@@ -84,7 +95,7 @@ def start_workers(api: Api, instances: InstanceApi, role: str, count: int, *, ap
 
     A session whose container could not be started is ended, so a failure does not leave instances dangling.
     """
-    token = api.request("POST", f"/roles/{role}/tokens", {"uses": count, "ttl": 3600})["token"]  # the admin call
+    token = api.request("POST", f"/roles/{role}/tokens", {"uses": count, "ttl": 3600})["token"]  # the person-side call
     names, joined = [], {}
     try:
         for i in range(count):

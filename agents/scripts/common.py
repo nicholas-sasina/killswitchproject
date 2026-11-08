@@ -13,6 +13,7 @@ RUN_DIR = AGENTS_DIR / ".run"
 sys.path.insert(0, str(REPO_ROOT / "contracts" / "python"))
 
 from burn_contracts import names  # noqa: E402
+from burn_contracts.automation import automation_headers  # noqa: E402
 
 REGION = names.REGION
 
@@ -56,7 +57,7 @@ def invoke_minter(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def burn_api(method: str, path: str, **kwargs) -> httpx.Response:
+    """A person-side Burn API call, made as the automation person (see burn_contracts.automation)."""
     base = setting("BURN_API_URL", "/burn/api/url")
-    token = secret_value(names.DEMO_TOKEN_SECRET)
-    headers = {names.DEMO_TOKEN_HEADER: token}
+    headers = automation_headers(demo_token=lambda: secret_value(names.DEMO_TOKEN_SECRET))
     return httpx.request(method, base + path, headers=headers, timeout=60, **kwargs)

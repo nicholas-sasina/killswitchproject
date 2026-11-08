@@ -21,11 +21,15 @@ class Api:
     def __init__(self, base_url: str, token: str):
         self.base_url, self._token = base_url, token  # token is only ever sent as a header
 
+    def auth_headers(self) -> dict:
+        """The one place a request's credentials are added. A subclass may authenticate differently."""
+        return {"x-burn-demo-token": self._token}
+
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
         req = urllib.request.Request(
             self.base_url + path, method=method,
             data=None if body is None else json.dumps(body).encode(),
-            headers={"x-burn-demo-token": self._token, "content-type": "application/json"})
+            headers={**self.auth_headers(), "content-type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 return json.loads(resp.read())

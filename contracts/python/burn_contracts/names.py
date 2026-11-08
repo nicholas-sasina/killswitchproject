@@ -58,6 +58,8 @@ PEOPLE_ISSUER_PARAM = f"{PEOPLE_SSM_PREFIX}/issuer"
 # "on" once the stack requires a person's token (the API's PEOPLE_AUTH_ENV is set), else "off".
 # make_env reads it to decide whether the dashboard still gets the local admin token.
 PEOPLE_ENABLED_PARAM = f"{PEOPLE_SSM_PREFIX}/enabled"
+# The same switch in .env (make env copies it), so callers on a stack that is off need no AWS access to know it.
+PEOPLE_ENABLED_ENV = "BURN_PEOPLE_ENABLED"
 # Scripts and tests that run without a person (e2e, smoke, load) sign in as an "automation" person
 # through a second, confidential app client that alone accepts the admin password flow. Its client
 # id is published next to the others. The person's credentials live in Secrets Manager as the JSON

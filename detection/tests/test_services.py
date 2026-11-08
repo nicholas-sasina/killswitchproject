@@ -87,6 +87,26 @@ class FakeCloud:
         return {"SecretString": self.value}
 
 
+@pytest.mark.parametrize("headers", [{"authorization": "Bearer automation-id"}, {"x-burn-demo-token": "demo"}])
+def test_the_ledger_is_read_from_the_api_with_the_automation_helpers_header(monkeypatch, headers):
+    import leaktest.service as service
+    cloud, seen, real_client = FakeCloud(), [], httpx.Client
+
+    def transport(request):
+        seen.append(request)
+        return httpx.Response(200, json={"entries": [{"secret_ref": cloud.ref}]})
+
+    monkeypatch.setenv("BURN_API_URL", "https://api.example.invalid/")
+    monkeypatch.setattr(service, "automation_headers", lambda: headers)  # bearer, or the demo-token fallback
+    monkeypatch.setattr(service.httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(transport)))
+    entries = LeakTest(ddb=cloud, secrets_client=cloud).ledger(cloud.agent)
+    assert entries == [{"secret_ref": cloud.ref}]
+    (request,) = seen
+    assert str(request.url) == f"https://api.example.invalid/agents/{cloud.agent}/ledger"
+    assert {k: request.headers[k] for k in headers} == headers
+    assert ("authorization" in request.headers) != ("x-burn-demo-token" in request.headers)  # exactly one of them
+
+
 @pytest.mark.parametrize("encoding", ENCODINGS)
 def test_leak_tool_transports_without_returning_values(encoding):
     cloud = FakeCloud()
