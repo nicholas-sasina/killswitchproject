@@ -310,9 +310,16 @@ export function heroCopy({
     const time =
       newest.burnedAtFrom === "last-seen" ? "" : shortTime(newest.burnedAt);
     const eyebrow = `Incident ${String(burned.length).padStart(2, "0")}${time ? ` / ${time}` : ""}`;
-    const openKey = own?.openKeys[0] ?? own?.flagged[0];
+    // The key to review: one still waiting on its owner from any of today's
+    // burns (newest burn first), else one the newest burn flagged.
+    const openKey =
+      burned.map((agent) => today.get(agent.key)?.openKeys[0]).find(Boolean) ??
+      own?.flagged[0];
     const links = {
-      open: { href: agentHref(newest.key), label: "Open the incident" },
+      open:
+        burned.length === 1
+          ? { href: agentHref(newest.key), label: "Open the incident" }
+          : { href: "#/incidents", label: "Open the incidents" },
       review: openKey
         ? { href: "#/credentials", label: `Review ${keyName(openKey)}` }
         : undefined,

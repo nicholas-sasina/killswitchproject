@@ -337,6 +337,27 @@ describe("the hero", () => {
     expect(hero.lede).toBe(
       "Burn revoked each of them. Nothing else restarted.",
     );
+    expect(hero.open).toEqual({
+      href: "#/incidents",
+      label: "Open the incidents",
+    });
+  });
+
+  it("reviews a key still open from an earlier burn today", () => {
+    const base = canaryBurn();
+    const data = world({
+      ...base,
+      instances: [
+        ...base.instances,
+        instance("w5", "worker", "revoked", { last_seen: at(19, 50) }),
+      ],
+    });
+    const hero = heroCopy({ ...data, history: complete });
+    expect(hero.title[0]).toBe("2 agents were burned today.");
+    expect(hero.review).toEqual({
+      href: "#/credentials",
+      label: "Review crm_db_url",
+    });
   });
 
   it("says all clear with the running count and the region", () => {
