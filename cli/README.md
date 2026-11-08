@@ -33,8 +33,8 @@ instance is burned. Any harness that speaks MCP over HTTP works, with any model 
 2. **Sign in** with `burn login`.
 3. **Run your agent:**
    ```bash
-   burn run claude                                                       # asks before tools run
-   burn run claude -p "Summarise ticket T-1" --allowedTools mcp__burn    # headless
+   burn run claude                                # interactive; Burn's tools need no approval, its own still ask
+   burn run claude -p "Summarise ticket T-1"      # headless
    burn run python agent.py
    ```
    Everything after the command is the command's own, flags included, so `--` is optional.
@@ -94,8 +94,8 @@ the Gateway, so the agent never holds the badge.
 
 **Claude Code**: `burn run` sets it up when the command is `claude`, so there is nothing to configure:
 ```bash
-burn run --role coder -- claude                                  # interactive
-burn run --role coder -- claude -p "Summarise ticket T-1"        # one prompt
+burn run claude                                  # interactive
+burn run claude -p "Summarise ticket T-1"        # one prompt; Burn's tools need no flag
 ```
 It runs on Bedrock with the instance's own AWS key (see [Models](#models)). In the instance's new `HOME`, `burn run`
 writes a `.claude.json` that connects Burn's MCP server, skips onboarding and trusts the current directory, and a
