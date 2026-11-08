@@ -136,7 +136,7 @@ export function causeSentence(cause: BurnCause): string {
  * since. Read from the detail alone: Burn's canary path writes these
  * without naming a key.
  */
-function rotationProblem(
+export function rotationProblem(
   agent: ConsoleAgent,
   events: LedgerEvent[],
 ): "failed" | "deferred" | undefined {
@@ -183,6 +183,51 @@ export function outcomeSentence(
   else if (instance?.replacement?.status === "needs_person")
     parts.push("replacement needs a person");
   return parts.join(", ");
+}
+
+/** One line of an open row's "What Burn did", with its key set apart. */
+export interface DidItem {
+  key?: string;
+  text: string;
+}
+
+/**
+ * An open row's "What Burn did", a line per step: the badge, each of its
+ * own keys rotated (or the rotation that failed), each shared key flagged
+ * and where its flag stands.
+ */
+export function didItems(
+  incident: Incident,
+  events: LedgerEvent[],
+  flags: Flag[],
+): DidItem[] {
+  const { agent } = incident;
+  const items: DidItem[] = [{ text: "Badge revoked" }];
+  for (const ref of incident.rotated)
+    items.push({ key: keyName(ref), text: "rotated" });
+  const problem = rotationProblem(agent, events);
+  if (problem === "failed")
+    items.push({ text: "Rotation failed: finish rotating its keys by hand" });
+  if (problem === "deferred")
+    items.push({
+      text: "Rotation deferred while other sessions use its keys",
+    });
+  const states = new Map(flags.map((flag) => [flag.secret_ref, flag.state]));
+  for (const ref of incident.flagged) {
+    const state = incident.openKeys.includes(ref) ? "open" : states.get(ref);
+    items.push({
+      key: keyName(ref),
+      text:
+        state === "open"
+          ? "flagged for its owner, still open"
+          : state === "dismissed"
+            ? "flagged for its owner, dismissed"
+            : "flagged for its owner",
+    });
+  }
+  if (!incident.flagged.length && revokedEventFor(agent, events))
+    items.push({ text: "No shared key to flag" });
+  return items;
 }
 
 /** The status pill: what is still open, or Burned once nothing is. */
