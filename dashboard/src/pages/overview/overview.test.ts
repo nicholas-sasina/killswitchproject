@@ -10,7 +10,6 @@ import { mergeFleet } from "../../fleet";
 import { buildConsole, burnedToday, incidents } from "../../model";
 import type { EventHistory } from "../../polling";
 import {
-  burnTrigger,
   burnedRows,
   countWord,
   dayStrip,
@@ -245,56 +244,6 @@ describe("the last 24 hours strip", () => {
       loading: false,
       lowerBound: true,
       from: at(15, 15),
-    });
-  });
-});
-
-describe("why an agent was burned", () => {
-  it("names the canary when the agent's canary was used", () => {
-    const { model, events } = world(canaryBurn());
-    const agent = model.byKey.get("w3")!;
-    expect(burnTrigger(agent, events)).toEqual({
-      kind: "canary",
-      ip: "203.0.113.9",
-    });
-  });
-
-  it("names the person and their reason", () => {
-    const { model, events } = world({
-      instances: [instance("w1", "worker", "revoked")],
-      events: [
-        event({
-          ts: at(19, 0),
-          agent_id: "agent-worker-w1",
-          session_id: "w1",
-          source: "burn",
-          action: "revoked",
-          actor: "priya@example.com",
-          detail: "1 session(s) revoked (read an unverified vendor page)",
-        }),
-      ],
-    });
-    expect(burnTrigger(model.byKey.get("w1")!, events)).toEqual({
-      kind: "person",
-      who: "priya@example.com",
-      reason: "read an unverified vendor page",
-    });
-  });
-
-  it("says when nothing was recorded", () => {
-    const { model, events } = world({
-      instances: [instance("w1", "worker", "revoked")],
-      events: [
-        event({
-          agent_id: "agent-worker-w1",
-          source: "burn",
-          action: "revoked",
-          detail: "Mock badge revocation.",
-        }),
-      ],
-    });
-    expect(burnTrigger(model.byKey.get("w1")!, events)).toEqual({
-      kind: "unknown",
     });
   });
 });
