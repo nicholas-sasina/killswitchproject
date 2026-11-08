@@ -1,13 +1,16 @@
 """Mock tool handlers against moto DynamoDB and Secrets Manager."""
 import json
+import logging
 import secrets
 import time
 from types import SimpleNamespace
 
 import boto3
+import placeholders
 import pytest
 import store
 import tools
+from botocore.exceptions import EndpointConnectionError, NoCredentialsError, ReadTimeoutError
 from burn_contracts.events import EVENT_RETENTION_DAYS, TTL_ATTRIBUTE
 
 
@@ -157,3 +160,116 @@ def test_canary_in_customer_notes_is_the_calling_sessions_own(aws):
     out = tools.handler({"query": "old vendor", "burn_caller_agent_id": "agent-alpha",
                          "burn_caller_session_id": "sess-alpha-1"}, context("query_customers"))
     assert out["customers"][0]["notes"] == f"legacy key: {mine}"
+
+
+# Secrets Manager failures while filling. Each one must cost only its own placeholder.
+FAILURES = [
+    "AccessDeniedException", "ThrottlingException", "DecryptionFailure", "InternalServiceError",
+    "InvalidRequestException",  # e.g. a secret scheduled for deletion
+    EndpointConnectionError(endpoint_url="https://secretsmanager.us-east-1.amazonaws.com"),
+    ReadTimeoutError(endpoint_url="https://secretsmanager.us-east-1.amazonaws.com"),
+    NoCredentialsError(),
+]
+ERROR_MESSAGE = "error-message-" + secrets.token_hex(4)  # must never reach the logs
+
+
+def fail_reads(secret_ids: set[str], failure) -> None:
+    """Make GetSecretValue of these ids fail as AWS does: an error response with this code (botocore raises
+    its real exception class), or the given botocore exception, such as a dropped connection."""
+    def before_call(params, **_):
+        if json.loads(params["body"])["SecretId"] not in secret_ids:
+            return None
+        if isinstance(failure, Exception):
+            raise failure
+        return SimpleNamespace(status_code=400, headers={}), {"Error": {"Code": failure, "Message": ERROR_MESSAGE}}
+
+    placeholders._secrets().meta.events.register("before-call.secrets-manager.GetSecretValue", before_call)
+
+
+@pytest.fixture
+def planted(scenario, aws):
+    """A backup file and a customer note with a registered canary next to ordinary placeholders."""
+    from burn_contracts.names import canary_secret_ref
+    canary_ref = canary_secret_ref("agent-alpha", "sess-alpha-1")
+    canary = secrets.token_urlsafe(24)
+    boto3.client("secretsmanager", region_name="us-east-1").create_secret(Name=canary_ref, SecretString=canary)
+    table = aws.Table("burn-scenario")
+    table.put_item(Item={"pk": "file#config/app.env.bak", "data": {"path": "config/app.env.bak", "content": (
+        "KEY={{cred:agent-alpha:api_key}}\n"
+        "# PROVIDER_API_KEY={{canary}}  # pre-rotation, dead\n"
+        "DB={{cred:shared:crm_db_url}}\n")}})
+    table.put_item(Item={"pk": "customer#C-9", "data": {
+        "id": "C-9", "name": "Old Vendor", "email": "old@example.com",
+        "notes": "legacy key: {{canary}} db: {{cred:shared:crm_db_url}}"}})
+    return {**scenario, "canary": canary, "canary_ref": canary_ref}
+
+
+def read_as_session(tool: str, **args):
+    return tools.handler({**args, "burn_caller_agent_id": "agent-alpha", "burn_caller_session_id": "sess-alpha-1"},
+                         context(tool))
+
+
+@pytest.mark.parametrize("failure", FAILURES, ids=lambda f: f if isinstance(f, str) else type(f).__name__)
+def test_a_canary_that_cannot_be_read_is_unavailable_and_the_rest_still_fills(planted, failure):
+    fail_reads({planted["canary_ref"]}, failure)
+
+    content = read_as_session("read_config", path="config/app.env.bak")["content"]
+    [customer] = read_as_session("query_customers", query="old vendor")["customers"]
+
+    assert content == (f"KEY={planted['api_key']}\n"
+                       "# PROVIDER_API_KEY=(credential not issued)  # pre-rotation, dead\n"
+                       f"DB={planted['db']}\n")
+    assert customer == {"id": "C-9", "name": "Old Vendor", "email": "old@example.com",
+                        "notes": f"legacy key: (credential not issued) db: {planted['db']}"}
+
+
+@pytest.mark.parametrize("failure", FAILURES, ids=lambda f: f if isinstance(f, str) else type(f).__name__)
+def test_a_credential_that_cannot_be_read_is_unavailable_and_the_canary_still_fills(planted, failure):
+    fail_reads({"burn/agent-alpha/api_key"}, failure)
+
+    content = read_as_session("read_config", path="config/app.env.bak")["content"]
+
+    assert content == ("KEY=(credential not issued)\n"
+                       f"# PROVIDER_API_KEY={planted['canary']}  # pre-rotation, dead\n"
+                       f"DB={planted['db']}\n")
+
+
+def test_a_failed_read_logs_the_error_class_and_secret_name_only(planted, caplog):
+    fail_reads({planted["canary_ref"], "burn/shared/crm_db_url"}, "AccessDeniedException")
+
+    with caplog.at_level(logging.WARNING):
+        content = read_as_session("read_config", path="config/app.env.bak")["content"]
+
+    assert f"KEY={planted['api_key']}\n" in content
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 2 and all("AccessDeniedException" in w for w in warnings)
+    assert any(planted["canary_ref"] in w for w in warnings)
+    for leaked in (ERROR_MESSAGE, planted["api_key"], planted["db"], planted["canary"]):
+        assert leaked not in caplog.text
+
+
+def test_a_secret_with_no_string_value_is_unavailable(planted):
+    boto3.client("secretsmanager", region_name="us-east-1").put_secret_value(
+        SecretId="burn/shared/crm_db_url", SecretBinary=b"\x00binary")
+
+    content = read_as_session("read_config", path="config/app.env.bak")["content"]
+
+    assert content.endswith("DB=(credential not issued)\n") and f"KEY={planted['api_key']}\n" in content
+
+
+def test_a_bug_while_reading_a_secret_still_fails_the_call(planted):
+    """Only AWS errors and a missing string value become one unfilled placeholder; a bug is not hidden."""
+    fail_reads({planted["canary_ref"]}, TypeError("a programming error"))
+
+    with pytest.raises(TypeError):
+        read_as_session("read_config", path="config/app.env.bak")
+
+
+def test_a_hung_secrets_manager_read_gives_up_well_inside_the_lambda_timeout(aws):
+    """A read that hangs must fail in time to cost only its placeholder. The tools Lambda times out at 15 s
+    (infra/burn_infra/gateway.py), which would fail the whole call; botocore's defaults wait 60 s per attempt."""
+    config = placeholders._secrets().meta.config
+    attempts = config.retries["total_max_attempts"]
+    backoff = attempts - 1  # standard mode waits at most 1 s before the first retry
+    worst = attempts * (config.connect_timeout + config.read_timeout) + backoff
+    assert config.retries["mode"] == "standard" and worst <= 15 / 2

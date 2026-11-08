@@ -19,6 +19,8 @@ import logging
 import re
 
 import boto3
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 from burn_contracts.names import REGION, canary_secret_ref
 
 PLACEHOLDER = re.compile(
@@ -28,20 +30,29 @@ CANARY = re.compile(r"\{\{canary\}\}")
 # An agent's own secrets that may appear in files. Its badge secret never may.
 AGENT_SECRET_NAMES = {"api_key", "aws_key"}
 UNAVAILABLE = "(credential not issued)"
+# A hung read gives up in about 7 s (2 attempts x (1 s connect + 2 s read) + at most 1 s backoff), inside the
+# tools Lambda's 15 s timeout (infra/burn_infra/gateway.py), so it costs its placeholder, not the whole call.
+SECRETS_CONFIG = Config(connect_timeout=1, read_timeout=2, retries={"mode": "standard", "total_max_attempts": 2})
 
 log = logging.getLogger()
 
 
 @functools.cache
 def _secrets():
-    return boto3.client("secretsmanager", region_name=REGION)
+    return boto3.client("secretsmanager", region_name=REGION, config=SECRETS_CONFIG)
 
 
 def _current_value(secret_ref: str) -> str | None:
+    """The secret's current string value, or None if AWS refuses or fails the read (missing, access denied,
+    throttled, a KMS decryption failure, a timeout...) or the secret has no string value. Then only the
+    placeholders naming this secret show UNAVAILABLE and the rest of the tool response still returns.
+    Any other exception is a bug and still fails the call."""
     try:
         return _secrets().get_secret_value(SecretId=secret_ref, VersionStage="AWSCURRENT")["SecretString"]
-    except _secrets().exceptions.ResourceNotFoundException:
-        log.warning("placeholder secret not found: %s", secret_ref)  # the name, never a value
+    except (ClientError, BotoCoreError, KeyError) as exc:
+        # The error class (an AWS error code for ClientError) and the secret's name: never its message or a value.
+        reason = exc.response.get("Error", {}).get("Code") if isinstance(exc, ClientError) else None
+        log.warning("placeholder secret unreadable (%s): %s", reason or type(exc).__name__, secret_ref)
         return None
 
 
