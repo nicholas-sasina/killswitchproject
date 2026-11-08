@@ -46,6 +46,7 @@ class BurnState:
             "owner": row["owner"], "owner_agent_id": row["owner_agent_id"],
             "source": source, "via": sender or tool,
             "first_seen": previous["first_seen"] if previous else utc_now_iso(), "status": "active",
+            "flag_level": None,
         }
         self.emit(agent_id, source, action, session_id=self.agent_state(agent_id)["session_id"],
                   secret_ref=ref, fingerprint=row["fingerprint"], secret_type=row["type"],
@@ -97,4 +98,6 @@ class BurnState:
                 for ledger in ledgers:
                     if ref in ledger:
                         ledger[ref]["status"] = action
+                        if action == "flagged":  # a burn flags what the agent saw at level seen
+                            ledger[ref]["flag_level"] = "seen"
         return {"agent_id": agent_id, "revoked": True, "sessions_revoked": revoked, **result}
