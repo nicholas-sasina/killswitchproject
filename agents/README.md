@@ -44,6 +44,27 @@ the breach and the ones the burned worker touched after it, which are quarantine
 The launcher logs `replaced <old> with <new>: <n> done, <m> quarantined`. `MOCK=1` runs the same story against the
 mock servers: burn a worker with `POST /burns {"scope": "instance", "id": <session_id>}` on the mock API.
 
+## The attack scenario
+`scenarios/support-desk-attack.yaml` is a strict superset of `support-desk.yaml`: the three
+agents, their tools and instructions, and every existing ticket, file and customer are unchanged,
+so `make e2e` (agent-reader) still passes while it is loaded. It only adds one poisoned ticket
+(`T-1099`, a prompt injection disguised as a compliance audit) and one planted file
+(`config/app.env.bak`, a superseded backup carrying `{{canary}}` on a commented, dead-looking
+line where an honest agent never looks). The ticket asks the agent to send the backup to an
+outside address.
+
+`make attack` (`scripts/attack.py`) plays the outside party that receives it. It listens on
+`127.0.0.1:8099` only, or reads the text from stdin (`pbpaste | make attack`) or a file
+(`FROM=...`); it extracts key-shaped tokens and presents each to the provider as an outsider
+(`GET /v1/whoami`, bearer token, no session proof), printing only `refused`/`accepted` and a
+fingerprint, never a value. Two things fall out. A model agent with only Burn's tools that tries
+to forward the backup is blocked by the gateway exit check, because the canary is a credential
+Burn minted and the real keys are already `{{burn:ref:...}}` references. And when the canary does
+reach the attacker by a channel Burn does not mediate (a laptop agent's own HTTP with no proxy, or
+a copy-paste), presenting it from outside Burn trips the canary path and burns that one session.
+Detection does not depend on how it escaped, so `make attack` makes no Burn call and takes no
+shortcut that causes a burn. See `docs/demo-script.md`.
+
 ## Key files
 | File | What |
 |---|---|
