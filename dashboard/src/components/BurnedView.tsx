@@ -27,6 +27,7 @@ import { AddAgent } from "./AddAgent";
 import { BlastTimeline } from "./BlastTimeline";
 import { Ledger } from "./Ledger";
 import { Status, Timestamp } from "./common";
+import { ReplacementInfo } from "./ReplacementInfo";
 
 /** Rows drawn before the list is truncated. */
 const ROW_CAP = 60;
@@ -95,6 +96,12 @@ export function BurnedView({
             roleList.map((item) => item.name),
           ),
       )
+    : undefined;
+  const instanceById = new Map(
+    instances.map((instance) => [instance.session_id, instance]),
+  );
+  const selectedInstance = selected?.entry.sessionId
+    ? instanceById.get(selected.entry.sessionId)
     : undefined;
 
   if (!contained.length)
@@ -191,6 +198,15 @@ export function BurnedView({
                         </span>
                       )}
                     </button>
+                    {item.entry.sessionId &&
+                      instanceById.has(item.entry.sessionId) && (
+                        <div className="burned-replacement">
+                          <ReplacementInfo
+                            instance={instanceById.get(item.entry.sessionId)!}
+                            instances={instances}
+                          />
+                        </div>
+                      )}
                   </li>
                 ))}
               </ul>
@@ -231,6 +247,15 @@ export function BurnedView({
               and are flagged rather than rotated.
             </p>
             {selected?.note && <p className="panel-intro">{selected.note}</p>}
+            {selectedInstance && (
+              <div className="panel-intro">
+                <ReplacementInfo
+                  instance={selectedInstance}
+                  instances={instances}
+                  detail
+                />
+              </div>
+            )}
             <div className="rebuild-actions">
               {selectedRole ? (
                 <>

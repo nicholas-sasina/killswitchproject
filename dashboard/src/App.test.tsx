@@ -448,3 +448,91 @@ describe("containment dashboard", () => {
     },
   );
 });
+
+it("opens replacement links and quarantined details from the one shared instance poll", async () => {
+  const old = {
+    session_id: "session_before",
+    agent_id: "agent-worker-112233",
+    role: "worker",
+    status: "revoked",
+    created_at: "2026-11-08T04:00:00Z",
+    replaced_by: "session_after",
+    items_started: 3,
+    replacement: {
+      status: "linked",
+      cutoff: "2026-11-08T05:00:00Z",
+      cutoff_source: "evidence",
+      done: ["item-1", "item-2"],
+      quarantined: ["item-review"],
+    },
+  };
+  const replacement = {
+    session_id: "session_after",
+    agent_id: "agent-worker-445566",
+    role: "worker",
+    status: "active",
+    created_at: "2026-11-08T05:01:00Z",
+    replaces: old.session_id,
+    generation: 1,
+  };
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+    const path = new URL(String(input)).pathname;
+    const data =
+      path === "/instances"
+        ? { instances: [replacement, old] }
+        : path === "/roles"
+          ? { roles: [{ name: "worker", managed_by: "ui", tools: [] }] }
+          : path.endsWith("/ledger")
+            ? { agent_id: replacement.agent_id, entries: [] }
+            : { events: [], agents: [] };
+    return new Response(JSON.stringify(data));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => {
+    render(
+      <App
+        config={{
+          burnUrl: "http://burn.example.test",
+          demoToken: crypto.randomUUID(),
+        }}
+      />,
+    );
+  });
+  const count = () =>
+    fetcher.mock.calls.filter(
+      ([url]) => new URL(String(url)).pathname === "/instances",
+    ).length;
+  expect(count()).toBe(1);
+  const previousLink = screen.getByRole("link", { name: old.agent_id });
+  await act(async () => {
+    window.location.hash = previousLink.getAttribute("href")!;
+    window.dispatchEvent(new Event("hashchange"));
+  });
+  let dialog = screen.getByRole("dialog");
+  expect(
+    within(dialog).getByRole("heading", { name: old.agent_id }),
+  ).toBeTruthy();
+  expect(within(dialog).getByText("item-review")).toBeTruthy();
+  const nextLink = within(dialog).getByRole("link", {
+    name: replacement.agent_id,
+  });
+  await act(async () => {
+    window.location.hash = nextLink.getAttribute("href")!;
+    window.dispatchEvent(new Event("hashchange"));
+  });
+  dialog = screen.getByRole("dialog");
+  expect(
+    within(dialog).getByRole("heading", { name: replacement.agent_id }),
+  ).toBeTruthy();
+  expect(within(dialog).getByText("item-review")).toBeTruthy();
+  expect(count()).toBe(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  expect(count()).toBe(2);
+  expect(
+    fetcher.mock.calls.some(([url]) =>
+      new URL(String(url)).pathname.startsWith("/instances/"),
+    ),
+  ).toBe(false);
+});

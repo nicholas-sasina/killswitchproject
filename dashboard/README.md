@@ -45,6 +45,11 @@ join commands, which use a hidden `read -rs BURN_JOIN_TOKEN` prompt or `pbpaste`
 to keep its value out of shell history and command-line arguments. For the clipboard command,
 copy the command first, then use **Copy token** before running it. The token is shown once and
 discarded when continuing or closing. The waiting view changes to connected when a new instance joins.
+**Replace on burn** is off by default and can be enabled when creating a role. Instance links open
+replacement details from the shared list, including quarantined item IDs. Resume counts use saved
+completed IDs and the predecessor's reported item count. Contained rows show whether a replacement
+is pending, linked, or needs a person.
+
 Existing dashboard-managed roles have a **New token** action. Both **Burn instance** and
 **Burn role** require confirmation; burning a role revokes all its active instances.
 
