@@ -154,6 +154,47 @@ Then confirm in each channel that the `[TEST]` alert arrived. About a minute lat
 follow-up summary too if the test fixture was a containment update (`--fixture canary_revoked`).
 Real Burn events flow automatically from then on.
 
+### What to look for
+- **Delivery history** (`burn-notify-state`, `delivery#…` items):
+  - Each event and destination appears once.
+  - `status` is `delivered` with `attempts` 1 in the normal case.
+  - `permanently_failed` has a `failure_category` (for example `auth_rejected`, `retries_exhausted:…`).
+  - Summaries appear as `agg_…` event ids.
+- **Providers:**
+  - Telegram and Discord return a message id, recorded as `provider_ref`.
+  - Slack returns only `ok`, so look in the channel.
+  - SES returns a MessageId. With the configuration set below, its `Delivery` event carries the
+    recipient server's SMTP reply.
+- **Email reaching the inbox:** check the received headers for `dkim=pass`, `spf=pass` and
+  `dmarc=pass` for the sender domain. A free-mail From address (for example @gmail.com) can get a
+  `250 OK` from Gmail's server and still never appear in the mailbox.
+- **SES delivery events (optional):** create a configuration set with an event destination (for
+  example SNS to SQS), and set it as the email destination's `options.configuration_set`. The stack
+  grants `ses:SendEmail` on it.
+
+### Alarms
+Subscribe an address (`-c burn:alarm_email=…`, or `aws sns subscribe` to `burn-notify-alarms`), then
+confirm the email AWS sends. To test delivery without an incident:
+```bash
+aws cloudwatch set-alarm-state --alarm-name burn-notify-queue-age --state-value ALARM \
+    --state-reason "TEST: alarm email delivery"     # returns to OK at the next evaluation
+```
+
+### Retries and the DLQ, without touching the live queue
+Create a disposable queue with its own DLQ (for example `maxReceiveCount` 3), a state table, and a
+Lambda from the same code. Give it one healthy destination, plus one that fails transiently: a
+provider-shaped URL on a host that does not resolve, so no real provider is contacted. Send one
+`test-message` and expect:
+1. The healthy destination is delivered once.
+2. The failing one is `retrying`, with growing gaps between receives.
+3. On the last receive it is `permanently_failed: retries_exhausted:…` and the message moves to the
+   DLQ.
+4. A redrive (`aws sqs start-message-move-task`) is absorbed with both destinations skipped and no
+   duplicate post.
+
+Set `BURN_NOTIFY_METRICS=0` on the disposable Lambda. Its metrics would otherwise count towards the
+production `burn-notify-permanent-failures` alarm. Delete the resources afterwards.
+
 ## Stop, roll back, tear down
 | Goal | Command | Effect on Burn |
 |---|---|---|
