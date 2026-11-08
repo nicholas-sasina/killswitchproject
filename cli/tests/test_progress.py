@@ -764,23 +764,47 @@ def test_burn_run_exits_3_when_the_instance_is_found_burned_at_exit(stack, capsy
     assert "the instance was burned or has exited" in err and "the agent was stopped" not in err  # the flush's path
 
 
-def test_a_connection_dropped_mid_heartbeat_counts_as_unreachable():
+@pytest.fixture
+def hangs_up():
+    """A server that reads each request, then closes the connection without answering: http.client raises
+    RemoteDisconnected, which urllib does not wrap."""
     import socket
+    import types
+    sock = socket.create_server(("127.0.0.1", 0))
+    server = types.SimpleNamespace(connections=0, url=f"http://127.0.0.1:{sock.getsockname()[1]}")
+
+    def serve():
+        while True:
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                return
+            server.connections += 1
+            conn.recv(65536)
+            conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    yield server
+    sock.close()
+
+
+@pytest.mark.parametrize("call", ["heartbeat", "exit"])
+def test_a_connection_dropped_mid_heartbeat_or_exit_counts_as_unreachable(hangs_up, call):
     from burn_cli.runner.instance_api import InstanceApi
-    server = socket.create_server(("127.0.0.1", 0))
+    with pytest.raises(ApiError, match="cannot reach the Burn API") as caught:
+        getattr(InstanceApi(hangs_up.url), call)("sess_1", "token")
+    assert caught.value.status is None and caught.value.retryable  # both are safe to send again
 
-    def hang_up():
-        conn, _ = server.accept()
-        conn.recv(65536)
-        conn.close()  # no status line: http.client raises RemoteDisconnected, which urllib does not wrap
 
-    threading.Thread(target=hang_up, daemon=True).start()
-    try:
-        with pytest.raises(ApiError, match="cannot reach the Burn API") as caught:
-            InstanceApi(f"http://127.0.0.1:{server.getsockname()[1]}").heartbeat("sess_1", "token")
-        assert caught.value.status is None  # transient, like any unreachable API: the heartbeat thread lives on
-    finally:
-        server.close()
+@pytest.mark.parametrize("call", ["join", "spawn"])
+def test_a_join_or_spawn_whose_connection_dropped_is_never_retried(hangs_up, call):
+    from burn_cli import retry
+    from burn_cli.runner.instance_api import InstanceApi
+    api = InstanceApi(hangs_up.url)
+    send = {"join": lambda: api.join("worker", "bjt_token"), "spawn": lambda: api.spawn("worker", "sess_1", "t")}[call]
+    with pytest.raises(ApiError, match="not retried") as caught:
+        retry.call(send, sleep=lambda _: None)
+    assert not caught.value.retryable and hangs_up.connections == 1  # it may have used a join token already
 
 
 
