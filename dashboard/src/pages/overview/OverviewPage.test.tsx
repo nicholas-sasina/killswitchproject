@@ -222,7 +222,7 @@ describe("the Overview", () => {
     );
     expect(
       within(card("Running now")).getByText(
-        "No agents running. Add agents to start a role.",
+        "No agents running. Connect an agent to start one.",
       ),
     ).toBeTruthy();
     expect(
@@ -356,7 +356,7 @@ describe("the Overview", () => {
     ]);
   });
 
-  it("sends Register it to Add agents and keeps Ignore in this browser", () => {
+  it("sends Register it to Connect an agent and keeps Ignore in this browser", () => {
     const openAddAgents = vi.fn();
     const value = data({
       instances: workers(1),

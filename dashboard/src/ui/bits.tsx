@@ -3,7 +3,7 @@ import "./ui.css";
 
 /**
  * What an empty card says: what will appear here, and how to make it
- * appear. "No agents running. Add agents to start a role."
+ * appear. "No agents running. Connect an agent to start one."
  */
 export function EmptyState({
   children,
