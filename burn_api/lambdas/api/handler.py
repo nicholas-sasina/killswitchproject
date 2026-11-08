@@ -119,7 +119,7 @@ def _swarm_route(method: str, path: str, query: dict, body: dict):
 
 # Must match the CORS settings of the HTTP API in infra/burn_infra/burn_api.py.
 ALLOWED_ORIGIN = "http://localhost:5173"
-ALLOWED_HEADERS = f"content-type,{names.DEMO_TOKEN_HEADER}"
+ALLOWED_HEADERS = f"content-type,authorization,{names.DEMO_TOKEN_HEADER}"
 
 
 def _preflight(headers: dict):
