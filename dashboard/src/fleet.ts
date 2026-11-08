@@ -129,11 +129,10 @@ export function liveFleet(fleet: FleetAgent[]): FleetAgent[] {
 
 export interface ContainedAgent {
   entry: FleetAgent;
-  /** When the badge was revoked, if that event is in the current stream. */
+  /** When the burn revoked this session, if its event is in the stream loaded. */
   revokedAt?: string;
   /** The burn's own note, if the event carried one. */
   note?: string;
-  observed: boolean;
 }
 
 /**
@@ -142,32 +141,36 @@ export interface ContainedAgent {
  * Only `revoked` counts as contained. An `exited` instance finished its work
  * and was never burned, so including it would overstate what containment did.
  *
- * Revocation events are matched by agent name rather than session, because
- * the burn event does not always carry the session. Where one name has
- * several burned sessions they share the most recent timestamp, which is why
- * the row shows the session too.
+ * A burn's `revoked` event names the session it revoked, so events are
+ * matched by session: one agent name can have several sessions, and each
+ * keeps its own burn time rather than borrowing the latest one. A session
+ * with no matching event in the stream loaded shows no time.
  */
 export function containedFleet(
   fleet: FleetAgent[],
   events: LedgerEvent[],
 ): ContainedAgent[] {
-  const revocation = new Map<string, LedgerEvent>();
+  const bySession = new Map<string, LedgerEvent>();
+  const byAgent = new Map<string, LedgerEvent>(); // entries without a session
   for (const event of events) {
     if (event.action !== "revoked") continue;
-    const seen = revocation.get(event.agent_id);
+    const [map, key] = event.session_id
+      ? [bySession, event.session_id]
+      : [byAgent, event.agent_id];
+    const seen = map.get(key);
     // Event ids sort by time, so the largest is the most recent revocation.
-    if (!seen || event.event_id > seen.event_id)
-      revocation.set(event.agent_id, event);
+    if (!seen || event.event_id > seen.event_id) map.set(key, event);
   }
   return fleet
     .filter((entry) => entry.status === "revoked")
     .map((entry) => {
-      const event = revocation.get(entry.agentId);
+      const event = entry.sessionId
+        ? bySession.get(entry.sessionId)
+        : byAgent.get(entry.agentId);
       return {
         entry,
         revokedAt: event?.ts,
         note: event?.detail ?? undefined,
-        observed: Boolean(event),
       };
     })
     .sort(

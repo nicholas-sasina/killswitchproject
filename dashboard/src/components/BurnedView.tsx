@@ -216,9 +216,13 @@ export function BurnedView({
             <div className="panel-heading">
               <h2>{selected?.entry.agentId}</h2>
               <span className="meta">
-                {selected?.observed
-                  ? "Burned during this session"
-                  : "Burned before this dashboard opened"}
+                {selected?.revokedAt ? (
+                  <>
+                    Burned <Timestamp value={selected.revokedAt} />
+                  </>
+                ) : (
+                  "Burned before the events shown here"
+                )}
               </span>
             </div>
             <p className="panel-intro">

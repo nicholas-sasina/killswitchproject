@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { AgentState, Instance } from "./contracts";
+import type { AgentState, Instance, LedgerEvent } from "./contracts";
 import {
+  containedFleet,
   copyName,
   joinable,
   liveFleet,
@@ -109,5 +110,43 @@ describe("markRevoked", () => {
     const marked = markRevoked(fleet, new Set(["sess_2"]));
     expect(marked.map((entry) => entry.status)).toEqual(["active", "revoked"]);
     expect(markRevoked(fleet, new Set())).toBe(fleet);
+  });
+});
+
+describe("containedFleet", () => {
+  function revoked(session: string | null, ts: string, id: string) {
+    return {
+      event_id: id,
+      ts,
+      agent_id: "agent-reader",
+      session_id: session,
+      source: "burn",
+      action: "revoked",
+      detail: `burned ${id}`,
+    } as LedgerEvent;
+  }
+
+  it("gives each session its own burn, and none to a session no burn ended", () => {
+    const fleet = mergeFleet(
+      [],
+      [
+        instance({ session_id: "sess_1", status: "revoked" }),
+        instance({ session_id: "sess_2", status: "revoked" }),
+        // Ended when the agent was restarted, not by a burn.
+        instance({ session_id: "sess_3", status: "revoked" }),
+      ],
+    );
+    const contained = containedFleet(fleet, [
+      revoked("sess_1", "2026-11-08T05:01:00.000Z", "evt_01"),
+      revoked("sess_2", "2026-11-08T05:02:00.000Z", "evt_02"),
+    ]);
+    const bySession = Object.fromEntries(
+      contained.map((item) => [item.entry.sessionId, item]),
+    );
+    expect(bySession.sess_1.revokedAt).toBe("2026-11-08T05:01:00.000Z");
+    expect(bySession.sess_2.revokedAt).toBe("2026-11-08T05:02:00.000Z");
+    expect(bySession.sess_2.note).toBe("burned evt_02");
+    expect(bySession.sess_3.revokedAt).toBeUndefined();
+    expect(bySession.sess_3.note).toBeUndefined();
   });
 });
