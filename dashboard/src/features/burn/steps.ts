@@ -331,6 +331,8 @@ export interface StepContext {
   untouched?: number;
   /** The agent's children still running after it was burned. */
   childrenLeft?: readonly string[];
+  /** Whether a call with its revoked badge has since been refused. */
+  refused?: boolean;
 }
 
 /**
@@ -346,6 +348,10 @@ export function containmentSteps(
   return outcome.target.scope === "agent"
     ? agentSteps(outcome, context)
     : roleSteps(outcome, outcome.target.role, context);
+}
+
+function byKeyName(a: string, b: string): number {
+  return keyName(a).localeCompare(keyName(b)) || a.localeCompare(b);
 }
 
 function untouchedTitle(n: number | undefined, fallback: string): string {
@@ -367,7 +373,9 @@ function agentSteps(
     {
       id: "revoked",
       title: "Badge revoked",
-      sub: "Its next call is refused",
+      sub: context.refused
+        ? "Its next call was refused"
+        : "Its next call is refused",
       hot: true,
       error:
         result && !result.revoked
@@ -377,7 +385,8 @@ function agentSteps(
             : undefined,
     },
   ];
-  for (const ref of result?.rotated ?? []) {
+  // By name, so the same burn reads the same from its answer or its events.
+  for (const ref of [...(result?.rotated ?? [])].sort(byKeyName)) {
     const key = stepKeyName(ref);
     steps.push({
       id: `rotated:${ref}`,
@@ -387,7 +396,7 @@ function agentSteps(
         : "The old value no longer works",
     });
   }
-  for (const ref of result?.flagged ?? [])
+  for (const ref of [...(result?.flagged ?? [])].sort(byKeyName))
     steps.push({
       id: `flagged:${ref}`,
       title: `${stepKeyName(ref)} sent to its owner`,

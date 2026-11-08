@@ -222,6 +222,26 @@ describe("containmentSteps", () => {
     expect(steps.some((step) => step.error)).toBe(false);
   });
 
+  it("lists keys by name whatever order the answer gave", () => {
+    const steps = containmentSteps(
+      outcome({
+        burned: [
+          result({ rotated: [`burn/${ME}/aws_key`, `burn/${ME}/api_key`] }),
+        ],
+      }),
+    );
+    expect(steps.slice(1, 3).map((step) => step.title)).toEqual([
+      "api_key rotated",
+      "aws_key replaced",
+    ]);
+  });
+
+  it("says the next call was refused once one has been", () => {
+    expect(containmentSteps(outcome(), { refused: true })[0].sub).toBe(
+      "Its next call was refused",
+    );
+  });
+
   it("doesn't count the untouched when it isn't known", () => {
     expect(containmentSteps(outcome()).at(-1)?.title).toBe(
       "Every other agent untouched",
