@@ -13,16 +13,22 @@ Scenarios (agents, tickets, files, customers) live in YAML, so a new scenario ne
 - A refused call (`BURN:`), a refused token or a model auth failure logs `badge revoked/credentials rotated - stopping` and the agent stops.
 
 ## Swarm workers
-`make swarm MOCK=1 ROLE=worker N=20` starts N deterministic workers, each running under `burn run`, against the mock
-servers on the host (`host.docker.internal`, the fake credential source, project `burn-demo`). A worker makes no
-model calls, so a swarm costs nothing: it calls one MCP tool (`read_inbox` by default) every few seconds through
-`BURN_MCP_URL`, offset by a hash of its agent id so 20 workers do not all call at once, and stops when the Gateway
-refuses its badge. `scripts/run_swarm.py` creates a join token for the role (the role must exist: `burn apply`)
-and writes it with the supervisor's settings to `.run/swarm.env` (mode 600, gitignored). In the container
-`burn run` is PID 1 as root and starts each worker under a uid of its own, so a worker can read neither the
-supervisor's environment nor another worker's. Ctrl-C stops only the workers.
+`make swarm ROLE=worker N=20` starts N deterministic workers, each running under `burn run` in its own container.
+A worker makes no model calls, so a swarm costs nothing: it calls one MCP tool (`read_inbox`
+by default) every few seconds through `BURN_MCP_URL`, offset by a hash of its agent id so 20 workers do not all call
+at once, and stops when the Gateway refuses its badge. The role must exist (`burn apply`).
 
-`make swarm` runs against the mock servers (`MOCK=1`); without `MOCK=1` it exits with an error.
+`scripts/run_swarm.py` is the launcher. On the host it creates one join token, joins once per container, and starts
+each container with `docker run -e NAME`, passing that container's own values (badge, api key, AWS key) from the
+launcher's environment: no secret is in a command line or a file, and containers need no AWS access. In the
+container `burn run` is PID 1 as root, takes the values out of its environment and starts the worker under a uid of
+its own, so a worker can read neither the supervisor's environment nor another worker's. The supervisor still
+sends the admin token to the Burn API (`BURN_DEMO_TOKEN`).
+
+Without `MOCK=1` the workers join the demo stack's internal network, whose one way out is the egress proxy, and
+the Burn API, token and Gateway come from `.env` (`make env`); start the stack first. `MOCK=1` runs the same
+containers against the mock servers on the host (`host.docker.internal`) and nothing else: it ignores `.env`, uses a
+placeholder token and refuses any URL that is not on localhost. Ctrl-C stops only the workers.
 
 ## Key files
 | File | What |
@@ -34,7 +40,7 @@ supervisor's environment nor another worker's. Ctrl-C stops only the workers.
 | `burn_agents/turn.py` | One Strands agent turn, refusal watcher, local tools |
 | `burn_agents/cloud.py` | `check_cloud_access`, `check_provider` (use the agent's own keys) |
 | `burn_agents/swarm_worker.py` | The deterministic swarm worker (no model calls) |
-| `scripts/run_swarm.py`, `scripts/swarm_compose.py` | `make swarm`: join token, `.run/swarm.env`, compose override |
+| `scripts/run_swarm.py`, `scripts/swarm_launch.py` | `make swarm`: join per container, `docker run -e NAME` |
 | `Dockerfile.swarm` | `burn run` plus the worker (build context: repository root) |
 | `docker-compose.yml` | Proxy, sink and networks (built from `.run/detection-build`, proxy credentials from `.run/proxy.env`); agent services are generated per scenario into `.run/` |
 | `scripts/` | `load_scenario.py`, `reset.py`, `run_demo.py`, `mock_badge_issuer.py` (dev) |
