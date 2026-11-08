@@ -327,6 +327,35 @@ describe("agent enrollment", () => {
 });
 
 describe("role instances", () => {
+  it("labels only roles with report-only or no-canary settings", async () => {
+    const fixture = setup([
+      role("defaults"),
+      { name: "omitted", tools: [], managed_by: "code" },
+      { ...role("report", "code"), auto_burn: false },
+      { ...role("none"), canaries: false },
+      { ...role("both", "scenario"), canaries: false, auto_burn: false },
+    ]);
+    await show(fixture);
+    for (const name of ["defaults", "omitted"]) {
+      const group = within(
+        screen.getByRole("region", { name: `Role ${name}` }),
+      );
+      expect(group.queryByText("report-only")).toBeNull();
+      expect(group.queryByText("no canary")).toBeNull();
+    }
+    const report = within(screen.getByRole("region", { name: "Role report" }));
+    expect(report.getByText("report-only")).toBeTruthy();
+    expect(report.queryByText("no canary")).toBeNull();
+    const none = within(screen.getByRole("region", { name: "Role none" }));
+    expect(none.getByText("no canary")).toBeTruthy();
+    expect(none.queryByText("report-only")).toBeNull();
+    const both = within(screen.getByRole("region", { name: "Role both" }));
+    expect(both.getByText("report-only")).toBeTruthy();
+    expect(both.getByText("no canary")).toBeTruthy();
+    expect(screen.getAllByText("report-only")).toHaveLength(2);
+    expect(screen.getAllByText("no canary")).toHaveLength(2);
+  });
+
   it("groups instances with cross-role parent context, status, last seen and exposures", async () => {
     const parent = instance("parent", "planner");
     const child = instance("child", "worker", {
