@@ -1,0 +1,65 @@
+/* Geist and Geist Mono, self-hosted, Latin only. Each @font-face uses
+   font-display: swap; the fallbacks below are Arial sized to Geist's metrics
+   so text keeps its line breaks and height when the real face arrives. */
+@import "@fontsource/geist/latin-400.css";
+@import "@fontsource/geist/latin-500.css";
+@import "@fontsource/geist/latin-600.css";
+@import "@fontsource/geist/latin-700.css";
+@import "@fontsource/geist/latin-800.css";
+@import "@fontsource/geist-mono/latin-400.css";
+@import "@fontsource/geist-mono/latin-500.css";
+@import "@fontsource/geist-mono/latin-600.css";
+
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 400;
+  src: local("Arial"), local("ArialMT");
+  size-adjust: 105.5%;
+  ascent-override: 95.26%;
+  descent-override: 27.96%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 500;
+  src: local("Arial"), local("ArialMT");
+  size-adjust: 107.84%;
+  ascent-override: 93.2%;
+  descent-override: 27.36%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 600;
+  src: local("Arial"), local("ArialMT");
+  size-adjust: 110.17%;
+  ascent-override: 91.22%;
+  descent-override: 26.78%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 700;
+  src: local("Arial Bold"), local("Arial-BoldMT");
+  size-adjust: 104.03%;
+  ascent-override: 96.61%;
+  descent-override: 28.36%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Geist Fallback";
+  font-weight: 800;
+  src: local("Arial Bold"), local("Arial-BoldMT");
+  size-adjust: 106.18%;
+  ascent-override: 94.65%;
+  descent-override: 27.78%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Geist Mono Fallback";
+  src: local("Arial"), local("ArialMT");
+  size-adjust: 136.02%;
+  ascent-override: 73.89%;
+  descent-override: 21.69%;
+  line-gap-override: 0%;
+}

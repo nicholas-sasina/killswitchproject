@@ -1,0 +1,61 @@
+/* Burn's design tokens. Ember is the only accent, and it always means
+   evidence, burning or burned. */
+:root {
+  /* Night: the hero stage (and the sign-in screen after it). */
+  --night: #18181b;
+  --night-raised: #27272a;
+  --night-dot: #3f3f46;
+  --night-line: #52525b;
+  --night-text: #fafafa;
+  --night-bright: #f4f4f5;
+  --night-quiet: #d4d4d8;
+  --night-muted: #a1a1aa;
+
+  /* Paper. */
+  --paper: #ffffff;
+  --band: #f6f7f8;
+  --surface: #fafafa;
+  --ink: #18181b;
+  --ink-soft: #3f3f46;
+  --body: #3b3f45;
+  --muted: #5a5f66;
+  --muted-2: #71717a;
+  --hairline: #e4e4e7;
+  --hairline-soft: #f4f4f5;
+  --rule-soft: #eef0f2;
+  --border: #d4d4d8;
+  --track: #dadde1;
+  --connector: #9da2a9;
+  --connector-dash: #b9bec5;
+
+  /* Ember. #e8522a for dots, fills and night; #b23a0e for text and strokes
+     on white (AA); the tints for washes behind ember text. */
+  --ember: #e8522a;
+  --ember-ink: #b23a0e;
+  --ember-tint: #fdede7;
+  --ember-wash: #fff7f3;
+  --ember-edge: #f8cdbe;
+
+  --font-sans: "Geist", "Geist Fallback", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.1, 1);
+  --ease-state: cubic-bezier(0.3, 0.6, 0.2, 1);
+  --state-ms: 350ms;
+
+  --shadow-stage: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --radius-card: 14px;
+  --radius-panel: 10px;
+
+  --page-max: 1440px;
+  --wrap-max: 1376px;
+  --gutter: 32px;
+  /* The hero's side inset: 52px at 1440, never under 16px. */
+  --edge: clamp(16px, 3.61vw, 52px);
+}
+
+@media (max-width: 760px) {
+  :root {
+    --gutter: 16px;
+  }
+}
