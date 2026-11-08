@@ -8,7 +8,7 @@
  * reasoning behind each kind of block and refusal). An action this build has
  * not heard of still reads as prose instead of breaking the feed.
  */
-import { carriesCredential } from "../alerts";
+import { carriesCredential, isUnknownCaller } from "../alerts";
 import type { LedgerEvent } from "../contracts";
 import { isCanaryRef, keyName } from "./keys";
 import { personLabel } from "./people";
@@ -84,7 +84,7 @@ export function eventSentence(
           );
     case "refused": {
       const detail = event.detail ?? "";
-      if (detail.startsWith("unknown badge") || detail === "session_required")
+      if (isUnknownCaller(event))
         return {
           who: "An unknown caller",
           whoKind: "caller",

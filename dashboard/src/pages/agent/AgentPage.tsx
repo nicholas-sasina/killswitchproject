@@ -31,7 +31,13 @@ import {
 import { AfterBurnCard, IdentityCard, TakeoverCard } from "./AsideCards";
 import { evidenceRefs } from "./ledger";
 import { LedgerCard } from "./LedgerCard";
-import { agentEvents, beforeBurnSteps, heroLede, timelineItems } from "./story";
+import {
+  agentEvents,
+  beforeBurnSteps,
+  finishedNote,
+  heroLede,
+  timelineItems,
+} from "./story";
 import { TimelineCard } from "./TimelineCard";
 import "./agent.css";
 
@@ -278,18 +284,7 @@ function AgentView({ agent }: { agent: ConsoleAgent }) {
           <>
             {agent.state === "finished" ? (
               <Card title="Finished" pad="narrow" className="agent-finished">
-                {agent.sessionId ? (
-                  <p>
-                    {agent.name} finished on its own, so there is nothing to
-                    burn. Burn revoked its badge and deleted its own keys when
-                    it exited.
-                  </p>
-                ) : (
-                  <p>
-                    {agent.name} has not started a session, so there is nothing
-                    to burn.
-                  </p>
-                )}
+                <p>{finishedNote(agent, group?.role?.managed_by)}</p>
               </Card>
             ) : (
               <div
