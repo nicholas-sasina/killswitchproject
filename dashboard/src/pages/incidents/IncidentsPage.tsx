@@ -72,7 +72,7 @@ export function IncidentsPage() {
   } = useConsole();
   const [show, setShow] = useHashParam("show");
   const filter: Filter = show === "open" || show === "burned" ? show : "all";
-  const [query, setQuery] = useHashParam("q");
+  const [query, setQuery, clearQuery] = useSearchText();
   const [everyRow, setEveryRow] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -118,12 +118,35 @@ export function IncidentsPage() {
       else next.add(key);
       return next;
     });
-  const allOpen =
-    shown.length > 0 &&
-    shown.every((row) => expanded.has(row.incident.agent.key));
+  const canExpand = shown.some((row) => !expanded.has(row.incident.agent.key));
+  const canCollapse = shown.some((row) => expanded.has(row.incident.agent.key));
   const clearSearch = () => {
-    setQuery(undefined);
+    clearQuery();
     search.current?.focus();
+  };
+  /**
+   * Once a key is decided, its row can leave the list (the Open tab, or a
+   * search). FlagActions keeps focus in the row when the row stays; when it
+   * goes, focus moves to the list's heading instead of the page.
+   */
+  const keepFocusAfter = (detailId: string, tries = 10) => {
+    window.setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const heading = search.current
+        ?.closest("section")
+        ?.querySelector<HTMLElement>("h2");
+      if (
+        !heading ||
+        heading.closest("[inert]") ||
+        document.getElementById(detailId)
+      ) {
+        if (tries > 0) keepFocusAfter(detailId, tries - 1);
+        return;
+      }
+      heading.tabIndex = -1;
+      heading.focus();
+    }, 16);
   };
 
   const open = useMemo(
@@ -288,9 +311,9 @@ export function IncidentsPage() {
                   <input
                     ref={search}
                     type="search"
-                    value={query ?? ""}
+                    value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search by agent, role, key, reason or status"
+                    placeholder="Search agents, keys, reasons"
                     aria-keyshortcuts="/"
                     autoComplete="off"
                     spellCheck={false}
@@ -300,27 +323,31 @@ export function IncidentsPage() {
                   </kbd>
                 </label>
                 <div className="inc-tools-buttons">
+                  {/* aria-disabled, not disabled: the button keeps focus once used. */}
                   <button
                     type="button"
                     className="btn btn-sm"
-                    disabled={!shown.length || allOpen}
-                    onClick={() =>
+                    aria-disabled={!canExpand}
+                    onClick={() => {
+                      if (!canExpand) return;
                       setExpanded(
                         (current) =>
                           new Set([
                             ...current,
                             ...shown.map((row) => row.incident.agent.key),
                           ]),
-                      )
-                    }
+                      );
+                    }}
                   >
                     Expand all
                   </button>
                   <button
                     type="button"
                     className="btn btn-sm"
-                    disabled={!expanded.size}
-                    onClick={() => setExpanded(new Set())}
+                    aria-disabled={!canCollapse}
+                    onClick={() => {
+                      if (canCollapse) setExpanded(new Set());
+                    }}
                   >
                     Collapse all
                   </button>
@@ -342,8 +369,8 @@ export function IncidentsPage() {
                 >
                   {terms.length
                     ? found.length
-                      ? `No ${filter} incidents match “${query?.trim()}”.`
-                      : `No incidents match “${query?.trim()}”.`
+                      ? `No ${filter} incidents match “${query.trim()}”.`
+                      : `No incidents match “${query.trim()}”.`
                     : filter === "open"
                       ? "Nothing is open. Every burned agent's shared keys have been decided."
                       : "No incident is closed yet. One closes once its shared keys are decided and its replacement is running."}
@@ -424,6 +451,7 @@ export function IncidentsPage() {
                                 flags={flags}
                                 ledger={ledgers.get(agent.agentId)}
                                 onRetry={() => retry(agent.agentId)}
+                                onResolved={() => keepFocusAfter(detailId)}
                               />
                             )}
                           </div>
@@ -457,6 +485,49 @@ export function IncidentsPage() {
       </Columns>
     </div>
   );
+}
+
+/**
+ * The search box's text, kept in the hash as ?q=. The list follows every
+ * key at once; the hash follows 250 ms after the last one, since a burst of
+ * history updates is refused by some browsers. A hash changed elsewhere (a
+ * link, Back) is followed.
+ */
+function useSearchText(): [string, (text: string) => void, () => void] {
+  const [query, setQuery] = useHashParam("q");
+  const [text, setText] = useState(query ?? "");
+  const written = useRef(query ?? "");
+  const write = useRef(setQuery);
+  write.current = setQuery;
+
+  useEffect(() => {
+    const next = query ?? "";
+    if (next === written.current) return;
+    written.current = next;
+    setText(next);
+  }, [query]);
+
+  const save = (value: string) => {
+    try {
+      write.current(value || undefined);
+      written.current = value;
+    } catch {
+      // History refused the update; the next change tries again.
+    }
+  };
+  useEffect(() => {
+    if (text === written.current) return;
+    const timer = window.setTimeout(() => save(text), 250);
+    return () => window.clearTimeout(timer);
+    // save reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
+  const clear = () => {
+    setText("");
+    save("");
+  };
+  return [text, setText, clear];
 }
 
 /** "/" puts the cursor in the search box, unless the cursor is in a field already. */

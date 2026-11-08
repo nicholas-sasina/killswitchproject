@@ -3,14 +3,14 @@
  * ledger, asked for the first time the row opens), the keys still open with
  * their Rotate and Dismiss, its replacement, and a link to the agent page.
  */
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { Flag, LedgerEvent } from "../../contracts";
 import { FlagActions } from "../../features/flags/FlagActions";
 import { flagKey, flagTag } from "../../features/flags/describe";
 import { findAgent, type ConsoleModel, type Incident } from "../../model";
 import { agentHref } from "../../router";
 import { Notice } from "../../ui";
-import { ledgerRows } from "../agent/ledger";
+import { ledgerRows, type LedgerRow } from "../agent/ledger";
 import { agentEvents, replacementOf } from "../agent/story";
 import { didItems } from "./describe";
 import type { LedgerState } from "./useLedgers";
@@ -25,6 +25,7 @@ export function IncidentDetail({
   flags,
   ledger,
   onRetry,
+  onResolved,
 }: {
   incident: Incident;
   /** Every loaded event, newest first. */
@@ -33,6 +34,8 @@ export function IncidentDetail({
   flags: Flag[];
   ledger: LedgerState | undefined;
   onRetry: () => void;
+  /** A key here was rotated or dismissed. */
+  onResolved?: () => void;
 }) {
   const { agent } = incident;
   const own = useMemo(
@@ -58,6 +61,7 @@ export function IncidentDetail({
   );
   const handover = replacementOf(agent, model);
   const href = agentHref(agent.sessionId ?? agent.key);
+  const sawHeading = useRef<HTMLHeadingElement>(null);
 
   return (
     <div className="inc-detail-body">
@@ -79,7 +83,9 @@ export function IncidentDetail({
         </section>
 
         <section className="inc-part">
-          <h3 className="cap inc-part-title">What it saw</h3>
+          <h3 ref={sawHeading} tabIndex={-1} className="cap inc-part-title">
+            What it saw
+          </h3>
           {ledger?.error ? (
             <>
               <Notice tone="error">
@@ -88,13 +94,19 @@ export function IncidentDetail({
               <button
                 type="button"
                 className="btn btn-sm inc-retry"
-                onClick={onRetry}
+                onClick={() => {
+                  // The button gives way to "Loading…": keep focus here.
+                  sawHeading.current?.focus();
+                  onRetry();
+                }}
               >
                 Try again
               </button>
             </>
           ) : !ledger?.entries ? (
-            <p className="inc-quiet">Loading what {agent.name} saw…</p>
+            <p className="inc-quiet" role="status">
+              Loading what {agent.name} saw…
+            </p>
           ) : !saw.length ? (
             <p className="inc-quiet">No key reached it.</p>
           ) : (
@@ -104,11 +116,7 @@ export function IncidentDetail({
                   <span className={row.mono ? "id inc-saw-key" : "inc-saw-key"}>
                     {row.name}
                   </span>
-                  <span
-                    className={row.hot ? "inc-saw-ev is-hot" : "inc-saw-ev"}
-                  >
-                    {row.evidence}
-                  </span>
+                  <span className={evidenceClass(row)}>{row.evidence}</span>
                   <span className="inc-saw-from">{row.source}</span>
                 </li>
               ))}
@@ -127,9 +135,13 @@ export function IncidentDetail({
             <ul className="inc-part-list inc-open-keys">
               {open.map((flag) => (
                 <li key={flag.secret_ref}>
-                  <span className="cap inc-open-tag">{flagTag(flag)}</span>
+                  <span className="cap inc-detail-tag">{flagTag(flag)}</span>
                   <span className="id inc-open-name">{flagKey(flag)}</span>
-                  <FlagActions flag={flag} variant="compact" />
+                  <FlagActions
+                    flag={flag}
+                    variant="compact"
+                    onResolved={onResolved}
+                  />
                 </li>
               ))}
             </ul>
@@ -166,4 +178,15 @@ export function IncidentDetail({
       </a>
     </div>
   );
+}
+
+/**
+ * Evidence reads in ink when it counts against the agent, as on its page;
+ * plain text of a key it doesn't own, the leak itself, reads in ember.
+ */
+function evidenceClass(row: LedgerRow): string {
+  if (!row.hot) return "inc-saw-ev";
+  return /^Plain text\b/.test(row.evidence)
+    ? "inc-saw-ev is-hot is-plain"
+    : "inc-saw-ev is-hot";
 }

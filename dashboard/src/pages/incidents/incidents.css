@@ -83,6 +83,16 @@
   gap: 8px;
 }
 
+/* Expand all and Collapse all stay focusable when there's nothing to do. */
+.incidents-page .inc-tools-buttons .btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.incidents-page .inc-tools-buttons .btn[aria-disabled="true"]:hover {
+  border-color: var(--border);
+}
+
 .incidents-page .inc-head {
   padding: 12px 0 9px;
   border-bottom: 1px solid var(--hairline);
@@ -104,8 +114,9 @@
   cursor: pointer;
 }
 
+/* The ring sits outside the row, clear of the square and the chevron. */
 .incidents-page .inc-row:focus-visible {
-  outline-offset: -2px;
+  outline-offset: 2px;
   border-radius: 6px;
 }
 
@@ -116,6 +127,7 @@
 /* A chevron drawn from two borders: right when shut, down when open. */
 .incidents-page .inc-chevron {
   justify-self: end;
+  margin-right: 4px;
   width: 8px;
   height: 8px;
   border-right: 1.5px solid var(--muted-2);
@@ -188,15 +200,24 @@
   color: var(--muted);
 }
 
-/* Plain text that reached it is the evidence, so it reads in ember. */
+/* Evidence against it reads in ink, as on its page; leaked plain text in ember. */
 .incidents-page .inc-saw-ev.is-hot {
-  color: var(--ember-ink);
+  color: var(--ink);
   font-weight: 600;
+}
+
+.incidents-page .inc-saw-ev.is-plain {
+  color: var(--ember-ink);
 }
 
 .incidents-page .inc-saw-from {
   flex-basis: 100%;
   font-size: 12px;
+  color: var(--muted-2);
+}
+
+.incidents-page .inc-detail-tag {
+  font-size: 10px;
   color: var(--muted-2);
 }
 
@@ -369,6 +390,11 @@
 
   .incidents-page .inc-detail-body {
     padding-left: 0;
+  }
+
+  /* Open, the row's details say what Burn did, step by step. */
+  .incidents-page .inc-item.is-open .inc-did {
+    display: none;
   }
 
   .incidents-page .inc-detail-grid {
