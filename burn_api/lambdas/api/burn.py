@@ -118,18 +118,21 @@ def flag_blocked_attempts(agent_id: str) -> list[dict]:
 
 
 def burn_agent(agent_id: str, reason: str = "", replaceable: list[str] | None = None,
-               evidence_time: str | None = None) -> dict:
+               evidence_time: str | None = None, revoked_before: list[str] | None = None) -> dict:
     """replaceable and evidence_time are for a burn of single instances (replace.py): the sessions the caller
-    already revoked, and its earliest evidence of compromise. None for any other burn, which never replaces."""
+    already revoked, and its earliest evidence of compromise. None for any other burn, which never replaces.
+    revoked_before: the sessions a scoped burn (burn_scopes.py) revoked before calling here. The event and
+    the reply count them along with any this call revokes, so they name every session the burn stopped."""
     if db.get_agent(agent_id) is None:
         raise sessions.NotFound(agent_id)
 
     revoked_ids = sessions.revoke_sessions(agent_id)
+    all_revoked = list(dict.fromkeys([*(revoked_before or []), *revoked_ids]))
     reason_text = f" ({reason[:200]})" if reason else ""
     db.write_event(
         agent_id=agent_id, source="burn", action="revoked",
-        session_id=revoked_ids[-1] if revoked_ids else None,
-        detail=f"{len(revoked_ids)} session(s) revoked{reason_text}",
+        session_id=all_revoked[-1] if all_revoked else None,
+        detail=f"{len(all_revoked)} session(s) revoked{reason_text}",
     )
 
     result = minter_client.call(
@@ -143,7 +146,7 @@ def burn_agent(agent_id: str, reason: str = "", replaceable: list[str] | None = 
         "agent_id": agent_id,
         # After a burn the agent has no usable badge, whether or not it had a session.
         "revoked": True,
-        "sessions_revoked": revoked_ids,
+        "sessions_revoked": all_revoked,
         "rotated": rotated,
         "flagged": flagged,
     }

@@ -29,10 +29,10 @@ BURN_WORKERS = 10
 BURN_BUDGET_SECONDS = 24
 
 
-def _submit(pool, fn, *args):
+def _submit(pool, fn, *args, **kwargs):
     """Run fn in the pool with this request's context, so its events name the same caller (caller.py).
     One copy per task: a context cannot be entered by two threads at once."""
-    return pool.submit(contextvars.copy_context().run, fn, *args)
+    return pool.submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
 
 def _lineage(root_id: str) -> list[dict]:
@@ -127,10 +127,14 @@ def _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed, replace
     """
     burned, failed = [], []
 
-    def args(agent_id):  # any other burn calls burn_agent exactly as before
-        return (agent_id, reason) + ((revoked.get(agent_id, []), (evidence or {}).get(agent_id)) if replaceable else ())
+    def kwargs(agent_id):  # burn_agent counts what was revoked here in its event and its reply
+        done = revoked.get(agent_id, [])
+        if not replaceable:
+            return {"revoked_before": done}
+        return {"revoked_before": done, "replaceable": done, "evidence_time": (evidence or {}).get(agent_id)}
 
-    futures = {_submit(pool, burn.burn_agent, *args(agent_id)): agent_id for agent_id in agent_ids}
+    futures = {_submit(pool, burn.burn_agent, agent_id, reason, **kwargs(agent_id)): agent_id
+               for agent_id in agent_ids}
     _, pending = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
     for future, agent_id in futures.items():
         if future in pending:
@@ -141,7 +145,7 @@ def _burn_all(pool, agent_ids, reason, deadline, revoked, revoke_failed, replace
         except Exception as exc:
             failed.append({"agent_id": agent_id, "error": _describe(exc, agent_id in revoke_failed)})
             continue
-        burned.append(result | {"sessions_revoked": sorted(set(revoked.get(agent_id, [])) | set(result["sessions_revoked"]))})
+        burned.append(result | {"sessions_revoked": sorted(result["sessions_revoked"])})
     return burned, failed
 
 
