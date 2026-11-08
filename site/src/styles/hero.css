@@ -60,6 +60,7 @@
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
   border-radius: 4px;
 }
 
@@ -142,6 +143,42 @@
   }
   .mark-md .mark-word {
     font-size: 19px;
+  }
+}
+
+/* The narrowest phones: tighten the bar so the call to action fits. */
+@media (max-width: 380px) {
+  .topbar-inner {
+    gap: 10px;
+    padding: 0 8px 0 12px;
+  }
+  .topbar-actions {
+    gap: 12px;
+  }
+  .topbar-cta {
+    padding: 0 10px;
+  }
+  .topbar-cta svg {
+    display: none;
+  }
+  .mark-md .mark-word {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 340px) {
+  .topbar-actions {
+    gap: 10px;
+  }
+  .topbar-link {
+    font-size: 13px;
+  }
+  .topbar-cta {
+    padding: 0 9px;
+    font-size: 12px;
+  }
+  .mark-md .mark-word {
+    font-size: 16px;
   }
 }
 
