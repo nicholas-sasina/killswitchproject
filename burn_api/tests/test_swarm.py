@@ -949,3 +949,12 @@ def test_cleanup_failures_do_not_hide_the_original_error_or_stop_the_rest(env, m
     monkeypatch.setattr(minter_client, "call", canary_delete_fails)
     failing_join(env)  # still raises the original RuntimeError("injected")
     assert len(deletes(env, "/credentials")) == 1  # the last step ran even though two before it failed
+
+
+@pytest.mark.parametrize("reserved", ["eval", "eval-7", "eval-load-test"])
+def test_eval_role_names_are_reserved(env, reserved):
+    for method, path in (("POST", "/roles"), ("PUT", f"/roles/{reserved}")):
+        status, body = call(env, method, path, {"name": reserved, "tools": []})
+        assert status == 400 and "reserved" in body["error"]
+    assert env.ddb.Table("burn-roles").scan()["Items"] == []
+    assert call(env, "POST", "/roles", {"name": "evaluator", "tools": []})[0] == 201  # only eval and eval-*

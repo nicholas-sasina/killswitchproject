@@ -40,6 +40,8 @@ def parse_spec(body: dict) -> dict:
     """Validate a RoleSpec request body (contracts/burn-api.openapi.yaml)."""
     if not names.is_role_name(body.get("name")):
         raise _bad("name must match ^[a-z0-9][a-z0-9-]{0,31}$")
+    if names.is_reserved_role_name(body["name"]):
+        raise _bad("role names 'eval' and 'eval-*' are reserved for the eval harness")
     managed_by = body.get("managed_by", "ui")
     if managed_by not in MANAGERS:
         raise _bad("managed_by must be code or ui")
