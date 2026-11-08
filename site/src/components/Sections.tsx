@@ -1,4 +1,4 @@
-import { REPO_URL, SURVEY_URL } from "../env";
+import { REPO_URL, RESULTS_URL, SURVEY_URL } from "../env";
 import { Mark } from "./Mark";
 import { SignInLink } from "./SignInLink";
 
@@ -22,10 +22,9 @@ export function Why() {
             whose value it saw, and stops only the instance with evidence
             against it.
           </p>
-          <p className="measured">
-            Measured on AWS: a single instance was revoked 2.01 s after the
-            burn, and burning a role of 20 workers left none active after 4.90
-            s.
+          <p className="why-note">
+            A burn revokes the instance first, so the Gateway refuses its next
+            tool call even before its keys are rotated.
           </p>
           <p className="fine">
             In a 2025 SailPoint report, 82% of organizations already used AI
@@ -55,10 +54,12 @@ export function Limits() {
             still has to be used somewhere.
           </p>
           <p className="body-lg">
-            In our tests the exit check caught 76% of leak attempts across 31
-            disguises and four key types, with no false alarms on 310 ordinary
-            payloads. Keys split across requests, gzipped or written in base32
-            mostly got through.
+            On our main offline test set, the exit check named the key in 76% of
+            leak attempts, across 31 disguises and four key types, with no false
+            alarms on 310 ordinary payloads. On a held-out set of eight more
+            disguises, it caught 31.2%. Keys gzipped or written in base32 got
+            through every time, and keys split across requests often did.{" "}
+            <a href={RESULTS_URL}>Read the results</a>
           </p>
           <p className="body-lg">
             Keep the guardrails you already run. When they miss, Burn makes the
