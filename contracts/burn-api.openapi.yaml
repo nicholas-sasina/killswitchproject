@@ -308,6 +308,7 @@ paths:
     post:
       summary: Start a role instance (join or spawn). The same two role forms as POST /sessions.
       security:
+        - demoToken: []      # the admin token may start either form
         - sessionToken: []   # {role, parent_session}: the parent's session token
         - {}                 # {role, enroll_token}: the join token in the body is the authority
       description: |
@@ -319,7 +320,7 @@ paths:
           `Authorization: Bearer <the parent's session_token>`. The role must be in the parent role's
           `may_spawn`; the child never gets more tools, credentials or egress than its parent.
         The reply is the same as for the role forms of `POST /sessions` (secrets included, once).
-        Any other body shape is refused with 401. `POST /sessions` keeps working unchanged.
+        Without the admin token, any other body shape is refused with 401. `POST /sessions` keeps working unchanged.
       requestBody:
         required: true
         content:
@@ -344,6 +345,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SessionStarted' }
+        '400': { description: "with the admin token: a body that is not one of the two role forms, or both enroll_token and parent_session" }
         '401': { description: no valid authority for this body (a malformed, mixed or unknown shape, or a wrong or missing session token) }
         '403': { description: join token invalid, expired, used up or revoked; or role not in the parent's may_spawn; or the parent is not active }
         '404': { description: the role or parent session does not exist }
@@ -555,8 +557,8 @@ components:
               pattern: '^bst_[A-Za-z0-9_-]{43}$'
               description: |
                 Authenticates this instance's own calls as `Authorization: Bearer <session_token>`,
-                in place of the admin token: its heartbeat and exit, and POST /sessions
-                {role, parent_session} to spawn a child of it. Only its sha256 is stored. The
+                in place of the admin token: its heartbeat and exit, and POST /sessions or
+                POST /instances {role, parent_session} to spawn a child of it. Only its sha256 is stored. The
                 supervisor keeps it and never hands it to the agent process.
             api_key: { type: string, description: Present if the role mints an api_key. }
             aws_key:
