@@ -57,6 +57,12 @@
           "type": "boolean",
           "default": true,
           "description": "Burn an instance automatically when its canary is used from outside Burn. false = report-only: alert and flag, never burn."
+        },
+        "references": {
+          "type": "string",
+          "enum": ["replace", "report", "off"],
+          "default": "replace",
+          "description": "Credentials Burn recognizes in tool output: replace = the agent gets {{burn:ref:<secret_ref>}} instead of the value; report = record what would be replaced, change nothing; off = neither. Canaries are never replaced."
         }
       }
     }

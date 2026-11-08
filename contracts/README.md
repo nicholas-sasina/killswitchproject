@@ -86,6 +86,25 @@ replays the pre-rotation key without anyone having stored a copy.
 - Registered rows go to `burn-fingerprints`. Rows are never deleted on rotation: they are marked
   `status=rotated`, so a leak of an old key is still caught and attributed.
 
+### Secret references
+- In tool output the Gateway replaces every located credential it recognizes with
+  `{{burn:ref:<secret_ref>}}` (role field `references`: `replace` default, `report`, `off`), so the agent
+  never holds the value and nothing it sends can leak it. In a connection string only the password is
+  replaced, so host and database stay readable. Canaries are never replaced.
+- If a recognized, non-canary credential cannot be located exactly (a fragment, an unknown span, or a copy
+  still found after replacing), the whole tool response is withheld with a `refused` event.
+- Ledger rows (`burn-exposures`) get `status`: `referenced` when the agent only got the reference, `seen`
+  when the plaintext reached it (`seen` wins once it happens). A burn never flags a credential whose
+  exposures are all `referenced`.
+- Tools that may take a reference as an argument list it in `accepts_secret_refs` (`mcp-tools.json`); the
+  Gateway swaps it for the value only there, only for a secret the session owns or has in its ledger, and
+  never for `send_message` or `notify`.
+- Ledger rows record `source_ref` = `<tool>:<resource>` from the tool's `resource_arg`
+  (`burn_contracts.tools.source_ref`), so `POST /burn/by-source` can find everyone who read a source.
+- `burn-fingerprints` holds one extra item, `fingerprint = "_version"` (`names.FINGERPRINTS_VERSION_KEY`),
+  which the minter bumps on every register, rotate and delete. The Gateway keeps all fingerprints in
+  memory and reloads them only when that number changes.
+
 ### Placeholders in scenario files
 Scenario `files[].content` and `customers[].notes` may contain:
 - `{{cred:<agent_id>:api_key}}`
@@ -106,7 +125,7 @@ values exist only in Secrets Manager, and after a rotation the file shows the ne
 | Table | Keys | GSIs | Writers |
 |---|---|---|---|
 | `burn-events` | PK `stream` (= `"all"`), SK `event_id` | `by_agent` (PK `agent_id`, SK `event_id`) | gateway, proxy, burn_api, minter (provider) |
-| `burn-exposures` (the ledger) | PK `agent_id`, SK `secret_ref_or_fp` | none | gateway (recorded, inherited) |
+| `burn-exposures` (the ledger) | PK `agent_id`, SK `secret_ref_or_fp` | `by_source` (PK `source_ref`, SK `first_seen`) | gateway (recorded, inherited) |
 | `burn-credentials` | PK `secret_ref` | `by_owner` (PK `owner_agent_id`) | minter |
 | `burn-fingerprints` | PK `fingerprint` | `by_secret` (PK `secret_ref`) | minter |
 | `burn-sessions` | PK `session_id` | `by_agent` (PK `agent_id`), `by_client` (PK `client_id`) | burn_api |

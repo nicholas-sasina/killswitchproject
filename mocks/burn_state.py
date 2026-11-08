@@ -47,7 +47,8 @@ class BurnState:
             "owner": row["owner"], "owner_agent_id": row["owner_agent_id"],
             "source": source, "via": sender or tool,
             "first_seen": previous["first_seen"] if previous else utc_now_iso(), "status": "active",
-            "flag_level": None,
+            "flag_level": None, "exposure": "seen",
+            "source_ref": previous["source_ref"] if previous else (None if sender else tool),
         }
         self.emit(agent_id, source, action, session_id=self.agent_state(agent_id)["session_id"],
                   secret_ref=ref, fingerprint=row["fingerprint"], secret_type=row["type"],
@@ -120,6 +121,22 @@ class BurnState:
             self.emit("system", "burn", "dismissed", secret_ref=ref, flag_level=flag["flag_level"],
                       detail="Mock flag dismissed by its owner.")
         return {"flag": self._flag_view(flag), "rotated_to_version": version}
+
+    def burn_by_source(self, source_ref, since=None):
+        """Mock POST /burn/by-source: readers of the source, then whoever they messaged afterwards."""
+        readers = {}
+        for agent_id, ledger in self.ledgers.items():
+            for row in ledger.values():
+                if row.get("source_ref") == source_ref and (since is None or row["first_seen"] >= since):
+                    readers.setdefault(agent_id, {"agent_id": agent_id, "via": "read", "first_seen": row["first_seen"]})
+        for agent_id, ledger in self.ledgers.items():
+            for row in ledger.values():
+                if row["source"] == "handoff" and row["via"] in readers and agent_id not in readers:
+                    if row["first_seen"] >= readers[row["via"]]["first_seen"]:
+                        readers[agent_id] = {"agent_id": agent_id, "via": "handoff", "first_seen": row["first_seen"]}
+        burned = [self.burn(agent_id) for agent_id in readers]
+        return {"source_ref": source_ref, "since": since, "readers": list(readers.values()),
+                "burned": burned, "failed": []}
 
     def burn(self, agent_id):
         revoked = []

@@ -19,6 +19,12 @@ MESSAGES_TABLE = "burn-messages"
 ROLES_TABLE = "burn-roles"
 ENROLL_TOKENS_TABLE = "burn-enroll-tokens"
 
+# burn-fingerprints item the minter bumps whenever it registers, rotates or deletes fingerprints.
+# Not 64 hex chars, so it can never collide with an HMAC.
+FINGERPRINTS_VERSION_KEY = "_version"
+# burn-exposures index for "who read this source": PK source_ref, SK first_seen.
+EXPOSURES_BY_SOURCE_INDEX = "by_source"
+
 # Partition key value for the single global event stream in burn-events.
 EVENTS_STREAM = "all"
 

@@ -14,7 +14,8 @@ from burn_contracts.names import (
     agent_secret_ref, instance_agent_id, parse_join_token, scenario_role_name,
 )
 
-ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn")
+ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn",
+               "references")
 
 
 class SwarmError(Exception):
@@ -48,7 +49,7 @@ class Swarm:
         return {"name": scenario_role_name(agent_id), "tools": list(agent["tools"]),
                 "credentials": list(agent["credentials"]),
                 "may_message": [scenario_role_name(peer) for peer in agent.get("send_to", [])],
-                "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
+                "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True, "references": "replace",
                 "managed_by": "scenario"}
 
     def _scenario_roles(self):

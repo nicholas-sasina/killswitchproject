@@ -270,3 +270,52 @@ def test_dismissed_event_and_flag_routes():
         assert resolution["properties"]["action"]["enum"] == ["rotate", "dismiss"]
         assert "reason" in resolution["required"]
         assert "instance_count" in doc["components"]["schemas"]["Flag"]["required"]
+
+
+def test_tool_mirrors_match_mcp_tools_json():
+    from burn_contracts import tools
+    doc = json.loads((ROOT / "mcp-tools.json").read_text())
+    by_name = {t["name"]: t for t in doc["tools"]}
+    assert {n: t["resource_arg"] for n, t in by_name.items() if t["resource_arg"]} == tools.RESOURCE_ARG
+    assert {n: tuple(t["accepts_secret_refs"]) for n, t in by_name.items() if t["accepts_secret_refs"]} == \
+        tools.ACCEPTS_SECRET_REFS
+    for name, tool in by_name.items():  # a resource or resolvable arg must be a real input
+        props = tool["inputSchema"]["properties"]
+        assert tool["resource_arg"] in (None, *props)
+        assert set(tool["accepts_secret_refs"]) <= set(props)
+    assert not by_name["send_message"]["accepts_secret_refs"] and not by_name["notify"]["accepts_secret_refs"]
+
+
+def test_source_ref_and_resolvable_args():
+    from burn_contracts import tools
+    assert tools.source_ref("read_ticket", {"ticket_id": "T-1001"}) == "read_ticket:T-1001"
+    assert tools.source_ref("read_config", {"path": "config/app.env"}) == "read_config:config/app.env"
+    assert tools.source_ref("list_tickets", {}) == "list_tickets"
+    assert tools.source_ref("read_ticket", {}) == "read_ticket"
+    assert len(tools.source_ref("read_config", {"path": "x" * 999})) == len("read_config:") + 200
+    assert tools.source_ref("read_config", {"path": "a\nb\x00c"}) == "read_config:abc"
+    assert tools.resolvable_args("send_message") == () and tools.resolvable_args("notify") == ()
+
+
+def test_reference_tokens():
+    from burn_contracts import references
+    tok = references.token("burn/shared/crm_db_url")
+    assert tok == "{{burn:ref:burn/shared/crm_db_url}}"
+    assert references.REF_RE.fullmatch(tok)["secret_ref"] == "burn/shared/crm_db_url"
+    with pytest.raises(ValueError):
+        references.token("arn:aws:secretsmanager:whatever")
+    assert references.mode({}) == "replace" and references.mode({"references": "report"}) == "report"
+    assert references.mode({"references": "bogus"}) == "replace"
+
+
+def test_references_role_field_ledger_fields_and_by_source_route():
+    schema = json.loads((ROOT / "burn.schema.json").read_text())
+    prop = schema["$defs"]["role"]["properties"]["references"]
+    assert prop["enum"] == ["replace", "report", "off"] and prop["default"] == "replace"
+    api = yaml.safe_load((ROOT / "burn-api.openapi.yaml").read_text())
+    assert api["components"]["schemas"]["RoleFields"]["properties"]["references"]["default"] == "replace"
+    entry = api["components"]["schemas"]["LedgerEntry"]["properties"]
+    assert entry["exposure"]["enum"] == ["seen", "referenced"] and "source_ref" in entry
+    assert "/burn/by-source" in api["paths"]
+    assert names.FINGERPRINTS_VERSION_KEY == "_version" and len(names.FINGERPRINTS_VERSION_KEY) != 64
+    assert names.EXPOSURES_BY_SOURCE_INDEX == "by_source"
