@@ -51,7 +51,15 @@ class RoleSpec(BaseModel):
     owner: str | None = None
     canaries: bool = True
     auto_burn: bool = True
+    references: Literal["replace", "report", "off"] = "replace"
     managed_by: Literal["code", "ui"] = "ui"
+
+
+class BySourceRequest(BaseModel):
+    tool: str | None = None
+    source_ref: str = Field(max_length=260)
+    since: str | None = None
+    reason: str | None = Field(default=None, max_length=200)
 
 
 class FlagResolution(BaseModel):
@@ -164,6 +172,14 @@ def create_app(scenario_path=DEFAULT_SCENARIO, *, activity_interval=2.0):
     async def ledger(agent_id: str):
         require_agent(agent_id)
         return {"agent_id": agent_id, "entries": list(state.ledgers[agent_id].values())}
+
+    @app.post("/burn/by-source")
+    async def burn_by_source(body: BySourceRequest):
+        source_ref = body.source_ref if body.tool is None or ":" in body.source_ref else f"{body.tool}:{body.source_ref}"
+        result = state.burn_by_source(source_ref, body.since)
+        if not result["readers"]:
+            raise HTTPException(404, "Nobody read that source in the window")
+        return result
 
     @app.get("/flags")
     async def flags():
