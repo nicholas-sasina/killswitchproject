@@ -9,6 +9,8 @@ import type {
 import { mergeFleet } from "../../fleet";
 import { buildConsole, roleCounts } from "../../model";
 import {
+  accessLevel,
+  FULL_ACCESS_TOOLS,
   filterOf,
   keysSeen,
   keysText,
@@ -451,7 +453,7 @@ describe("rolesList", () => {
       owner: "Support automation",
       managed_by: "code",
     },
-    { name: "triage", tools: [], managed_by: "ui" },
+    { name: "triage", tools: [...FULL_ACCESS_TOOLS], managed_by: "ui" },
     { name: "reader", tools: [], managed_by: "code" },
   ];
   // worker-02 was last seen, so burned, at 7:30 PM today.
@@ -472,11 +474,11 @@ describe("rolesList", () => {
     ]);
   });
 
-  it("says who owns a role and where it is managed", () => {
+  it("says whether a role has Full access, who owns it and where it is managed", () => {
     expect(list.map((found) => found.line)).toEqual([
-      "Support automation · managed in burn.yaml",
-      "Managed in burn.yaml",
-      "Managed in this dashboard",
+      "Limited · Support automation · managed in burn.yaml",
+      "Limited · managed in burn.yaml",
+      "Full access · managed in this dashboard",
     ]);
   });
 
@@ -508,5 +510,34 @@ describe("rolesList", () => {
       modelOf([instance("w1", "worker", "exited", at(19, 0))]),
     );
     expect(finished[0].note).toBe("1 finished");
+  });
+});
+
+describe("accessLevel", () => {
+  it("is Full access with every tool and no egress list", () => {
+    expect(accessLevel({ tools: [...FULL_ACCESS_TOOLS], egress: null })).toBe(
+      "Full access",
+    );
+    expect(
+      accessLevel({
+        tools: [...FULL_ACCESS_TOOLS].reverse(),
+        egress: undefined,
+      }),
+    ).toBe("Full access");
+  });
+
+  it("is Limited with a tool missing or any egress list", () => {
+    expect(
+      accessLevel({ tools: FULL_ACCESS_TOOLS.slice(1), egress: null }),
+    ).toBe("Limited");
+    expect(accessLevel({ tools: [...FULL_ACCESS_TOOLS], egress: [] })).toBe(
+      "Limited",
+    );
+    expect(
+      accessLevel({
+        tools: [...FULL_ACCESS_TOOLS],
+        egress: ["api.example.com"],
+      }),
+    ).toBe("Limited");
   });
 });

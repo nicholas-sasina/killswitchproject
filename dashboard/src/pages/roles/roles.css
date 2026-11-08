@@ -216,6 +216,13 @@
 
 /* ---------- Join tokens ---------- */
 
+.role-token-reuse {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-2);
+}
+
 .role-token {
   display: flex;
   align-items: center;

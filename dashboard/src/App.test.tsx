@@ -210,10 +210,10 @@ describe("the console shell", () => {
     ).toBeTruthy();
   });
 
-  it("opens Add agents from the navigation", async () => {
+  it("opens Connect an agent from the navigation", async () => {
     api();
     await open();
-    fireEvent.click(screen.getByRole("button", { name: "Add agents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect an agent" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 

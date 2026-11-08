@@ -133,7 +133,9 @@ export function RunningNow({
       {loading ? (
         <Notice>Loading agents.</Notice>
       ) : rows.length === 0 ? (
-        <EmptyState>No agents running. Add agents to start a role.</EmptyState>
+        <EmptyState>
+          No agents running. Connect an agent to start one.
+        </EmptyState>
       ) : (
         <>
           <ul className="ov-rows">

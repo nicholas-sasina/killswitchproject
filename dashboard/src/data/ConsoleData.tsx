@@ -109,7 +109,7 @@ export interface ConsoleData {
   refreshRoles: () => void;
   refreshInstances: () => void;
 
-  /** Open the Add agents dialog, for a role or for a new one. */
+  /** Open Connect an agent, with a role chosen or none. */
   openAddAgents: (role?: string) => void;
   /** Squares listen here for their agent's calls. */
   pulses: PulseBus;
