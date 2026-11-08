@@ -74,6 +74,24 @@ class Instance:
 
     # -- lifecycle ----------------------------------------------------------------------------
     def run(self) -> int:
+        original = self._guard_setup()
+        try:
+            return self._run_guarded()
+        finally:
+            self._restore_signals(original)
+
+    def _guard_setup(self) -> dict:
+        """Until the agent runs and signals are forwarded to it, SIGTERM and SIGHUP end this instance cleanly
+        (the exit is reported) instead of killing the supervisor with its session still active."""
+        if threading.current_thread() is not threading.main_thread():
+            return {}
+
+        def stop(sig, _frame):
+            raise SystemExit(128 + sig)
+
+        return {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGHUP)}
+
+    def _run_guarded(self) -> int:
         session = self.start_session()
         cleanups: list[Callable[[], None]] = []
         try:

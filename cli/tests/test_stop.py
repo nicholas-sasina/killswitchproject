@@ -180,3 +180,21 @@ def test_spawn_never_puts_secrets_in_the_child_supervisors_argv(stack, monkeypat
     for value in ("client-secret-xyz", "mpk_live_secretvalue", "AKIASECRETXYZ", "aws-secret-xyz", "bst_secrettoken"):
         assert value not in joined
     assert json.loads(argv[argv.index("--adopt") + 1])["session_id"] == result["session_id"]  # the rest still goes
+
+
+def test_sigterm_during_setup_still_reports_the_exit(stack, monkeypatch):
+    """docker stop landing after the session started but before the agent runs must not leave it active."""
+    inst = instance(stack, py("pass"))
+    before = signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(inst, "_make_home", lambda: os.kill(os.getpid(), signal.SIGTERM) or "/nonexistent")
+    with pytest.raises(SystemExit) as exc:
+        inst.run()
+    assert exc.value.code == 128 + signal.SIGTERM
+    (row,) = stack.instances.values()
+    assert row["status"] == "exited"
+    assert signal.getsignal(signal.SIGTERM) is before  # the handler is put back
+
+
+def test_the_agent_dying_nonzero_still_reports_the_exit(stack):
+    assert instance(stack, py("import sys; sys.exit(1)")).run() == 1
+    assert next(iter(stack.instances.values()))["status"] == "exited"
