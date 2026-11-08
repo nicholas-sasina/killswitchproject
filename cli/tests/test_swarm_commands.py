@@ -1,6 +1,5 @@
-"""login, init, apply, pull, token create, ps and kill against the fake API."""
+"""init, apply, pull, token create, ps and kill against the fake API."""
 import json
-import stat
 from pathlib import Path
 
 import pytest
@@ -39,31 +38,6 @@ def test_init_does_not_overwrite_without_force(tmp_path, capsys):
     code, _, err = burn(capsys, "init", "-f", str(target))
     assert code == 2 and "already exists" in err and target.read_text() == "keep"
     assert burn(capsys, "init", "-f", str(target), "--force")[0] == 0
-
-
-def test_login_verifies_then_stores_privately_without_printing_the_token(fake, tmp_path, capsys, monkeypatch):
-    dotenv = tmp_path / ".env"
-    dotenv.write_text("KEEP=1\nBURN_DEMO_TOKEN=old\n")
-    monkeypatch.delenv("BURN_API_URL")
-    monkeypatch.delenv("BURN_DEMO_TOKEN")
-    monkeypatch.setattr("getpass.getpass", lambda _: API_TOKEN)
-    args = ["login", "--url", fake.url]
-    from burn_cli import main
-    code = main.run(args, dotenv=dotenv)
-    out = capsys.readouterr()
-    assert code == 0 and API_TOKEN not in out.out + out.err
-    values = dict(line.split("=", 1) for line in dotenv.read_text().splitlines())
-    assert values == {"KEEP": "1", "BURN_API_URL": fake.url, "BURN_DEMO_TOKEN": API_TOKEN}
-    assert stat.S_IMODE(dotenv.stat().st_mode) == 0o600
-
-
-def test_login_with_a_wrong_token_stores_nothing(fake, tmp_path, capsys, monkeypatch):
-    dotenv = tmp_path / ".env"
-    monkeypatch.setattr("getpass.getpass", lambda _: "wrong")
-    from burn_cli import main
-    assert main.run(["login", "--url", fake.url], dotenv=dotenv) == 1
-    assert not dotenv.exists()
-    assert "wrong" not in capsys.readouterr().err
 
 
 def write_yaml(tmp_path, doc):

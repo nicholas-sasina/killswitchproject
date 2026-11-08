@@ -51,9 +51,10 @@ def authorize_url(domain: str, client_id: str, challenge: str, state: str) -> st
 
 
 # -- the redirect -------------------------------------------------------------------------------
-def wait_for_code(state: str, port: int = CALLBACK_PORT, timeout: float = CALLBACK_TIMEOUT,
+def wait_for_code(state: str, port: int | None = None, timeout: float = CALLBACK_TIMEOUT,
                   started: threading.Event | None = None) -> str:
     """Serve 127.0.0.1:<port> until the redirect arrives; return its code. A wrong state is refused."""
+    port = port or CALLBACK_PORT
     result: dict = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -204,8 +205,9 @@ def delete_cache(path: Path | None = None) -> bool:
 
 
 # -- the flows ----------------------------------------------------------------------------------
-def login(domain: str, client_id: str, open_browser: Callable[[str], bool] = webbrowser.open,
-          say: Callable[[str], None] = print, port: int = CALLBACK_PORT, timeout: float = CALLBACK_TIMEOUT) -> dict:
+def login(domain: str, client_id: str, open_browser: Callable[[str], bool] | None = None,
+          say: Callable[[str], None] = print, port: int | None = None, timeout: float = CALLBACK_TIMEOUT) -> dict:
+    open_browser = open_browser or webbrowser.open
     verifier, challenge = pkce_pair()
     state = secrets.token_urlsafe(24)
     url = authorize_url(domain, client_id, challenge, state)

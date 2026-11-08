@@ -1,4 +1,4 @@
-"""Where the CLI finds the API URL and demo token: environment first, then the repo-root .env."""
+"""Where the CLI finds its settings: environment first, then the repo-root .env."""
 import os
 from pathlib import Path
 
@@ -25,27 +25,15 @@ def get(name: str, dotenv: Path | None = None) -> str:
     return os.environ.get(name) or _read_dotenv(dotenv or REPO_ROOT / ".env").get(name, "")
 
 
-def save(api_url: str, token: str, dotenv: Path | None = None) -> Path:
-    """Write the API URL and token into the .env file, keeping its other lines. The file is made private."""
-    path = dotenv or REPO_ROOT / ".env"
-    updates = {"BURN_API_URL": api_url.rstrip("/"), "BURN_DEMO_TOKEN": token}
-    lines = path.read_text().splitlines() if path.exists() else []
-    kept = [ln for ln in lines if ln.split("=", 1)[0].strip() not in updates]
-    path.touch(mode=0o600)
-    path.chmod(0o600)
-    path.write_text("\n".join(kept + [f"{k}={v}" for k, v in updates.items()]) + "\n")
-    return path
-
-
 def load(dotenv: Path | None = None) -> tuple[str, str]:
-    """Return (api_url, token). Raises ConfigError with a hint when either is missing."""
-    file_values = _read_dotenv(dotenv or REPO_ROOT / ".env")
-
-    def get(name: str) -> str:
-        return os.environ.get(name) or file_values.get(name, "")
-
-    url, token = get("BURN_API_URL"), get("BURN_DEMO_TOKEN")
-    missing = [n for n, v in (("BURN_API_URL", url), ("BURN_DEMO_TOKEN", token)) if not v]
-    if missing:
-        raise ConfigError(f"{' and '.join(missing)} not set. Export them or run `make env` to write .env.")
+    """Return (api_url, demo_token). The demo token is needed (and read) only with BURN_LOCAL_DEV=1; otherwise
+    people sign in with `burn login` and the token is "". Raises ConfigError with a hint when something is missing."""
+    url = get("BURN_API_URL", dotenv)
+    if not url:
+        raise ConfigError("BURN_API_URL not set. Export it or run `make env` to write .env.")
+    if get("BURN_LOCAL_DEV", dotenv) != "1":
+        return url.rstrip("/"), ""
+    token = get("BURN_DEMO_TOKEN", dotenv)
+    if not token:
+        raise ConfigError("BURN_LOCAL_DEV=1 needs BURN_DEMO_TOKEN (any value for the mock servers).")
     return url.rstrip("/"), token
