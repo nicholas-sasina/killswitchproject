@@ -1,0 +1,99 @@
+/* Shared state-change motion: crossfades and rolling digits. Every one of
+   these answers a state change; reduced motion turns them into instant swaps. */
+
+.xf {
+  display: inline-grid;
+  vertical-align: top;
+}
+
+.xf-layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.roll-digits {
+  display: inline-flex;
+}
+
+.digit {
+  display: inline-grid;
+  height: 1.15em;
+  line-height: 1.15;
+  overflow: hidden;
+}
+
+.digit > span {
+  grid-area: 1 / 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .xf-in {
+    animation: xf-in 260ms var(--ease-out) both;
+    transform-origin: 0 50%;
+  }
+
+  .xf-out {
+    animation: xf-out 180ms ease-out both;
+    pointer-events: none;
+  }
+
+  .digit-up .digit-in {
+    animation: roll-from-below 420ms var(--ease-out) both;
+  }
+
+  .digit-up .digit-out {
+    animation: roll-to-above 420ms var(--ease-out) both;
+  }
+
+  .digit-down .digit-in {
+    animation: roll-from-above 420ms var(--ease-out) both;
+  }
+
+  .digit-down .digit-out {
+    animation: roll-to-below 420ms var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xf-out,
+  .digit-out {
+    display: none;
+  }
+}
+
+@keyframes xf-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes xf-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes roll-from-below {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes roll-to-above {
+  to {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes roll-from-above {
+  from {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes roll-to-below {
+  to {
+    transform: translateY(100%);
+  }
+}
