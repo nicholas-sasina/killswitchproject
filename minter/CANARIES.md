@@ -135,8 +135,8 @@ them. Real secrets keep every existing protection. Canary values live only in Se
 | Role | Add |
 |---|---|
 | `ProviderRole` (`burn-provider`) | `dynamodb:GetItem`, `dynamodb:UpdateItem` on `burn-credentials`; `lambda:InvokeFunction` on `burn-api` and `burn-minter` |
-| BurnApi role | `dynamodb:Query` on `burn-events/index/by_agent` |
-| `MinterRole` | none (canaries are `burn/*` secrets in the existing tables) |
+| BurnApi role | `dynamodb:Query` on `burn-events/index/by_agent`; `dynamodb:GetItem` on `burn-roles` (role policy; #43 already grants it) |
+| `MinterRole` | `dynamodb:Scan` on `burn-credentials` (`GET /flags`); canaries need nothing new (`burn/*` secrets, existing tables) |
 
 Optional env on the provider: `BURN_API_FUNCTION`, `MINTER_FUNCTION` (defaults `burn-api`, `burn-minter`).
 
