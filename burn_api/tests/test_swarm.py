@@ -763,14 +763,14 @@ def test_spawn_returns_only_what_the_narrowed_child_has(env):
     make_role(env, WORKER); make_role(env, HELPER)
     parent = join(env, "worker")[1]
     child = spawn(env, parent["session_id"], "helper")[1]
-    assert set(child["secrets"]) == {"badge", "api_key"}  # helper mints api_key only
+    assert set(child["secrets"]) == {"badge", "api_key", "session_token"}  # helper mints api_key only
     assert child["secrets"]["api_key"] == stored_values(env, child)["api_key"]
     assert child["secrets"]["api_key"] != parent["secrets"]["api_key"]  # its own key, not the parent's
 
 
 def test_only_what_the_role_mints_is_returned(env):
     make_role(env, {"name": "bare", "tools": ["notify"], "credentials": []})
-    assert set(join(env, "bare")[1]["secrets"]) == {"badge"}
+    assert set(join(env, "bare")[1]["secrets"]) == {"badge", "session_token"}
 
 
 def test_the_scenario_path_has_no_secrets(env):

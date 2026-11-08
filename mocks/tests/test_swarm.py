@@ -3,7 +3,7 @@
 import json
 
 import jsonschema
-from burn_contracts.names import JOIN_TOKEN_RE, scenario_role_name
+from burn_contracts.names import JOIN_TOKEN_RE, is_session_token, scenario_role_name
 
 from mock_data import CONTRACTS
 from test_burn_api import check, start
@@ -129,14 +129,16 @@ def test_a_role_instance_gets_its_secret_values_once_and_a_scenario_agent_does_n
     make_role(client, WORKER)
     make_role(client, PLANNER | {"may_spawn": ["worker"]})
     joined = join(client, "worker", token_for(client, "worker")["token"])
-    assert set(joined["secrets"]) == {"badge", "api_key", "aws_key"}
+    assert set(joined["secrets"]) == {"badge", "api_key", "aws_key", "session_token"}
+    assert is_session_token(joined["secrets"]["session_token"])
     assert set(joined["secrets"]["badge"]) == {"client_id", "client_secret", "token_url", "scope"}
     assert set(joined["secrets"]["aws_key"]) == {"access_key_id", "secret_access_key"}
     parent = join(client, "planner", token_for(client, "planner")["token"])
-    assert set(parent["secrets"]) == {"badge", "api_key"}  # only what the role mints
+    assert set(parent["secrets"]) == {"badge", "api_key", "session_token"}  # only what the role mints
     child = check(client.post("/sessions", json={"role": "worker", "parent_session": parent["session_id"]}),
                   "/sessions", "post", 201)
     assert "badge" in child["secrets"] and "aws_key" not in child["secrets"]  # narrowed to the parent's
+    assert child["secrets"]["session_token"] != parent["secrets"]["session_token"]
     instance = check(client.get("/instances"), "/instances")["instances"][0]
     assert "secrets" not in json.dumps(instance)
     assert "secrets" not in start(client, scenario[1]["agents"][0]["id"])

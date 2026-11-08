@@ -3,6 +3,7 @@
 Order matters: credentials first (idempotent, safe to repeat), then the badge, then
 the session row. A session row only exists once everything it needs exists.
 """
+import hashlib
 import json
 import secrets
 import time
@@ -208,6 +209,8 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         # Read inside the try: if the values cannot be read the instance has nothing to run with,
         # so the join fails and is cleaned up like any other failed join.
         own_secrets = _own_secrets(badge, credentials)
+        # The supervisor's credential for this instance's own calls (heartbeat, exit, spawn). Only its hash is kept.
+        own_secrets["session_token"] = names.SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
         now = _now()
         db.table(names.SESSIONS_TABLE).put_item(Item={
@@ -216,6 +219,7 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
             "role": role_name, "parent_session": parent_session, "token_id": token_id,
             "owner": role.get("owner"), "egress": limits["egress"], "credentials": limits["credentials"],
             "last_seen": now, "exited_at": None,
+            "session_token_sha256": session_token_hash(own_secrets["session_token"]),
         })
     except BaseException:
         _discard_partial_instance(agent_id, minted, badge)
@@ -236,6 +240,10 @@ def _create_instance(role_name, role, limits, token_id, parent_session) -> dict:
         "tools": limits["tools"], "egress": limits["egress"],
         "secrets": own_secrets,  # returned once; never logged, stored or sent again
     }
+
+
+def session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 SECRET_READ_ATTEMPTS = 4

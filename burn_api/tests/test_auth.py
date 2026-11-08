@@ -59,3 +59,27 @@ def test_the_admin_token_still_opens_every_route(env):
     make_role(env, WORKER)
     assert call(env, "GET", "/roles")[0] == 200
     assert call(env, "GET", "/roles", token="wrong")[0] == 401
+
+
+# --- session tokens ----------------------------------------------------------------------------
+
+def test_each_instance_gets_its_own_session_token_and_only_its_hash_is_stored(env):
+    import hashlib
+    from burn_contracts import names
+    from test_swarm import join, session_row
+    make_role(env, WORKER)
+    first, second = join(env, "worker")[1], join(env, "worker")[1]
+    for joined in (first, second):
+        token = joined["secrets"]["session_token"]
+        assert names.is_session_token(token)
+        row = session_row(env, joined["session_id"])
+        assert row["session_token_sha256"] == hashlib.sha256(token.encode()).hexdigest()
+        assert token not in str(row)
+    assert first["secrets"]["session_token"] != second["secrets"]["session_token"]
+    listed = str(call(env, "GET", "/instances")[1]) + str(call(env, "GET", "/agents")[1])
+    assert "session_token" not in listed and first["secrets"]["session_token"] not in listed
+
+
+def test_a_scenario_session_gets_no_session_token(env):
+    status, body = call(env, "POST", "/sessions", {"agent_id": "agent-a"})
+    assert status == 201 and "secrets" not in body
