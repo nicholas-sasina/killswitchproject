@@ -111,7 +111,7 @@ def _swarm_route(method: str, path: str, query: dict, body: dict):
         case ("GET", ["instances", session_id]):
             return 200, instances.get_instance(session_id)
         case ("POST", ["instances", session_id, "heartbeat"]):
-            return 200, instances.heartbeat(session_id)
+            return 200, instances.heartbeat(session_id, body)
         case ("POST", ["instances", session_id, "exit"]):
             return 200, instances.exit_instance(session_id)
         case ("POST", ["burns"]):

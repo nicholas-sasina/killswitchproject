@@ -123,8 +123,68 @@ def list_instances(role: str | None, status: str | None) -> list[dict]:
     return [view(s, n) for s, n in zip(rows, counts)]
 
 
-def heartbeat(session_id: str) -> dict:
-    get_session(session_id)  # 404 for an unknown session
+def heartbeat(session_id: str, body: dict | None = None) -> dict:
+    """Mark the instance alive, and record the task progress its supervisor sent (Burn's clock).
+
+    A non-active instance gets 409 before its body is even looked at: a burned instance must always learn
+    that it is burned. A broken progress rule is a 400 that records nothing, last_seen included.
+    """
+    session = get_session(session_id, consistent=bool(body))  # 404 for an unknown session
+    if session["status"] != "active":
+        raise errors.ApiError(409, f"Instance is {session['status']}")
+    events = _progress_events(body or {})
+    return _record_progress(session, events) if events else _mark_alive(session_id)
+
+
+def _progress_events(body: dict) -> list[tuple[str, str]]:
+    if set(body) - {"progress"}:
+        raise errors.ApiError(400, "the heartbeat body has only progress")
+    if body.get("progress") is None:
+        return []
+    try:
+        return task_progress.check_events(body["progress"])
+    except task_progress.ProgressError as exc:
+        raise errors.ApiError(400, str(exc)) from None
+
+
+PROGRESS_ATTEMPTS = 4
+
+
+def _record_progress(session: dict, events: list[tuple[str, str]]) -> dict:
+    """Read, apply, write back on a version check, so two heartbeats racing never drop each other's items.
+
+    Each item is one entry on the session row (at most names.MAX_PROGRESS_ITEMS, about 100 bytes each), so the
+    row stays far below DynamoDB's item size limit. The write is also conditional on the instance being active,
+    so progress can never land after a burn has read it.
+    """
+    session_id = session["session_id"]
+    for _ in range(PROGRESS_ATTEMPTS):
+        now = utc_now_iso()
+        try:
+            updated = task_progress.apply(session.get("progress"), events, now)
+        except task_progress.ProgressError as exc:  # the item limit, which depends on what is stored
+            raise errors.ApiError(400, str(exc)) from None
+        version = int(session.get("progress_version", 0))
+        try:
+            row = db.table(names.SESSIONS_TABLE).update_item(
+                Key={"session_id": session_id},
+                UpdateExpression="SET last_seen = :t, progress = :p, progress_version = :next",
+                ConditionExpression="#s = :active AND (attribute_not_exists(progress_version) OR progress_version = :v)",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":t": now, ":p": updated, ":next": version + 1, ":v": version,
+                                           ":active": "active"},
+                ReturnValues="ALL_NEW")["Attributes"]
+            return view(row)
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                raise
+        session = get_session(session_id, consistent=True)
+        if session["status"] != "active":
+            raise errors.ApiError(409, f"Instance is {session['status']}")
+    raise errors.ApiError(429, "progress changed while it was being saved; retry")
+
+
+def _mark_alive(session_id: str) -> dict:
     try:
         # Conditional, so a heartbeat can never mark a burned or exited instance as alive.
         row = db.table(names.SESSIONS_TABLE).update_item(
