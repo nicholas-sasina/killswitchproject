@@ -1,3 +1,4 @@
+vi.mock("./signIn", () => ({ currentSession: () => ({ accessToken: "test-access", owner: "Test", expiresAt: Date.now()+60000 }), completeSignIn: async () => ({ accessToken: "test-access", owner: "Test", expiresAt: Date.now()+60000 }), signInConfigured: () => true, signOut: () => {}, startSignIn: async () => {} }));
 // @vitest-environment jsdom
 import {
   act,

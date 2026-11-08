@@ -1,3 +1,4 @@
+import { currentSession } from "./signIn";
 import type {
   BlastRadius,
   BurnRequest,
@@ -8,13 +9,13 @@ import type {
 
 export interface ApiConfig {
   burnUrl: string;
-  demoToken: string;
+  demoToken?: string; // legacy test config only; never sent
 }
 
 export function readConfig(): ApiConfig {
   return {
     burnUrl: import.meta.env.VITE_BURN_API_URL?.trim() ?? "",
-    demoToken: import.meta.env.VITE_BURN_DEMO_TOKEN?.trim() ?? "",
+
   };
 }
 
@@ -33,7 +34,9 @@ export function createApi(
         "API URL is missing. Set it in dashboard/.env.local and restart Vite.",
       );
     const headers = new Headers(init.headers);
-    headers.set("x-burn-demo-token", config.demoToken);
+    const token = currentSession()?.accessToken;
+    if (!token) throw new Error("Sign-in required");
+    headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept", "application/json");
     if (init.body) headers.set("Content-Type", "application/json");
 
@@ -58,7 +61,7 @@ export function createApi(
     if (!response.ok) {
       throw new Error(
         response.status === 401 || response.status === 403
-          ? `Request denied (HTTP ${response.status}). Check the demo token.`
+          ? `Request denied (HTTP ${response.status}). Please sign in again.`
           : `API request failed (HTTP ${response.status}).`,
       );
     }

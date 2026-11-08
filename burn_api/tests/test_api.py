@@ -22,6 +22,8 @@ def test_session_flow(env):
     assert body["badge_ref"] == "burn/agent-a/badge"
     assert {c["type"] for c in body["credentials"]} == {"api_key", "aws_key"}
     row = env.ddb.Table("burn-sessions").get_item(Key={"session_id": body["session_id"]})["Item"]
+    assert row["owner_sub"] == "person-123" and row["owner_name"] == "tester"
+    assert body["owner_name"] == "tester"
     assert row["status"] == "active" and row["tools"] == ["read_ticket"] and row["send_to"] == ["agent-b"]
     assert boto3.client("secretsmanager", region_name="us-east-1").get_secret_value(
         SecretId="burn/agent-a/badge")["SecretString"]
@@ -122,6 +124,28 @@ def test_preflight_needs_no_token_but_other_methods_do(env):
         out = handler.handler(event)
         assert out["statusCode"] == 204
         assert out["headers"]["access-control-allow-origin"] == "http://localhost:5173"
-        assert "x-burn-demo-token" in out["headers"]["access-control-allow-headers"]
+        assert "authorization" in out["headers"]["access-control-allow-headers"]
     assert call(env, "GET", "/events", token="")[0] == 401
     assert call(env, "POST", "/burn", {"agent_id": "agent-a"}, token="")[0] == 401
+
+
+def test_signed_in_owner_is_server_derived(env):
+    import handler
+    event = {"requestContext": {"http": {"method": "POST", "path": "/sessions"},
+                                 "authorizer": {"jwt": {"claims": {"sub": "unique-sub", "username": "alice"}}}},
+             "headers": {"authorization": "Bearer arbitrary-text"},
+             "body": '{"agent_id":"agent-b","owner_sub":"forged","owner_name":"forged"}'}
+    import json
+    reply = handler.handler(event)
+    assert reply["statusCode"] == 201
+    data = json.loads(reply["body"])
+    assert data["owner_sub"] == "unique-sub" and data["owner_name"] == "alice"
+    stored = env.ddb.Table("burn-sessions").get_item(Key={"session_id": data["session_id"]})["Item"]
+    assert stored["owner_sub"] == "unique-sub"
+    assert call(env, "GET", "/events")[1]["agents"][1]["owner_name"] == "alice"
+
+def test_spoofed_identity_header_is_not_accepted(env):
+    import handler
+    response = handler.handler({"requestContext": {"http": {"method": "GET", "path": "/events"}},
+                                "headers": {"x-user-sub": "admin", "authorization": "Bearer fake"}})
+    assert response["statusCode"] == 401

@@ -29,6 +29,8 @@ def agent_states() -> list[dict]:
             "role": agent.get("role"),
             "status": latest["status"] if latest else "idle",
             "session_id": latest["session_id"] if latest else None,
+            "owner_sub": latest.get("owner_sub") if latest else None,
+            "owner_name": latest.get("owner_name") if latest else None,
             "exposures": _exposure_count(agent_id),
         })
     return states
@@ -59,12 +61,11 @@ def ledger(agent_id: str) -> dict:
     entries = []
     for row in rows:
         ref = row.get("secret_ref")
-        status, flag_level = "active", None
+        status = "active"
         if ref:
             cred = creds.get_item(Key={"secret_ref": ref}).get("Item") or {}
             if cred.get("status") in ("active", "rotated", "flagged"):
                 status = cred["status"]
-            flag_level = cred.get("flag_level") if status == "flagged" else None
         entries.append({
             "secret_ref": ref,
             "fingerprint": row.get("fingerprint") or row["secret_ref_or_fp"].removeprefix("fp#"),
@@ -75,7 +76,6 @@ def ledger(agent_id: str) -> dict:
             "via": row.get("via"),
             "first_seen": row.get("first_seen"),
             "status": status,
-            "flag_level": flag_level,
         })
     entries.sort(key=lambda e: e["first_seen"] or "")
     return {"agent_id": agent_id, "entries": entries}
@@ -85,7 +85,8 @@ def badge(session_id: str) -> dict:
     item = db.table(names.SESSIONS_TABLE).get_item(Key={"session_id": session_id}).get("Item")
     if not item:
         raise sessions.NotFound(session_id)
-    return {"session_id": session_id, "agent_id": item["agent_id"], "status": item["status"]}
+    return {"session_id": session_id, "agent_id": item["agent_id"], "status": item["status"],
+            "owner_sub": item.get("owner_sub"), "owner_name": item.get("owner_name")}
 
 
 def blast_radius(agent_id: str, since: str | None = None) -> dict:

@@ -5,13 +5,10 @@ One Lambda with a tiny router keeps the whole API readable in one place.
 import json
 import re
 
-from burn_contracts import names
 
 import auth
 import burn
-import canary
 import db
-import flag_review
 import minter_client
 import reads
 import sessions
@@ -33,22 +30,18 @@ def _agent_id(value) -> str | None:
     return value if isinstance(value, str) and names.is_agent_id(value) else None
 
 
-def route(method: str, path: str, query: dict, body: dict):
+def route(method: str, path: str, query: dict, body: dict, user: dict | None = None):
     """Return (status, body). Raises NotFound / MinterError for the caller to map."""
     if method == "POST" and path == "/sessions":
         agent_id = _agent_id(body.get("agent_id"))
         if not agent_id:
             return 400, {"error": "agent_id is required (agent-xxx)"}
-        return 201, sessions.start_session(agent_id)
+        return 201, sessions.start_session(agent_id, user["sub"], user["username"])
     if method == "POST" and path == "/burn":
         agent_id = _agent_id(body.get("agent_id"))
         if not agent_id:
             return 400, {"error": "agent_id is required (agent-xxx)"}
         return 200, burn.burn_agent(agent_id, str(body.get("reason") or ""))
-    if method == "GET" and path == "/flags":
-        return 200, flag_review.list_flags()
-    if method == "POST" and path == "/flags/resolve":
-        return flag_review.resolve(body)
     if method == "GET" and path == "/events":
         try:
             limit = int(query.get("limit", 200))
@@ -69,7 +62,7 @@ def route(method: str, path: str, query: dict, body: dict):
 
 # Must match the CORS settings of the HTTP API in infra/burn_infra/burn_api.py.
 ALLOWED_ORIGIN = "http://localhost:5173"
-ALLOWED_HEADERS = f"content-type,{names.DEMO_TOKEN_HEADER}"
+ALLOWED_HEADERS = "content-type,authorization"
 
 
 def _preflight(headers: dict):
@@ -83,19 +76,16 @@ def _preflight(headers: dict):
 
 
 def handler(event, context=None):
-    if "canary_incident" in event and "requestContext" not in event:
-        # Direct async invoke from the mock provider (IAM-only; API Gateway events always
-        # carry requestContext). The payload is re-verified, never trusted: see canary.py.
-        return canary.handle_incident(event["canary_incident"])
     http = event["requestContext"]["http"]
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     if http["method"] == "OPTIONS":
         return _preflight(headers)
-    if not auth.is_authorized(headers):
-        return _resp(401, {"error": "missing or invalid x-burn-demo-token"})
+    user = auth.signed_in_user(event)
+    if user is None:
+        return _resp(401, {"error": "sign-in required"})
     try:
         status, body = route(http["method"], http["path"], event.get("queryStringParameters") or {},
-                             _json_body(event))
+                             _json_body(event), user)
     except sessions.NotFound as exc:
         return _resp(404, {"error": f"not found: {exc}"})
     except minter_client.MinterError as exc:

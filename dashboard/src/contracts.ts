@@ -13,10 +13,7 @@ export type EventAction =
   | "issued"
   | "started"
   | "exited"
-  | "unregistered"
-  | "canary_used"
-  | "dismissed";
-export type FlagLevel = "seen" | "attempted" | "reported";
+  | "unregistered";
 
 export interface LedgerEvent {
   event_id: string;
@@ -45,7 +42,6 @@ export interface LedgerEvent {
   detail?: string | null;
   role?: string | null;
   parent_session?: string | null;
-  flag_level?: FlagLevel | null;
 }
 
 export interface AgentState {
@@ -53,6 +49,8 @@ export interface AgentState {
   role?: string | null;
   status: "active" | "revoked" | "idle";
   session_id?: string | null;
+  owner_sub?: string | null;
+  owner_name?: string | null;
   exposures?: number;
 }
 
@@ -72,7 +70,6 @@ export interface LedgerEntry {
   via?: string | null;
   first_seen: string;
   status: "active" | "rotated" | "flagged";
-  flag_level?: FlagLevel | null;
 }
 
 export interface LedgerResponse {

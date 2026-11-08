@@ -15,6 +15,8 @@ REGION = "us-east-1"
 # env var -> SSM parameter published by the stack that owns it
 SSM_VARS = {
     "BURN_API_URL": "/burn/api/url",
+    "BURN_AUTH_DOMAIN": "/burn/auth/domain",
+    "BURN_AUTH_CLIENT_ID": "/burn/auth/client-id",
     "BURN_GATEWAY_URL": "/burn/gateway/url",
     "BURN_PROVIDER_URL": "/burn/provider/url",
     "BURN_COGNITO_TOKEN_URL": "/burn/identity/token-url",
@@ -57,8 +59,10 @@ def main() -> None:
         "BURN_COGNITO_TOKEN_URL", "AWS_ACCOUNT_ID"]))
     dash = REPO / "dashboard"
     dash.mkdir(exist_ok=True)
-    local = render(values, ["BURN_API_URL", "BURN_DEMO_TOKEN"],
-                   {"BURN_API_URL": "VITE_BURN_API_URL", "BURN_DEMO_TOKEN": "VITE_BURN_DEMO_TOKEN"})
+    local = render(values, ["BURN_API_URL", "BURN_AUTH_DOMAIN", "BURN_AUTH_CLIENT_ID"],
+                   {"BURN_API_URL": "VITE_BURN_API_URL",
+                    "BURN_AUTH_DOMAIN": "VITE_COGNITO_DOMAIN",
+                    "BURN_AUTH_CLIENT_ID": "VITE_COGNITO_CLIENT_ID"})
     (dash / ".env.local").write_text(local)
     missing = [k for k, v in values.items() if not v]
     print("wrote .env and dashboard/.env.local" + (f" (blank: {', '.join(missing)})" if missing else ""))

@@ -69,7 +69,7 @@ def env(monkeypatch):
             res.Table("burn-scenario").put_item(Item={"pk": f"agent#{agent_id}", "data": agent})
 
         import auth, db, minter_client
-        auth.reset(); db.reset()
+        db.reset()
         fake = FakeMinter()
         monkeypatch.setattr(minter_client, "call", fake)
         badges_stub.created.clear(); badges_stub.deleted.clear()
@@ -79,7 +79,8 @@ def env(monkeypatch):
 def call(env, method, path, body=None, query=None, token="ok"):
     import handler
     headers = {"x-burn-demo-token": env.token if token == "ok" else token}
-    event = {"requestContext": {"http": {"method": method, "path": path}}, "headers": headers,
+    event = {"requestContext": {"http": {"method": method, "path": path},
+                "authorizer": {"jwt": {"claims": {"sub": "person-123", "username": "tester"}}} if token == "ok" else {}}, "headers": headers,
              "queryStringParameters": query, "body": None if body is None else __import__("json").dumps(body)}
     out = handler.handler(event)
     return out["statusCode"], __import__("json").loads(out["body"])

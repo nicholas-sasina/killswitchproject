@@ -1,3 +1,4 @@
+vi.mock("./signIn", () => ({ currentSession: () => ({ accessToken: "test-access", owner: "Test", expiresAt: Date.now()+60000 }) }));
 import { describe, expect, it, vi } from "vitest";
 import { createApi } from "./api";
 
@@ -22,8 +23,8 @@ describe("API client", () => {
     await api.events(cursor);
     const [url, init] = fetcher.mock.calls[0];
     expect(new URL(String(url)).searchParams.get("since")).toBe(cursor);
-    expect(new Headers(init?.headers).get("x-burn-demo-token")).toBe(
-      config.demoToken,
+    expect(new Headers(init?.headers).get("Authorization")).toBe(
+      "Bearer test-access",
     );
     expect(init?.cache).toBe("no-store");
     await api.events();
@@ -42,8 +43,8 @@ describe("API client", () => {
       "https://burn.example.test/burn",
     ]);
     for (const [, init] of fetcher.mock.calls) {
-      expect(new Headers(init?.headers).get("x-burn-demo-token")).toBe(
-        config.demoToken,
+      expect(new Headers(init?.headers).get("Authorization")).toBe(
+        "Bearer test-access",
       );
     }
     const burn = fetcher.mock.calls[2][1];
@@ -67,7 +68,7 @@ describe("API client", () => {
         }),
     );
     await expect(api.events()).rejects.toThrow(
-      "Request denied (HTTP 403). Check the demo token.",
+      "Request denied (HTTP 403). Please sign in again.",
     );
     expect(observe.mock.calls[0][0].get("x-burn-mock")).toBe("true");
   });

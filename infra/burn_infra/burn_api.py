@@ -1,6 +1,6 @@
-"""BurnApi stack: API Gateway HTTP API in front of one Lambda that serves every Burn API route.
+"""BurnApi stack: JWT-protected HTTP API with a separate human Cognito user pool.
 
-Least privilege: the role can touch only the Burn tables, the demo-token secret,
+Least privilege: the role can touch only the Burn tables,
 the per-agent badge secrets, the minter Lambda and Cognito app clients.
 """
 import pathlib
@@ -10,6 +10,8 @@ import sys
 import aws_cdk as cdk
 from aws_cdk import aws_apigatewayv2 as apigw
 from aws_cdk import aws_apigatewayv2_integrations as integrations
+from aws_cdk import aws_apigatewayv2_authorizers as authorizers
+from aws_cdk import aws_cognito as cognito
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_ssm as ssm
@@ -56,10 +58,6 @@ class BurnApiStack(cdk.Stack):
             actions=["dynamodb:PutItem", "dynamodb:Query"], resources=[table_arn(names.EVENTS_TABLE)]))
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:Query"], resources=[table_arn(names.EXPOSURES_TABLE)]))
-        role.add_to_policy(iam.PolicyStatement(
-            actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:{names.DEMO_TOKEN_SECRET}-*"],
-        ))
         role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge
             actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/*/badge-*"],
@@ -86,13 +84,50 @@ class BurnApiStack(cdk.Stack):
             timeout=cdk.Duration.seconds(29), memory_size=256,
         )
 
+        people = cognito.UserPool(
+            self, "People", user_pool_name="burn-people",
+            self_sign_up_enabled=False,
+            sign_in_aliases=cognito.SignInAliases(email=True),
+            auto_verify=cognito.AutoVerifiedAttrs(email=True),
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
+        domain = people.add_domain(
+            "PeopleDomain", cognito_domain=cognito.CognitoDomainOptions(
+                domain_prefix=f"burn-people-{cdk.Aws.ACCOUNT_ID}"
+            ),
+        )
+        client = people.add_client(
+            "DashboardClient", generate_secret=False,
+            auth_flows=cognito.AuthFlow(user_srp=True),
+            o_auth=cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(authorization_code_grant=True),
+                scopes=[cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL, cognito.OAuthScope.PROFILE],
+                callback_urls=[DASHBOARD_ORIGIN + "/"],
+                logout_urls=[DASHBOARD_ORIGIN + "/"],
+            ),
+            prevent_user_existence_errors=True,
+        )
+        jwt = authorizers.HttpJwtAuthorizer(
+            "PeopleJwt", jwt_issuer=f"https://cognito-idp.{region}.amazonaws.com/{people.user_pool_id}",
+            jwt_audience=[client.user_pool_client_id],
+        )
         api = apigw.HttpApi(
             self, "Api", api_name="burn-api",
             default_integration=integrations.HttpLambdaIntegration("Integration", fn),
+            default_authorizer=jwt,
+            default_authorization_scopes=["openid"],
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_origins=[DASHBOARD_ORIGIN],
                 allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.OPTIONS],
-                allow_headers=["content-type", names.DEMO_TOKEN_HEADER],
+                allow_headers=["content-type", "authorization"],
             ),
         )
         ssm.StringParameter(self, "UrlParam", parameter_name="/burn/api/url", string_value=api.api_endpoint)
+
+        for name, value in {
+            "pool-id": people.user_pool_id,
+            "client-id": client.user_pool_client_id,
+            "domain": domain.base_url(),
+        }.items():
+            ssm.StringParameter(self, f"People-{name}",
+                                parameter_name=f"/burn/auth/{name}", string_value=value)

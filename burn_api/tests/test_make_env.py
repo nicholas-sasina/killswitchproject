@@ -34,5 +34,5 @@ def test_dashboard_env_contains_only_burn_connection(tmp_path, monkeypatch, caps
     })
     make_env.main()
     lines = (tmp_path / "dashboard" / ".env.local").read_text().splitlines()
-    assert {line.split("=", 1)[0] for line in lines} == {"VITE_BURN_API_URL", "VITE_BURN_DEMO_TOKEN"}
+    assert {line.split("=", 1)[0] for line in lines} == {"VITE_BURN_API_URL", "VITE_COGNITO_DOMAIN", "VITE_COGNITO_CLIENT_ID"}
     assert token not in capsys.readouterr().out

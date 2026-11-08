@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import { completeSignIn, currentSession, signInConfigured, signOut, startSignIn, type SignInSession } from "./signIn";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createApi, readConfig, type ApiConfig } from "./api";
 import type { AgentState, BurnResult } from "./contracts";
 import { newestEvents } from "./events";
@@ -13,6 +14,16 @@ import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
 
 export function App({ config = readConfig() }: { config?: ApiConfig }) {
+  const [session, setSession] = useState<SignInSession | null>(currentSession);
+  const [signInError, setSignInError] = useState("");
+  useEffect(() => {
+    void completeSignIn().then(setSession).catch((e: Error) => setSignInError(e.message));
+  }, []);
+  useEffect(() => {
+    if (!session) return;
+    const timer = window.setInterval(() => { if (!currentSession()) setSession(null); }, 5000);
+    return () => clearInterval(timer);
+  }, [session]);
   const [mock, setMock] = useState(false);
   const observeResponse = useCallback(
     (headers: Headers) =>
@@ -21,9 +32,9 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
   );
   const api = useMemo(
     () => createApi(config, observeResponse),
-    [config.burnUrl, config.demoToken, observeResponse],
+    [config.burnUrl, observeResponse],
   );
-  const configured = Boolean(config.burnUrl && config.demoToken);
+  const configured = Boolean(config.burnUrl && session);
   const { state, error, updatedAt } = useEventFeed(api, configured);
   const events = useMemo(() => newestEvents(state), [state]);
   const [selectedId, setSelectedId] = useState("");
@@ -88,6 +99,12 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
             </h1>
           </div>
           <div className="header-status">
+            {session ? <div>Signed in as <strong>{session.owner}</strong>{" "}
+              <button onClick={() => { signOut(); setSession(null); }}>Sign out</button></div>
+              : <div>
+                  <button disabled={!signInConfigured()} onClick={() => void startSignIn().catch((e: Error) => setSignInError(e.message))}>Sign in</button>
+                  {signInError && <p role="alert">{signInError}</p>}
+                </div>}
             <dl className="summary">
               <div>
                 <dt>Agents</dt>
@@ -129,8 +146,7 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
             <section className="setup panel" role="status">
               <h2>Connect the dashboard</h2>
               <p>
-                Set <code>VITE_BURN_API_URL</code> and{" "}
-                <code>VITE_BURN_DEMO_TOKEN</code> in{" "}
+                Set <code>VITE_BURN_API_URL</code>, <code>VITE_COGNITO_DOMAIN</code> and <code>VITE_COGNITO_CLIENT_ID</code> in{" "}
                 <code>dashboard/.env.local</code>, then restart Vite. Use{" "}
                 <code>.env.example</code> for the configuration fields.
               </p>
@@ -160,8 +176,8 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 {state.agents.length ? (
                   <div className="agent-grid">
                     {state.agents.map((agent) => (
+                      <div key={agent.agent_id}>
                       <AgentCard
-                        key={agent.agent_id}
                         agent={agent}
                         selected={selectedAgent?.agent_id === agent.agent_id}
                         busy={busy || Boolean(error)}
@@ -172,6 +188,8 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                           setConfirmAgent(agent);
                         }}
                       />
+                      {agent.owner_name && <p className="muted">Session owner: {agent.owner_name}</p>}
+                      </div>
                     ))}
                   </div>
                 ) : (

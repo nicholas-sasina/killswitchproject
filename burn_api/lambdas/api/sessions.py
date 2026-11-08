@@ -60,7 +60,7 @@ def _store_badge(agent_id: str, badge: dict) -> str:
     return ref
 
 
-def start_session(agent_id: str) -> dict:
+def start_session(agent_id: str, owner_sub: str, owner_name: str) -> dict:
     agent = db.get_agent(agent_id)
     if agent is None:
         raise NotFound(agent_id)
@@ -82,6 +82,8 @@ def start_session(agent_id: str) -> dict:
     db.table(names.SESSIONS_TABLE).put_item(Item={
         "session_id": session_id,
         "agent_id": agent_id,
+        "owner_sub": owner_sub,
+        "owner_name": owner_name,
         "client_id": badge["client_id"],
         "status": "active",
         "tools": list(agent.get("tools", [])),
@@ -90,11 +92,13 @@ def start_session(agent_id: str) -> dict:
     })
     db.write_event(
         agent_id=agent_id, source="session", action="issued", session_id=session_id,
-        detail=f"session started with {len(credentials)} credentials",
+        detail=f"session started by {owner_name} ({owner_sub}) with {len(credentials)} credentials",
     )
     return {
         "session_id": session_id,
         "agent_id": agent_id,
+        "owner_sub": owner_sub,
+        "owner_name": owner_name,
         "badge_ref": badge_ref,
         "credentials": credentials,
     }
