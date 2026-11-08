@@ -111,12 +111,16 @@ function AlertDetail({ alert }: { alert: Alert }) {
   );
 }
 
+/** Rows drawn before the list is truncated; a noisy stack can raise hundreds. */
+const ROW_CAP = 60;
+
 export function AlertsView({ events }: { events: LedgerEvent[] }) {
   const alerts = useMemo(() => bySeverity(toAlerts(events)), [events]);
   const counts = useMemo(() => countByTier(alerts), [alerts]);
   const [hidden, setHidden] = useState<Tier[]>([]);
   const [agentFilter, setAgentFilter] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  const [showAll, setShowAll] = useState(false);
 
   // Agents that actually have alerts, noisiest first, so the one flooding
   // the queue is the first thing you can filter to.
@@ -140,6 +144,7 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
       ),
     [alerts, hidden, agentFilter],
   );
+  const visible = showAll ? shown : shown.slice(0, ROW_CAP);
   // Keep a selection valid as the stream moves underneath it.
   const selected =
     shown.find((alert) => alert.event.event_id === selectedId) ?? shown[0];
@@ -232,7 +237,7 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
             </div>
           ) : (
             <ol className="alert-list">
-              {shown.map((alert, index) => (
+              {visible.map((alert, index) => (
                 <li key={alert.event.event_id}>
                   <button
                     type="button"
@@ -268,6 +273,17 @@ export function AlertsView({ events }: { events: LedgerEvent[] }) {
                 </li>
               ))}
             </ol>
+          )}
+          {shown.length > ROW_CAP && (
+            <div className="trail-more">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setShowAll((current) => !current)}
+              >
+                {showAll ? `Show first ${ROW_CAP}` : `Show all ${shown.length}`}
+              </button>
+            </div>
           )}
         </section>
 
