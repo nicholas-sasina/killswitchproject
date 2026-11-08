@@ -1,13 +1,17 @@
 """burn run and task progress: the local endpoint, the queue and its trip on the heartbeat."""
 import json
+import time
 import urllib.error
 import urllib.request
 
 import pytest
 
 from burn_contracts.progress import ProgressError
+from burn_cli.api import ApiError
 from burn_cli.runner.progress import ProgressQueue
+from burn_cli.runner.run import EXIT_STOPPED, Instance
 from burn_cli.runner.spawn_endpoint import SpawnEndpoint
+from test_run import instance, py, stack  # noqa: F401 - stack is a fixture
 
 
 def ev(item, state="started"):
@@ -148,3 +152,146 @@ def test_without_a_queue_there_is_no_progress_endpoint():
         assert post(server.url.removesuffix("/spawn") + "/progress", ev("a"))[0] == 404
     finally:
         server.stop()
+
+
+# -- progress on the heartbeat --------------------------------------------------------------------
+class RecordingApi:
+    """Heartbeats only; `statuses` are the replies in turn (200 or an error status, 0 for unreachable)."""
+
+    def __init__(self, *statuses):
+        self.bodies, self.statuses = [], list(statuses)
+
+    def heartbeat(self, session_id, session_token, progress=None):
+        self.bodies.append(progress)
+        status = self.statuses.pop(0) if self.statuses else 200
+        if status != 200:
+            raise ApiError(f"POST /instances/{session_id}/heartbeat failed with HTTP {status}", status or None)
+        return {}
+
+
+def supervisor(api):
+    inst = Instance(api, "worker", ["true"], gateway_url="http://gateway", host_env={},
+                    session={"session_id": "sess_1", "agent_id": "agent-1"})
+    inst._token = "session-token-in-memory"
+    return inst
+
+
+def test_each_heartbeat_carries_at_most_50_events_oldest_first():
+    api = RecordingApi()
+    inst = supervisor(api)
+    for i in range(120):
+        inst._progress.add(ev(f"item-{i:03d}"))
+    assert [inst._beat() for _ in range(4)] == [200] * 4
+    assert [len(b) for b in api.bodies[:3]] == [50, 50, 20] and api.bodies[3] == []
+    assert [e for b in api.bodies[:3] for e in b] == [ev(f"item-{i:03d}") for i in range(120)]
+
+
+def test_a_refused_batch_is_logged_and_dropped_and_is_not_a_burn(capsys):
+    api = RecordingApi(400)
+    inst = supervisor(api)
+    inst._progress.add(ev("a"))
+    inst._progress.add(ev("b"))
+    assert inst._beat() == 400
+    assert inst._progress.pending() == 0 and not inst._stopped_by_api
+    err = capsys.readouterr().err
+    assert "refused 2 progress events" in err and "HTTP 400" in err
+    inst._progress.add(ev("c"))
+    assert inst._beat() == 200 and api.bodies[-1] == [ev("c")]
+
+
+@pytest.mark.parametrize("status", [0, 429, 503])
+def test_a_transient_failure_keeps_the_batch_for_the_next_heartbeat(status):
+    api = RecordingApi(status)
+    inst = supervisor(api)
+    inst._progress.add(ev("a"))
+    assert inst._beat() == status
+    assert inst._beat() == 200
+    assert api.bodies == [[ev("a")], [ev("a")]]
+
+
+REPORT = """
+    import json, os, sys, time, urllib.request
+    def report(item, state):
+        req = urllib.request.Request(os.environ["BURN_PROGRESS_URL"], method="POST",
+                                     data=json.dumps({"item": item, "state": state}).encode(),
+                                     headers={"Authorization": "Bearer " + os.environ["BURN_LOCAL_TOKEN"]})
+        urllib.request.urlopen(req).read()
+"""
+
+
+def timed(stack):
+    """Every request the fake API answers, with when it arrived."""
+    seen, original = [], stack.handle
+
+    def handle(method, path, query, body):
+        seen.append((time.monotonic(), method, path, body))
+        return original(method, path, query, body)
+
+    stack.handle = handle
+    return seen
+
+
+def progress_beats(seen):
+    return [(t, body["progress"]) for t, method, path, body in seen
+            if path.endswith("/heartbeat") and body.get("progress")]
+
+
+def test_progress_goes_out_promptly_in_order_and_never_closer_than_the_minimum_gap(stack):
+    seen = timed(stack)
+    code = REPORT + """
+    for i in range(1, 4):
+        report(f"item-{i:02d}", "started")
+        time.sleep(0.05)
+        report(f"item-{i:02d}", "done")
+        time.sleep(0.3)
+    time.sleep(1.5)"""
+    started = time.monotonic()
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.25).run() == 0
+    beats = progress_beats(seen)
+    assert [e for _, batch in beats for e in batch] == [
+        ev(f"item-{i:02d}", state) for i in range(1, 4) for state in ("started", "done")]
+    assert beats[0][0] - started < 1.0  # heartbeat_every is a minute: progress itself caused these beats
+    assert all(b[0] - a[0] >= 0.2 for a, b in zip(beats, beats[1:]))
+    exit_at = next(t for t, _, path, _ in seen if path.endswith("/exit"))
+    assert exit_at - beats[-1][0] > 1.0  # all of it went out while the agent ran, not just at its exit
+
+
+def test_progress_reported_just_before_a_clean_exit_is_sent_before_the_exit(stack):
+    seen = timed(stack)
+    code = REPORT + """
+    report("item-01", "done")"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=30.0).run() == 0
+    paths = [(path.rsplit("/", 1)[-1], body.get("progress")) for _, _, path, body in seen if "/instances/" in path]
+    assert paths[-2:] == [("heartbeat", [ev("item-01", "done")]), ("exit", None)]
+    assert next(iter(stack.instances.values()))["status"] == "exited"  # finished: never replaced
+
+
+def test_a_refused_heartbeat_drops_its_progress_and_the_agent_keeps_running(stack, capfd):
+    original = stack.handle
+
+    def refuse_bad(method, path, query, body):
+        if path.endswith("/heartbeat") and ev("bad-item") in body.get("progress", []):
+            return 400, {"error": "at most 500 items per instance"}
+        return original(method, path, query, body)
+
+    stack.handle = refuse_bad
+    seen = timed(stack)  # records the refused heartbeat too
+    code = REPORT + """
+    report("bad-item", "started")
+    time.sleep(0.6)
+    report("good-item", "started")
+    time.sleep(0.6)"""
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1).run() == 0
+    assert [batch for _, batch in progress_beats(seen)] == [[ev("bad-item")], [ev("good-item")]]
+    assert "refused 1 progress events" in capfd.readouterr().err
+    assert next(iter(stack.instances.values()))["status"] == "exited"
+
+
+def test_a_409_still_means_burned_when_progress_is_waiting(stack):
+    stack.heartbeat_status = 409
+    code = REPORT + """
+    report("item-01", "started")
+    time.sleep(30)"""
+    started = time.monotonic()
+    assert instance(stack, py(code), heartbeat_every=60.0, min_heartbeat_gap=0.1, stop_grace=1).run() == EXIT_STOPPED
+    assert time.monotonic() - started < 10

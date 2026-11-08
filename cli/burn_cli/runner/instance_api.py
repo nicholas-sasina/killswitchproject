@@ -43,8 +43,10 @@ class InstanceApi:
         """Start a child of this instance, with exactly {role, parent_session} and the parent's session token."""
         return self._request("POST", "/instances", {"role": role, "parent_session": parent_session}, session_token)
 
-    def heartbeat(self, session_id: str, session_token: str) -> dict:
-        return self._request("POST", f"/instances/{session_id}/heartbeat", session_token=session_token)
+    def heartbeat(self, session_id: str, session_token: str, progress: list[dict] | None = None) -> dict:
+        """Keep the instance alive; `progress` (oldest first, at most 50) goes in the body when there is any."""
+        return self._request("POST", f"/instances/{session_id}/heartbeat",
+                             {"progress": progress} if progress else None, session_token)
 
     def exit(self, session_id: str, session_token: str) -> dict:
         return self._request("POST", f"/instances/{session_id}/exit", session_token=session_token)

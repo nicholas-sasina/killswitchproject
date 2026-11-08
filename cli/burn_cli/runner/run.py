@@ -20,6 +20,7 @@ from .instance_api import InstanceApi
 from .mcp_proxy import McpProxy
 from . import privs
 from .privs import Drop
+from .progress import ProgressQueue
 from .spawn_endpoint import SpawnEndpoint
 
 EXIT_STOPPED = 3  # the Burn API said the instance was burned or exited
@@ -51,6 +52,8 @@ class Instance:
         self._stopped_by_api = False
         self.drop, self.user_arg, self.stdin_devnull = drop, user_arg, stdin_devnull
         self._stopping, self._spawn_lock = threading.Event(), threading.Lock()
+        self._progress = ProgressQueue(on_change=self._activity.set)  # new progress wakes the heartbeat
+        self._beat_lock = threading.Lock()  # one heartbeat at a time, so a batch is never sent twice at once
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -125,12 +128,13 @@ class Instance:
         local_token = secrets.token_urlsafe(32)  # per run: only this instance's agent is told it
         mcp = McpProxy(self.gateway_url, badge, self._activity.set, local_token).start()
         cleanups.append(mcp.stop)
-        spawn = SpawnEndpoint(self.spawn_child, local_token).start()
+        spawn = SpawnEndpoint(self.spawn_child, local_token, progress=self._progress).start()
         cleanups.append(spawn.stop)
         home = self._make_home()
         cleanups.append(lambda: shutil.rmtree(home, ignore_errors=True))  # last, so nothing recreates it behind us
         env = child_env(self.host_env, session=session, credentials=creds, mcp_url=mcp.url,
-                        spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token)
+                        spawn_url=spawn.url, proxy_base=self.proxy_url, home=home, local_token=local_token,
+                        progress_url=spawn.progress_url)
         log(f"instance {session['agent_id']} (session {session['session_id']}, role {session.get('role', self.role)}) started")
         try:
             self._proc = subprocess.Popen(self.command, env=env, start_new_session=True,
@@ -150,6 +154,8 @@ class Instance:
         if self._stopped_by_api:
             log("the instance was burned or has exited; the agent was stopped")
             return EXIT_STOPPED
+        self._done.set()
+        self._flush_progress()  # what the agent reported just before it exited still counts
         self._exit()
         return code if code >= 0 else 128 - code
 
@@ -175,22 +181,50 @@ class Instance:
     def _heartbeat_loop(self) -> None:
         last = 0.0
         while not self._done.is_set():
-            woke = self._activity.wait(self.heartbeat_every)  # MCP activity wakes the loop early
+            woke = self._activity.wait(self.heartbeat_every)  # MCP activity and new progress wake the loop early
             if self._done.is_set():
                 return
             if woke:
                 self._activity.clear()
-                if time.monotonic() - last < self.min_gap:
-                    continue
+                gap_left = self.min_gap - (time.monotonic() - last)
+                if gap_left > 0:
+                    if not self._progress.pending():
+                        continue  # MCP activity just after a beat: that beat already showed the instance alive
+                    if self._done.wait(gap_left):  # progress goes out as soon as the minimum gap allows
+                        return
             last = time.monotonic()
+            status = self._beat()
+            if status in (404, 409):  # burned, exited or gone: the agent must not keep running
+                self._stopped_by_api = True
+                self._stop_agent()
+                return
+            if status in (200, 400) and self._progress.pending():
+                self._activity.set()  # more than 50 were waiting: the rest go with the next beat
+            # anything else (network, 5xx, 429) is transient; the next beat tries again, with the same progress
+
+    def _beat(self) -> int:
+        """One heartbeat with the oldest queued progress, at most 50 events.
+
+        Returns 200, or the failed call's status (0 when the API was unreachable).
+        """
+        with self._beat_lock:
+            batch = self._progress.batch()
             try:
-                self.api.heartbeat(self.session["session_id"], self._token)
+                self.api.heartbeat(self.session["session_id"], self._token, batch)
             except ApiError as exc:
-                if exc.status in (404, 409):  # burned, exited or gone: the agent must not keep running
-                    self._stopped_by_api = True
-                    self._stop_agent()
-                    return
-                # anything else (network, 5xx, 429) is transient; the next beat tries again
+                if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
+                    self._progress.dropped(len(batch))
+                    log(f"the Burn API refused {len(batch)} progress events, which are dropped ({exc})")
+                return exc.status or 0
+            self._progress.sent(len(batch))
+            return 200
+
+    def _flush_progress(self) -> None:
+        """Send the progress still queued when the agent exits, so the instance's record is complete."""
+        while self._progress.pending():
+            if self._beat() not in (200, 400):
+                log(f"{self._progress.pending()} progress events could not be sent before the exit")
+                return
 
     def _stop_agent(self) -> None:
         """SIGTERM the agent's whole group, then SIGKILL whatever is left after the grace period."""

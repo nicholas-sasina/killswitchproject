@@ -2,6 +2,8 @@
 import re
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from burn_contracts.names import PROGRESS_URL_ENV
+
 # The agent's environment is an allow-list: a variable reaches it only if it is listed here. A deny-list has to
 # know every credential name (PGPASSWORD, MYSQL_PWD, SENTRY_DSN, a proxy URL with a password in it...) and misses some.
 # AWS_REGION and AWS_DEFAULT_REGION hold no credential and boto3 needs a region; the CA-bundle variables let TLS
@@ -43,7 +45,7 @@ def proxy_url(base: str, agent_id: str, session_id: str) -> str:
 
 
 def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn_url: str,
-              proxy_base: str = "", home: str = "", local_token: str = "") -> dict:
+              proxy_base: str = "", home: str = "", local_token: str = "", progress_url: str = "") -> dict:
     """Everything the agent process runs with: the allow-listed host environment plus its own values."""
     env = scrub(host_env)
     if home:  # a private HOME, so SDKs do not find ~/.aws, ~/.config/gh, ~/.docker, ~/.netrc and the like
@@ -54,6 +56,8 @@ def child_env(host_env: dict, *, session: dict, credentials, mcp_url: str, spawn
         "BURN_ROLE": session.get("role", ""), "BURN_MCP_URL": mcp_url, "BURN_SPAWN_URL": spawn_url})
     if local_token:
         env["BURN_LOCAL_TOKEN"] = local_token
+    if progress_url:
+        env[PROGRESS_URL_ENV] = progress_url
     if credentials.aws_access_key_id:
         env["AWS_ACCESS_KEY_ID"] = credentials.aws_access_key_id
         env["AWS_SECRET_ACCESS_KEY"] = credentials.aws_secret_access_key
@@ -84,6 +88,7 @@ def describe(host_env: dict, proxy_base: str = "", show: bool = False) -> list[s
               "  BURN_SESSION_ID=<its session id>", "  BURN_AGENT_ID=<its agent id>", "  BURN_ROLE=<its role>",
               "  BURN_MCP_URL=http://127.0.0.1:<port>/...  (adds the badge token; the agent never sees the badge)",
               "  BURN_SPAWN_URL=http://127.0.0.1:<port>/spawn",
+              f"  {PROGRESS_URL_ENV}=http://127.0.0.1:<port>/progress  (POST {{item, state}}: task progress)",
               "  BURN_LOCAL_TOKEN=<random per run; the bearer both local endpoints require>",
               "  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY=<its own AWS key>",
               "  BURN_API_KEY=<its own provider key>"]
