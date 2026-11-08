@@ -206,13 +206,18 @@ describe("agent enrollment", () => {
         String(fixture.calls("/roles/worker/tokens", "POST")[0][1]?.body),
       ),
     ).toEqual({ uses: 2, ttl: 600 });
-    const command = `burn run --role worker --token ${fixture.tokens[0]} -- <your agent command>`;
-    expect(screen.getByText(command)).toBeTruthy();
+    const command =
+      "read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN   # paste the token, press Enter\nburn run --role worker -- <your agent command>";
+    expect(
+      screen.getByRole("region", { name: "Join commands" }).textContent,
+    ).toContain(command);
+    expect(screen.getByText(fixture.tokens[0])).toBeTruthy();
     expect(screen.getByText(/token will not be shown again/)).toBeTruthy();
-    await click("Copy command");
-    expect(writeText).toHaveBeenCalledWith(command);
+    await click("Copy token");
+    expect(writeText).toHaveBeenCalledWith(fixture.tokens[0]);
     await click("Continue to waiting");
-    expect(screen.queryByText(command)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Join commands" })).toBeNull();
+    expect(screen.queryByText(fixture.tokens[0])).toBeNull();
     expect(screen.getByText("Waiting for worker to connect…")).toBeTruthy();
     fixture.state.instances = [
       instance("123abc", "worker", {
@@ -230,7 +235,7 @@ describe("agent enrollment", () => {
     expect(window.location.href).not.toContain(fixture.tokens[0]);
     await click("Close");
     await click("New token for worker");
-    expect(screen.queryByText(command)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Join commands" })).toBeNull();
     expect(fixture.calls("/roles/worker/tokens", "POST")).toHaveLength(1);
   });
 
@@ -239,10 +244,10 @@ describe("agent enrollment", () => {
     await show(fixture);
     await click("New token for worker");
     await click("Create token");
-    const command = screen.getByText(/burn run --role worker/).textContent;
+    const token = fixture.tokens[0];
     await click("Close");
     await click("New token for worker");
-    expect(screen.queryByText(command!)).toBeNull();
+    expect(screen.queryByText(token)).toBeNull();
     await click("Create token");
     expect(fixture.tokens[1]).not.toBe(fixture.tokens[0]);
     await click("Continue to waiting");
@@ -292,7 +297,32 @@ describe("agent enrollment", () => {
     fixture.state.failToken = false;
     await click("Create token");
     expect(fixture.calls("/roles", "POST")).toHaveLength(1);
-    expect(screen.getByText(/burn run --role worker/)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Join commands" })).toBeTruthy();
+  });
+
+  it("keeps the token out of every copyable join command and copies only the token", async () => {
+    const fixture = setup([role("worker")]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    await show(fixture);
+    await click("New token for worker");
+    await click("Create token");
+    const commands = screen.getByRole("region", { name: "Join commands" });
+    const snippets = within(commands).getAllByRole("code");
+    expect(snippets.map((snippet) => snippet.textContent)).toEqual([
+      "read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN   # paste the token, press Enter\nburn run --role worker -- <your agent command>",
+      "pbpaste | burn run --role worker --token-stdin -- <your agent command>",
+    ]);
+    for (const snippet of snippets) {
+      expect(snippet.textContent).not.toContain(fixture.tokens[0]);
+      expect(snippet.textContent).not.toContain("--token ");
+    }
+    expect(screen.getByText(fixture.tokens[0]).closest("pre")?.className).toBe(
+      "swarm-token",
+    );
+    await click("Copy token");
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(fixture.tokens[0]);
+    expect(screen.queryByRole("button", { name: "Copy command" })).toBeNull();
   });
 });
 

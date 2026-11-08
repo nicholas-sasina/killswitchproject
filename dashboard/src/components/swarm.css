@@ -120,7 +120,8 @@
   width: auto;
   margin: 0;
 }
-.swarm-command {
+.swarm-command,
+.swarm-token {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: #0b1016;

@@ -10,9 +10,11 @@ Code-managed roles are labelled read-only, and scenario roles retain their names
 
 Use **Add agent** to create a dashboard-managed role with tools from the MCP contract,
 credential types, message/spawn permissions, optional egress hosts and an owner. Choose the
-join token's uses and lifetime, copy the `burn run` command, then continue to the waiting view.
-The token is shown only in that view and discarded when continuing or closing; save the command
-before leaving it. The waiting view changes to connected when a new instance joins.
+join token's uses and lifetime, then use **Copy token**. The token appears separately from the
+join commands, which use a hidden `read -rs BURN_JOIN_TOKEN` prompt or `pbpaste` with `--token-stdin`
+to keep its value out of shell history and command-line arguments. For the clipboard command,
+copy the command first, then use **Copy token** before running it. The token is shown once and
+discarded when continuing or closing. The waiting view changes to connected when a new instance joins.
 Existing dashboard-managed roles have a **New token** action. Both **Burn instance** and
 **Burn role** require confirmation; burning a role revokes all its active instances.
 
@@ -76,9 +78,9 @@ Development services expose `x-burn-mock` in `Access-Control-Expose-Headers` so 
 ## FAQ
 
 **Does the browser receive credential values?** The dashboard reads agent credential references and metadata.
-Creating a join token returns its value once so you can copy the join command. It stays in the open
+Creating a join token returns its value once so you can copy it separately from the join commands. It stays in the open
 dialog's memory and is never written to localStorage, the URL or console logs. Continuing or closing
-discards it; copying writes the command to your clipboard. Blocked handoff and egress events describe
+discards it; **Copy token** writes only the token to your clipboard. Blocked handoff and egress events describe
 stopped traffic without exposing agent credential values.
 
 **Why is the timeline empty after Burn?** CloudTrail history can lag several minutes.

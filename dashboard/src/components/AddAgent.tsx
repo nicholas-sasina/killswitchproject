@@ -164,15 +164,19 @@ export function AddAgent({
     }
   }
 
-  const command = join?.token
-    ? `burn run --role ${join.role} --token ${join.token} -- <your agent command>`
+  const command = join
+    ? `read -rs BURN_JOIN_TOKEN && export BURN_JOIN_TOKEN   # paste the token, press Enter\nburn run --role ${join.role} -- <your agent command>`
     : "";
-  async function copy() {
+  const clipboardCommand = join
+    ? `pbpaste | burn run --role ${join.role} --token-stdin -- <your agent command>`
+    : "";
+  async function copyToken() {
+    if (!join?.token) return;
     try {
-      await navigator.clipboard.writeText(command);
-      setCopyStatus("Copied.");
+      await navigator.clipboard.writeText(join.token);
+      setCopyStatus("Token copied.");
     } catch {
-      setCopyStatus("Copy unavailable. Select and copy the command above.");
+      setCopyStatus("Copy unavailable. Select and copy the token above.");
     }
   }
   return (
@@ -291,20 +295,34 @@ export function AddAgent({
       ) : step === "command" ? (
         <div className="swarm-fields">
           <p>
-            Copy this join command now. The token will not be shown again after
-            you continue or close this window.
+            Copy this token now. The token will not be shown again after you
+            continue or close this window.
           </p>
-          <pre className="swarm-command">
-            <code>{command}</code>
+          <h3>Join token</h3>
+          <pre className="swarm-token">
+            <code>{join?.token}</code>
           </pre>
           <button
             className="secondary-button"
             type="button"
-            onClick={() => void copy()}
+            onClick={() => void copyToken()}
           >
-            Copy command
+            Copy token
           </button>
           <p role="status">{copyStatus}</p>
+          <section aria-label="Join commands">
+            <h3>Join from a hidden prompt</h3>
+            <pre className="swarm-command">
+              <code>{command}</code>
+            </pre>
+            <h3>Join from the clipboard (macOS)</h3>
+            <p>
+              Copy this command first, then use Copy token before running it.
+            </p>
+            <pre className="swarm-command">
+              <code>{clipboardCommand}</code>
+            </pre>
+          </section>
           <button
             className="secondary-button"
             type="button"
