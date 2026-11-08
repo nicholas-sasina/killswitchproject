@@ -39,8 +39,10 @@ def main() -> int:
         return 0
     auth = api.signed_in(env)  # the automation person's headers, minted once
     if auth is None:
-        return 0
-    _, feed = api.request(base, auth, "GET", "/events?limit=1")
+        return 1
+    status, feed = api.request(base, auth, "GET", "/events?limit=1")
+    if api.refused(status):
+        return 1
     if not feed.get("agents"):
         print("SKIP: no scenario loaded")
         return 0

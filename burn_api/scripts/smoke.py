@@ -3,7 +3,7 @@
 
 Reads BURN_API_URL from the environment or the repo-root .env (see make_env.py) and calls the API as the
 automation person (the demo token until the stack requires sign-in). Exits 0 with a SKIP message when the API or the
-scenario is not deployed.
+scenario is not deployed, and 1 when it cannot sign in or the API refuses the sign-in.
 Usage: python burn_api/scripts/smoke.py [agent_id]   (default: first agent in the scenario)
 """
 import json
@@ -29,19 +29,29 @@ def load_env() -> dict:
 
 
 def person_auth(env: dict):
-    """The headers for each call, as the automation person. The token is minted once and kept in memory."""
-    return lambda: automation_headers(demo_token=env.get("BURN_DEMO_TOKEN") or None)
+    """The headers for each call, as the automation person, with the settings read from .env (see load_env).
+    The token is minted once and kept in memory."""
+    return lambda: automation_headers(env=env)
 
 
 def signed_in(env: dict):
-    """person_auth(env), or None (with a SKIP message) when there is no way to sign in to this stack."""
+    """person_auth(env), or None (with a FAIL message) when it cannot sign in. The API is configured, so failing to
+    sign in to it is an error, not a reason to skip."""
     auth = person_auth(env)
     try:
         auth()
     except AutomationAuthError as exc:
-        print(f"SKIP: cannot sign in to the Burn API ({exc})")
+        print(f"FAIL: cannot sign in to the Burn API ({exc})")
         return None
     return auth
+
+
+def refused(status: int) -> bool:
+    """A 401 or 403: the API is there but did not accept the sign-in. Reported as a failure, never a skip."""
+    if status in (401, 403):
+        print(f"FAIL: the Burn API refused the sign-in (HTTP {status}); after a sign-in switch, run `make env`")
+        return True
+    return False
 
 
 def request(base, auth, method, path, body=None):
@@ -63,8 +73,10 @@ def main() -> int:
         return 0
     auth = signed_in(env)
     if auth is None:
-        return 0
+        return 1
     status, feed = request(base, auth, "GET", "/events?limit=1")
+    if refused(status):
+        return 1
     if status != 200 or not feed["agents"]:
         print(f"SKIP: API not ready (status {status}) or no scenario loaded")
         return 0
