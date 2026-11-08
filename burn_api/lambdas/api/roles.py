@@ -5,12 +5,13 @@ burn-scenario on every read and never stored, so the scenario file stays the onl
 """
 import re
 from botocore.exceptions import ClientError
-from burn_contracts import names
+from burn_contracts import names, references
 from burn_contracts.events import utc_now_iso
 
 import db
 import errors
 
+REFERENCE_MODES = references.MODES
 CREDENTIAL_TYPES = ("api_key", "aws_key")
 MANAGERS = ("code", "ui")
 _EGRESS_RE = re.compile(r"^(\*\.)?[a-z0-9.-]{1,253}$")
@@ -53,7 +54,10 @@ def parse_spec(body: dict) -> dict:
     owner = body.get("owner")
     if owner is not None and not isinstance(owner, str):
         raise _bad("owner must be a string")
-    flags = {}
+    mode = body.get("references")
+    if mode is not None and mode not in REFERENCE_MODES:
+        raise _bad(f"references must be one of {', '.join(REFERENCE_MODES)}")
+    flags = {} if mode is None else {"references": mode}  # absent = the Gateway's default
     for key in ("canaries", "auto_burn"):
         value = body.get(key, True)
         if not isinstance(value, bool):
@@ -83,7 +87,7 @@ def _scenario_role(agent: dict) -> dict:
         "credentials": list(agent.get("credentials", [])),
         "may_message": [r for r in map(role_name, agent.get("send_to", [])) if r],
         "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
-        "managed_by": "scenario",
+        "references": references.DEFAULT_MODE, "managed_by": "scenario",
     }
 
 
@@ -117,7 +121,8 @@ def lookup(name: str) -> dict:
 
 def _view(role: dict, active: int) -> dict:
     # Rows stored before these fields existed mean "on", like canary.role_policy reads them.
-    return {"canaries": True, "auto_burn": True, **role, "active_instances": active}
+    return {"canaries": True, "auto_burn": True, "references": references.DEFAULT_MODE, **role,
+            "active_instances": active}
 
 
 def _active_counts() -> dict[str, int]:
