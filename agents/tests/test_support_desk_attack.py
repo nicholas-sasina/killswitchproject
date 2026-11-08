@@ -1,8 +1,7 @@
 """support-desk-attack.yaml must be a STRICT SUPERSET of support-desk.yaml:
 the same agents, shared credentials, customers, and every existing ticket and
-file unchanged, plus exactly one poisoned ticket and one planted file. This is
-what lets the deployed stack sit on it during the rehearsal while
-burn_api/scripts/e2e.py (agent-reader) keeps passing."""
+file unchanged, plus exactly one poisoned ticket and one planted file. That is
+what keeps burn_api/scripts/e2e.py (agent-reader) passing with it loaded."""
 from pathlib import Path
 
 import yaml

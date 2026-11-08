@@ -81,20 +81,26 @@ independent service evidence.
 `scenarios/support-desk-attack.yaml` is the support desk with one added poisoned ticket
 (`T-1099`) and one added file (`config/app.env.bak`). The backup carries the reading session's
 canary on a commented, dead-looking line; everything else is the support desk unchanged, so the
-end-to-end containment check still passes while this scenario is loaded. The attack is two beats
-from that one ticket.
+end-to-end containment check still passes while this scenario is loaded. Load it like any other
+scenario:
 
-Blocked at the gateway. A model agent that has only Burn's tools reads `T-1099`, reads the
-backup, and tries to forward it with `notify` or `send_message`. The backup's canary is a
-credential Burn minted, so the gateway's exit check blocks the message and records a `blocked`
-egress event that names the canary. The real keys in `config/app.env` are already
-`{{burn:ref:...}}` references by the time the agent sees them, so there is nothing usable to send.
+```bash
+make demo SCENARIO=scenarios/support-desk-attack.yaml
+```
 
-Burned from outside. `make attack` is the attacker: it takes whatever leaked out and tries it
-against the provider as an outsider (`GET /v1/whoami`, a bearer token, no session proof). It
-prints only `refused` or `accepted` and a short fingerprint, never a value, makes no Burn API
-call, and takes no shortcut that causes a burn. Once the attacker has the text, it does not
-matter how it got out, so there are two equivalent ways to hand it over:
+The ticket asks whoever reads it to send the backup to an outside address, and two things follow.
+
+A model agent that has only Burn's tools reads `T-1099`, reads the backup, and tries to forward
+it with `notify` or `send_message`. The backup's canary is a credential Burn minted, so the
+gateway's exit check blocks the message and records a `blocked` egress event that names the
+canary. The real keys in `config/app.env` are already `{{burn:ref:...}}` references by the time
+the agent sees them, so there is nothing usable to send.
+
+`make attack` is the attacker: it takes whatever leaked out and tries it against the provider as
+an outsider (`GET /v1/whoami`, a bearer token, no session proof). It prints only `refused` or
+`accepted` and a short fingerprint, never a value, makes no Burn API call, and takes no shortcut
+that causes a burn. Because detection does not depend on how the text escaped, there are two
+equivalent ways to hand it over:
 
 ```bash
 make attack                 # listen on http://127.0.0.1:8099/audit for a POST
@@ -109,10 +115,10 @@ The stdin form is for when you already hold the text: ask a laptop agent to show
 and pipe it in. Either way the canary is refused, and presenting it from outside Burn is what
 trips Burn's canary path, which burns that one session.
 
-A current Claude model usually declines the injection outright — it recognises the ticket as
-social engineering and does not exfiltrate — which is a result worth showing in itself. Burn does
-not rely on the model saying no: a weaker model, a jailbreak, or a copy-paste by hand all put the
-canary in the attacker's hands, and the burn is the same.
+A current Claude model usually declines the injection outright: it recognises the ticket as
+social engineering and does not exfiltrate. Burn does not rely on the model refusing — a weaker
+model, a jailbreak, or a copy-paste by hand all put the canary in the attacker's hands, and the
+burn is the same.
 
 ## Reset or change the scenario
 

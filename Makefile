@@ -19,7 +19,7 @@ PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval c
 
 .DEFAULT_GOAL := help
 .PHONY: burn help hooks deploy site-deploy dashboard-deploy dashboard-hosted env person automation-person test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm attack teardown
-PORT ?= 8099
+ATTACK_PORT ?= 8099
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -102,7 +102,7 @@ swarm: ## Start N deterministic workers under `burn run` in containers (ROLE=wor
 	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) --items $(ITEMS) $(if $(MOCK),--mock)
 
 attack: ## Receive the attack scenario's leak and try each key (listens on 127.0.0.1:8099; FROM=- reads stdin, e.g. pbpaste | make attack)
-	cd agents && uv run python scripts/attack.py --port $(PORT) $(if $(FROM),--from "$(FROM)")
+	cd agents && uv run python scripts/attack.py --port $(ATTACK_PORT) $(if $(FROM),--from "$(FROM)")
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)
