@@ -678,5 +678,6 @@ def test_a_burned_instance_learns_it_before_its_body_is_checked():
 
 def test_site_names():
     assert names.SITE_URL_PARAM == "/burn/site/url"
+    assert names.API_URL_PARAM == "/burn/api/url"
     assert names.DASHBOARD_URL_PARAM == "/burn/dashboard/url"
     assert names.DASHBOARD_ORIGIN_ENV == "BURN_DASHBOARD_ORIGIN"
