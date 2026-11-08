@@ -260,7 +260,8 @@ def cmd_run(api, args):
     except ValueError as exc:
         raise UsageError(str(exc)) from None
     return Instance(api, source, args.role, command, gateway_url=gateway.rstrip("/"), enroll_token=token,
-                    session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv), drop=drop, user_arg=args.user).run()
+                    session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv), drop=drop, user_arg=args.user,
+                    stdin_devnull=args.token_stdin).run()
 
 
 def cmd_env(args):

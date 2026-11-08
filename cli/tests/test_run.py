@@ -445,6 +445,7 @@ def test_root_starts_the_agent_as_an_unprivileged_user_but_not_child_supervisors
     stack.roles["worker"]["may_spawn"] = ["worker"]
     parent = stack.add_instance("sess_parent", "worker")
     inst.session = {"session_id": "sess_parent", "agent_id": parent["agent_id"]}
+    inst._stopping.clear()
     FakePopen.calls.clear()
     inst.spawn_child("worker", ["true"])
     argv, kw = FakePopen.calls[0]
