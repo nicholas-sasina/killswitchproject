@@ -1,1 +1,301 @@
-/* The overview page. Tokens from styles/tokens.css only; shared pieces from src/ui/. */
+/* The overview page. Tokens from styles/tokens.css only; shared pieces from
+   src/ui/. Every selector sits under .overview. */
+
+.overview {
+  padding-bottom: 64px;
+}
+
+/* ---------- Running now ---------- */
+
+.overview .ov-now {
+  padding-bottom: 12px;
+}
+
+.overview .ov-now .card-head-rule {
+  padding-bottom: 16px;
+}
+
+.overview .ov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.overview .ov-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview .ov-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.overview .ov-row-role {
+  min-width: 0;
+}
+
+.overview .ov-row-name {
+  display: block;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+/* The whole row opens the role; the squares sit above that and open
+   their own agents. */
+.overview .ov-row-name::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.overview .ov-row:hover .ov-row-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.overview .ov-row-what {
+  display: block;
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+.overview .ov-squares {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.overview .ov-squares .square-running:hover {
+  background: var(--ink-soft);
+  border-color: var(--ink-soft);
+}
+
+.overview .ov-squares .square:focus-visible {
+  outline-color: var(--ink);
+}
+
+.overview .ov-row-counts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.overview .ov-row-running {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.overview .ov-row-note {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.overview .ov-row-note.is-ember {
+  color: var(--ember-ink);
+}
+
+.overview .ov-now .card-note {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.overview .ov-now .notice,
+.overview .ov-now .empty-state {
+  padding-top: 18px;
+}
+
+/* ---------- Last 24 hours ---------- */
+
+.overview .ov-day {
+  padding: 22px 28px;
+}
+
+.overview .ov-day .card-head {
+  margin-bottom: 14px;
+}
+
+.overview .ov-least {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-2);
+}
+
+/* ---------- Right column ---------- */
+
+.overview .ov-decide,
+.overview .ov-burned {
+  padding-bottom: 8px;
+}
+
+.overview .ov-live {
+  padding-bottom: 10px;
+}
+
+.overview .ov-card-notice {
+  padding: 16px 0 8px;
+}
+
+.overview .ov-empty {
+  padding: 18px 0 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.overview .ov-more {
+  padding: 14px 0 8px;
+  font-size: 13px;
+  color: var(--muted-2);
+}
+
+/* Needs a decision */
+
+.overview .ov-decide-item {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.overview .ov-decide-tag {
+  font-size: 10px;
+  color: var(--muted-2);
+}
+
+.overview .ov-decide-tag.is-ember {
+  color: var(--ember-ink);
+}
+
+.overview .ov-decide-title {
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.overview .ov-decide-body {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.overview .ov-decide-body .id {
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.overview .ov-decide-actions,
+.overview .ov-decide-item .flag-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Burned today */
+
+.overview .ov-burned-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.overview .ov-burned-row:hover .ov-burned-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.overview .ov-burned-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.overview .ov-burned-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.overview .ov-burned-why {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted-2);
+}
+
+/* Live */
+
+.overview .ov-live-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.overview .ov-live-at {
+  padding-top: 2px;
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+.overview .ov-live-text {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.overview .ov-live-text b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.overview .ov-live-text b.is-ember {
+  color: var(--ember-ink);
+}
+
+/* ---------- Narrow ---------- */
+
+@media (max-width: 860px) {
+  .overview .ov-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px 16px;
+  }
+
+  .overview .ov-squares {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .overview .ov-now,
+  .overview .ov-day {
+    padding-inline: 20px;
+  }
+}
