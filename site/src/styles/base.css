@@ -192,3 +192,12 @@ code {
   letter-spacing: -0.04em;
   text-wrap: balance;
 }
+
+/* The full-page veil that carries people to sign-in. */
+.leave-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--night);
+  pointer-events: none;
+}
