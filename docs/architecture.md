@@ -1,13 +1,14 @@
 # Architecture
 
 Burn contains a compromised AI agent in one action: revoke its badge, rotate every credential it
-owns, flag the credentials it saw that others own, and show where its AWS key was used. It works
-because every credential an agent can touch is minted per agent, and every place an agent could
-see or leak one is a checkpoint Burn controls.
+owns, flag the credentials it saw that others own, and show recorded use of its AWS key.
+Agent-owned credentials are issued separately so rotating one agent's copies does not rotate
+another's. Shared credentials remain shared and require their owner's response. The current
+demo routes tool calls through the Gateway and outbound agent traffic through the proxy.
 
 ```mermaid
 flowchart LR
-  subgraph local["Presenter machine"]
+  subgraph local["Local machine"]
     A1[reader agent] & A2[analyst agent] & A3[notifier agent]
     P[egress proxy<br/>exit check]
     S[webhook sink]
@@ -49,7 +50,7 @@ flowchart LR
 | Component | Where | What it does |
 |---|---|---|
 | Agents (`agents/`) | Docker, internal network only | Three Strands agents on a fixed graph (reader → analyst → notifier). Each calls Claude with its **own** minted AWS key and calls tools through the Gateway with its **own** badge. Stops when its badge is refused. |
-| Egress proxy (`detection/proxy`) | Docker, the only container on both networks | Authenticates each agent's session, refuses revoked sessions, blocks metadata/private addresses and hosts not on the allowlist, and runs the exit check on everything leaving. |
+| Egress proxy (`detection/proxy`) | Docker, the only agent-facing container on both networks | Authenticates each agent's session, refuses inactive sessions, applies deployment and session destination restrictions, and runs the exit check on outbound requests. |
 | AgentCore Gateway (`gateway/`) | AWS | MCP endpoint for the tools. Inbound auth is a Cognito JWT with scope `burn/tools`. |
 | Interceptor Lambda (`gateway/lambdas/interceptor`) | AWS | **REQUEST:** looks up the badge's session in DynamoDB on every call and refuses revoked or unknown badges and tools outside the agent's allowlist; scans `send_message`/`notify` arguments and blocks known credentials. **RESPONSE:** scans the tool output and writes every credential found to the agent's exposure ledger. |
 | Tool Lambda (`gateway/lambdas/tools`) | AWS | Tickets, config files, customers, messages. Scenario data comes from a data file; credential placeholders are filled from Secrets Manager at read time, so a file shows the current key. |
@@ -82,6 +83,21 @@ inside the trust boundary and skip the body check: Bedrock (the model legitimate
 output in the conversation) and the Gateway (its interceptor checks arguments). A credential
 going to its own home service in its expected header is not a leak.
 
+Allowed HTTPS requests to the configured provider also receive a signed session-origin
+header after scanning. The proxy removes agent-supplied copies, then binds the authenticated
+session and timestamp to an HMAC using the system fingerprint key. The canary provider
+verifies that header to distinguish use through Burn from outside use. This protocol does not
+relax the exit check, and requires the matching provider implementation to be deployed.
+
+The proxy permits only exact configured destinations. Session `egress` lists narrow the
+deployment allowlist except for Burn's configured Gateway, which continues to enforce tools
+per role. Missing or null lists retain legacy defaults; empty lists allow only the Gateway
+when configured. Invalid lists fail closed. S3 is restricted to
+the demo's HTTPS `GET /` bucket-list operation without a query or body. The default configured
+sink is deliberately readable by the simulated attacker. An empty `BURN_SINK_URL` removes its
+allowlist entry and private-address exception; other destinations still need capability and
+access-control review. A deny-all configuration is not a usable zero-exposure result.
+
 **Burn.** `POST /burn {agent_id}`:
 1. Every active session of the agent is marked `revoked` in DynamoDB and its Cognito client is
    deleted. The DynamoDB flag is the real kill switch: tokens already issued stay valid at Cognito
@@ -104,10 +120,21 @@ going to its own home service in its expected header is not a leak.
 | `burn-events` | Append-only event stream (ULID ids, so the dashboard polls with `since=`) |
 | `burn-credentials` / `burn-fingerprints` | Credential registry and HMAC-SHA256 fingerprints (exact + 8-char shingles) |
 | `burn-scenario`, `burn-messages` | Scenario data loaded from YAML, agent inboxes |
-| Secrets Manager `burn/<agent>/*` | The only place credential values exist |
+| Secrets Manager `burn/<agent>/*` | Persistent credential vault; private runtime environments also receive the values they need |
 
-No credential value is ever written to DynamoDB, logs, events or the dashboard. The ledger holds
-HMAC fingerprints keyed with a secret generated by AWS at deploy time.
+Ledger and event records store credential references and keyed fingerprints rather than raw
+values. The dashboard reads that metadata. The HMAC key is generated by AWS at deploy time.
+Runtime credential files under `.run/` and local configuration stay private and gitignored.
+
+## Contract and runtime scope
+
+The API implements roles, enrollment tokens, instances and scoped burns. Mocks support
+development independently of the real handlers. Implementation and mock routes do not
+establish which revision is deployed.
+The [CLI and Python SDK](../cli/README.md) expose these workflows to operators and agent code;
+their availability also depends on the corresponding API implementation.
+Canaries and secret references belong to separate component implementations; evaluations
+must identify the source checkout and the actual path they exercised.
 
 ## Identity and least privilege
 

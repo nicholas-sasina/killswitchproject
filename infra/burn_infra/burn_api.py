@@ -67,6 +67,9 @@ class BurnApiStack(cdk.Stack):
             resources=[table_arn(names.EVENTS_TABLE), f"{table_arn(names.EVENTS_TABLE)}/index/by_agent"]))
         role.add_to_policy(iam.PolicyStatement(  # Scan: a canary incident checks no other agent holds it
             actions=["dynamodb:Query", "dynamodb:Scan"], resources=[table_arn(names.EXPOSURES_TABLE)]))
+        role.add_to_policy(iam.PolicyStatement(  # POST /burn/by-source
+            actions=["dynamodb:Query"],
+            resources=[f"{table_arn(names.EXPOSURES_TABLE)}/index/{names.EXPOSURES_BY_SOURCE_INDEX}"]))
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:{names.DEMO_TOKEN_SECRET}-*"],
@@ -76,8 +79,8 @@ class BurnApiStack(cdk.Stack):
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/api_key-*",
                        f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/agent-*/aws_key-*"],
         ))
-        role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge
-            actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue"],
+        role.add_to_policy(iam.PolicyStatement(  # badge secrets: burn/<agent_id>/badge (delete: a failed join's)
+            actions=["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:DeleteSecret"],
             resources=[f"arn:aws:secretsmanager:{region}:{acct}:secret:burn/*/badge-*"],
         ))
         role.add_to_policy(iam.PolicyStatement(

@@ -2,13 +2,24 @@
 
 Only HMACs are stored. A rotated credential keeps its rows with status
 "rotated", so a leak of an old value is still caught and attributed.
+
+Every change (register, rotate, delete) bumps one counter item,
+names.FINGERPRINTS_VERSION_KEY, after the rows are written. The Gateway keeps all
+fingerprints in memory and reloads them only when that counter changes.
 """
 from boto3.dynamodb.conditions import Key
 
 import aws
 import vault
 from burn_contracts import fingerprint as fp
-from burn_contracts.names import FINGERPRINT_KEY_SECRET, FINGERPRINTS_TABLE
+from burn_contracts.names import FINGERPRINT_KEY_SECRET, FINGERPRINTS_TABLE, FINGERPRINTS_VERSION_KEY
+
+
+def bump_version() -> None:
+    """Tell readers the fingerprint set changed. Called after the rows are written."""
+    aws.table(FINGERPRINTS_TABLE).update_item(
+        Key={"fingerprint": FINGERPRINTS_VERSION_KEY}, UpdateExpression="ADD v :one",
+        ExpressionAttributeValues={":one": 1})
 
 
 def key() -> bytes:
@@ -40,6 +51,7 @@ def register(secret_ref: str, owner: str, secret_type: str, version: int, parts,
     with aws.table(FINGERPRINTS_TABLE).batch_writer() as batch:
         for digest, row in rows.items():
             batch.put_item(Item={"fingerprint": digest, **row})
+    bump_version()
     return len(rows)
 
 
@@ -64,9 +76,11 @@ def mark_rotated(secret_ref: str, version: int) -> None:
         for row in _rows_for(secret_ref):
             if int(row["version"]) == version:
                 batch.put_item(Item={**row, "status": "rotated"})
+    bump_version()
 
 
 def delete_all(secret_ref: str) -> None:
     with aws.table(FINGERPRINTS_TABLE).batch_writer() as batch:
         for row in _rows_for(secret_ref):
             batch.delete_item(Key={"fingerprint": row["fingerprint"]})
+    bump_version()

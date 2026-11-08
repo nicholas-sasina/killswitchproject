@@ -41,7 +41,12 @@ class BurnDataStack(cdk.Stack):
             sort_key=ddb.Attribute(name="event_id", type=S),
         )
 
-        table("burn-exposures", "agent_id", "secret_ref_or_fp")
+        exposures = table("burn-exposures", "agent_id", "secret_ref_or_fp")
+        exposures.add_global_secondary_index(  # "who read this source", for POST /burn/by-source
+            index_name=names.EXPOSURES_BY_SOURCE_INDEX,
+            partition_key=ddb.Attribute(name="source_ref", type=S),
+            sort_key=ddb.Attribute(name="first_seen", type=S),
+        )
 
         credentials = table("burn-credentials", "secret_ref")
         credentials.add_global_secondary_index(
