@@ -91,3 +91,50 @@ def make_event(*, agent_id: str, source: str, action: str, **fields) -> dict:
     for name in OPTIONAL_FIELDS:
         event[name] = fields.get(name)
     return event
+
+
+# --- storage representation -------------------------------------------------
+# make_event() returns every optional field, set to None where unused, because
+# in-process callers and the JSON Schema both expect the full shape. A typical
+# event uses four or five of the seventeen, so writing them all put roughly
+# 190 bytes of attribute names and NULLs into every row: over half of a
+# measured 325-byte average.
+#
+# DynamoDB rows therefore carry only the fields that have a value, plus a TTL.
+# for_storage() and from_storage() are inverses, so what the API returns is
+# unchanged; only what DynamoDB holds and what a query has to read gets
+# smaller. The schema is untouched, which matters because it sets
+# additionalProperties: false and a TTL attribute on the event itself would
+# fail validation.
+
+#: Numeric epoch-seconds attribute DynamoDB uses to expire a row. Distinct
+#: from the ISO `expires_at` on enroll tokens, which is an application check.
+TTL_ATTRIBUTE = "ttl_epoch"
+
+#: How long a ledger event is kept. Long enough that no demo, eval run or
+#: post-mortem loses history; short enough that the table does not grow
+#: without bound. Rows written before TTL was enabled have no TTL attribute
+#: and are never expired, so enabling this cannot delete existing history.
+EVENT_RETENTION_DAYS = 30
+
+
+def ttl_epoch(days: int, now: float | None = None) -> int:
+    """Epoch seconds `days` from now, for a DynamoDB TTL attribute."""
+    import time
+
+    return int((time.time() if now is None else now) + days * 86400)
+
+
+def for_storage(event: dict, retention_days: int = EVENT_RETENTION_DAYS) -> dict:
+    """The row to write: no None values, plus a TTL so the table self-trims."""
+    row = {key: value for key, value in event.items() if value is not None}
+    row[TTL_ATTRIBUTE] = ttl_epoch(retention_days)
+    return row
+
+
+def from_storage(row: dict) -> dict:
+    """The event as callers expect it: every optional field present, TTL gone."""
+    event = {key: value for key, value in row.items() if key != TTL_ATTRIBUTE}
+    for name in OPTIONAL_FIELDS:
+        event.setdefault(name, None)
+    return event

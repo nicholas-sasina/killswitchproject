@@ -25,6 +25,7 @@ import resolve  # noqa: E402
 import sessions  # noqa: E402
 import store  # noqa: E402
 from burn_contracts import fingerprint as fp  # noqa: E402
+from burn_contracts.events import from_storage  # noqa: E402
 
 TABLES = {
     "burn-sessions": ("session_id", None, [("by_client", "client_id"), ("by_agent", "agent_id")]),
@@ -131,7 +132,9 @@ def put_session(dynamodb, agent_id="agent-alpha", status="active",
 
 
 def events(dynamodb) -> list[dict]:
-    return dynamodb.Table("burn-events").scan()["Items"]
+    """Stored events as callers see them: storage bookkeeping (the TTL) removed
+    and omitted optional fields restored, which is what the Burn API returns."""
+    return [from_storage(item) for item in dynamodb.Table("burn-events").scan()["Items"]]
 
 
 def fake_token(client_id: str) -> str:

@@ -6,7 +6,7 @@ from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from burn_contracts import names
-from burn_contracts.events import make_event
+from burn_contracts.events import for_storage, make_event
 
 _local = threading.local()
 _session: boto3.session.Session | None = None
@@ -127,7 +127,8 @@ def write_event(**fields) -> dict:
     if fields.get("actor") is None and caller.get().actor:
         fields["actor"] = caller.get().actor
     event = make_event(**fields)
-    table(names.EVENTS_TABLE).put_item(Item={"stream": names.EVENTS_STREAM, **event})
+    table(names.EVENTS_TABLE).put_item(
+        Item={"stream": names.EVENTS_STREAM, **for_storage(event)})
     return event
 
 

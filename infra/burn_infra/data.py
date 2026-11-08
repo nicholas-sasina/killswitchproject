@@ -15,6 +15,7 @@ from .assets import REPO
 
 # Fixed resource names live in the contracts package; infra has no dependency on it, so add its path.
 sys.path.insert(0, str(REPO / "contracts" / "python"))
+from burn_contracts import events as events_mod  # noqa: E402
 from burn_contracts import names  # noqa: E402
 
 S = ddb.AttributeType.STRING
@@ -25,7 +26,7 @@ class BurnDataStack(cdk.Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         def table(name: str, pk: str, sk: str | None = None,
-                  stream: ddb.StreamViewType | None = None) -> ddb.Table:
+                  stream: ddb.StreamViewType | None = None, expires: bool = False) -> ddb.Table:
             return ddb.Table(
                 self, name,
                 table_name=name,
@@ -34,10 +35,15 @@ class BurnDataStack(cdk.Stack):
                 billing_mode=ddb.BillingMode.PAY_PER_REQUEST,
                 stream=stream,
                 removal_policy=cdk.RemovalPolicy.DESTROY,  # hackathon: teardown must be clean
+                # Rows carrying the TTL attribute are deleted by DynamoDB at no
+                # cost. Rows written before this was enabled do not carry it and
+                # are never expired, so turning it on cannot remove history.
+                time_to_live_attribute=events_mod.TTL_ATTRIBUTE if expires else None,
             )
 
         # The stream feeds notifications (notifications/infra): new rows only, writers unchanged.
-        events = table("burn-events", "stream", "event_id", stream=ddb.StreamViewType.NEW_IMAGE)
+        events = table("burn-events", "stream", "event_id",
+                       stream=ddb.StreamViewType.NEW_IMAGE, expires=True)
         cdk.CfnOutput(self, "EventsStreamArn", value=events.table_stream_arn or "")
         events.add_global_secondary_index(
             index_name="by_agent",
@@ -71,10 +77,10 @@ class BurnDataStack(cdk.Stack):
         )
 
         table("burn-scenario", "pk")
-        table("burn-messages", "to_agent", "msg_id")
+        table("burn-messages", "to_agent", "msg_id", expires=True)
 
         table(names.ROLES_TABLE, "name")
-        tokens = table(names.ENROLL_TOKENS_TABLE, "token_id")
+        tokens = table(names.ENROLL_TOKENS_TABLE, "token_id", expires=True)
         tokens.add_global_secondary_index(
             index_name="by_role", partition_key=ddb.Attribute(name="role", type=S)
         )
