@@ -8,7 +8,7 @@ only allows the tools its scenario role lists, and refuses everything once the b
 - A badge is one Cognito app client per agent session (`badges.py`); the agent trades it for a token.
 - The gateway checks the token; the interceptor then checks the session in DynamoDB on every call.
 - Revoked or unknown badges and unlisted tools or recipients are refused; the real caller id is injected.
-- Tool output is scanned (`burn_detect`) into the agent's ledger; messages carrying a known key are blocked.
+- Tool output is scanned (`burn_detect`) against a short-lived in-memory fingerprint snapshot and recorded in the agent's ledger; messages carrying a known key are blocked.
 - One tool Lambda serves the mock tools from scenario data; credentials are filled in at read time.
 
 ## Key files
@@ -18,7 +18,7 @@ only allows the tools its scenario role lists, and refuses everything once the b
 | `lambdas/interceptor/interceptor.py` | REQUEST/RESPONSE decisions (see `INTERCEPTOR.md`) |
 | `lambdas/interceptor/shapes.py` | Reads gateway events, builds pass-through and deny outputs |
 | `lambdas/interceptor/sessions.py` | Session lookup (the kill switch) and event writes |
-| `lambdas/interceptor/record.py` | RESPONSE: credentials in tool output -> ledger + `recorded` events |
+| `lambdas/interceptor/record.py` | RESPONSE: credentials in tool output -> ledger + `recorded` events |\n| `lambdas/interceptor/detection.py` | HMAC scanner plus a paginated in-memory fingerprint snapshot (5-second refresh) |
 | `lambdas/interceptor/exit_check.py` | REQUEST: blocks credentials in send_message/notify; receiver inherits the ledger |
 | `lambdas/interceptor/ledger.py`, `detection.py` | `burn-exposures` writes; `burn_detect` scanner + fingerprint lookup |
 | `lambdas/tools/tools.py` | The seven mock tools from `contracts/mcp-tools.json` |
