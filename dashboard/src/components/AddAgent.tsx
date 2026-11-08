@@ -67,6 +67,8 @@ export function AddAgent({
   const [maySpawn, setMaySpawn] = useState<string[]>([]);
   const [egress, setEgress] = useState("");
   const [owner, setOwner] = useState("");
+  const [canaries, setCanaries] = useState(true);
+  const [autoBurn, setAutoBurn] = useState(true);
   const [uses, setUses] = useState("1");
   const [ttl, setTtl] = useState("3600");
   const [created, setCreated] = useState(role);
@@ -140,6 +142,8 @@ export function AddAgent({
           may_spawn: maySpawn,
           egress: hosts.length ? hosts : null,
           owner: owner.trim() || null,
+          canaries,
+          auto_burn: autoBurn,
           managed_by: "ui",
         };
         target = await api.createRole(spec);
@@ -219,6 +223,25 @@ export function AddAgent({
                   selected={credentials}
                   onChange={setCredentials}
                 />
+                <div className="swarm-choices">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={canaries}
+                      onChange={(event) => setCanaries(event.target.checked)}
+                    />
+                    Plant a canary credential
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={autoBurn}
+                      disabled={!canaries}
+                      onChange={(event) => setAutoBurn(event.target.checked)}
+                    />
+                    Burn automatically if the canary is used
+                  </label>
+                </div>
                 <Choices
                   title="may_message"
                   options={roles.map((item) => item.name)}
