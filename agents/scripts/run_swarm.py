@@ -1,6 +1,6 @@
 """`make swarm ROLE=worker N=20`: start N workers, each running under `burn run`, in containers.
 
-    uv run python scripts/run_swarm.py --role worker --count 20 [--mock] [--interval 3]
+    uv run python scripts/run_swarm.py --role worker --count 20 [--items 10] [--mock] [--interval 3]
 
 The launcher joins from the host once per container with one join token, and hands each container its own values
 through `docker run -e NAME` (the values live in the launcher's environment, never in argv or a file). The
@@ -9,6 +9,9 @@ containers need no AWS access. Workers make no model calls, so a swarm costs not
 Without --mock the workers run on the demo stack's internal network, whose one way out is the egress proxy
 (start the stack first); the Burn API and Gateway come from the environment or .env (`make env`).
 With --mock they run against the mock servers on the host, which are the only servers it will talk to.
+
+With --items each worker works through a task of that many items and exits when it is done. A worker that Burn burns
+is replaced by a fresh instance that resumes its task (when the role has replace on burn); see swarm_launch.py.
 """
 import argparse
 import os
@@ -19,8 +22,8 @@ from urllib.parse import urlsplit
 
 from common import AGENTS_DIR, REPO_ROOT, load_dotenv
 from burn_contracts.automation import AutomationAuthError, automation_headers
-from burn_contracts.names import DEMO_TOKEN_HEADER
-from swarm_launch import IMAGE, NETWORK, InstanceApi, PersonApi, start_workers
+from burn_contracts.names import DEMO_TOKEN_HEADER, MAX_PROGRESS_ITEMS
+from swarm_launch import NETWORK, InstanceApi, PersonApi, image_tag, start_workers
 
 MOCK_API, MOCK_GATEWAY = "http://localhost:8700", "http://localhost:8701/mcp"
 
@@ -38,15 +41,29 @@ def docker(argv: list[str], env: dict | None = None) -> subprocess.CompletedProc
     return result
 
 
-def follow(names: list[str]) -> None:
-    """Prefix and print each container's log until it exits; return when all have."""
-    def tail(name: str) -> None:
-        proc = subprocess.Popen(["docker", "logs", "-f", name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        short = name.rsplit("-", 1)[-1]
-        for line in proc.stdout:
-            print(f"{short} | {line.rstrip()}", flush=True)
+def tail_logs(name: str) -> None:
+    """Print one container's log, each line prefixed with its short name, until the container exits."""
+    proc = subprocess.Popen(["docker", "logs", "-f", name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    short = name.rsplit("-", 1)[-1]
+    for line in proc.stdout:
+        print(f"{short} | {line.rstrip()}", flush=True)
 
-    threads = [threading.Thread(target=tail, args=(n,), daemon=True) for n in names]
+
+def follow(names: list[str], on_exit=None, tail=tail_logs) -> None:
+    """Follow each worker until it exits, then the container `on_exit(name)` started in its place, if any.
+
+    Each worker has a thread of its own, so one replacement never waits on another. Returns when none is left.
+    """
+    def lane(name: str | None) -> None:
+        while name:
+            tail(name)
+            try:
+                name = on_exit(name) if on_exit else None
+            except Exception as exc:  # noqa: BLE001 - say so rather than let the thread end silently
+                print(f"{name}: {exc}", flush=True)
+                name = None
+
+    threads = [threading.Thread(target=lane, args=(n,), daemon=True) for n in names]
     for t in threads:
         t.start()
     for t in threads:
@@ -59,12 +76,16 @@ def main() -> int:
     parser.add_argument("--role", required=True)
     parser.add_argument("--count", type=int, required=True)
     parser.add_argument("--interval", type=float, default=3.0, help="seconds between a worker's tool calls")
+    parser.add_argument("--items", type=int, default=0,
+                        help="items in each worker's task, replaced on burn (default 0: no task, poll until stopped)")
     parser.add_argument("--mock", action="store_true", help="use the mock servers on the host")
     parser.add_argument("--api-url", default=MOCK_API, help="with --mock: the mock Burn API (localhost only)")
     parser.add_argument("--gateway-url", default=MOCK_GATEWAY, help="with --mock: the mock MCP server (localhost only)")
     args = parser.parse_args()
     if args.count < 1:
         sys.exit("--count must be at least 1")
+    if not 0 <= args.items <= MAX_PROGRESS_ITEMS:
+        sys.exit(f"--items must be between 0 and {MAX_PROGRESS_ITEMS}, the most items Burn tracks for one instance")
 
     if args.mock:
         # The environment and .env (which `make env` points at the real stack) are ignored, so a mock swarm can
@@ -86,19 +107,22 @@ def main() -> int:
         if subprocess.run(["docker", "network", "inspect", NETWORK], capture_output=True).returncode:
             sys.exit(f"the demo stack's network {NETWORK} does not exist: start the stack first (make demo)")
 
-    docker(["docker", "build", "-q", "-f", str(AGENTS_DIR / "Dockerfile.swarm"), "-t", IMAGE, str(REPO_ROOT)])
-    names: list[str] = []
+    image = image_tag()  # this checkout's own image: another checkout's swarm cannot replace it under us
+    docker(["docker", "build", "-q", "-f", str(AGENTS_DIR / "Dockerfile.swarm"), "-t", image, str(REPO_ROOT)])
+    swarm = None
     try:
-        names = start_workers(api, InstanceApi(api_url), args.role, args.count, api_url=api_url,
+        swarm = start_workers(api, InstanceApi(api_url), args.role, args.count, api_url=api_url,
                               gateway_url=gateway, mock=args.mock, interval=args.interval,
-                              certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker)
-        print(f"started {len(names)} worker(s) of role {args.role}; Ctrl-C stops them")
-        follow(names)
+                              certs_dir=str(REPO_ROOT / ".run" / "proxy-certs"), docker=docker, image=image,
+                              items=args.items)
+        task = f", {args.items} item(s) each" if args.items else ""
+        print(f"started {len(swarm.names)} worker(s) of role {args.role}{task}; Ctrl-C stops them")
+        follow(swarm.names, swarm.on_exit)
     except KeyboardInterrupt:
         pass
     finally:
-        if names:
-            subprocess.run(["docker", "rm", "-f", *names], capture_output=True)  # only the workers
+        if swarm and swarm.names:
+            subprocess.run(["docker", "rm", "-f", *swarm.names], capture_output=True)  # only the workers
     return 0
 
 

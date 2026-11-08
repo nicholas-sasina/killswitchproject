@@ -4,20 +4,30 @@ Run under `burn run`: it calls one MCP tool every few seconds through BURN_MCP_U
 adds the instance's badge) and stops when the Gateway says its badge is dead.
 
     burn run --role worker -- python -m burn_agents.swarm_worker
+
+With a task (BURN_TASK, a JSON list of item ids, from the launcher) it works through the items instead: for each one
+not already done or quarantined (BURN_RESUME, when it replaces a burned instance) it tells `burn run` it started it,
+makes one tool call, tells `burn run` it is done, and exits 0 once every item is handled. Only item ids are
+reported, so nothing else it writes can reach a replacement.
 """
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Awaitable, Callable
 
+from burn_contracts.names import PROGRESS_URL_ENV, RESUME_ENV, TASK_ENV, is_item_id
+
 from .revoked import is_refusal_text
 
 log = logging.getLogger("swarm_worker")
 Call = Callable[[str, dict], Awaitable[tuple[bool, str]]]  # (tool, arguments) -> (is_error, text)
+Report = Callable[[str, str], Awaitable[None]]  # (item, "started" | "done"); raises if burn run did not take it
 MAX_CONSECUTIVE_FAILURES = 5
+EXIT_BURNED = 3  # a task worker stopped because it was burned (as `burn run` exits when it stops a burned agent)
 
 
 def root_cause(exc: BaseException) -> str:
@@ -73,6 +83,102 @@ async def work(call: Call, *, tool: str, interval: float, calls: int = 0, offset
     return 0
 
 
+def read_task(env: dict) -> tuple[list[str], dict] | None:
+    """(task, resume) from BURN_TASK and BURN_RESUME, or None without a task. Anything but item ids is a ValueError."""
+    if not env.get(TASK_ENV):
+        return None
+    try:
+        task = json.loads(env[TASK_ENV])
+        resume = json.loads(env.get(RESUME_ENV) or '{"done": [], "quarantined": []}')
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{TASK_ENV} and {RESUME_ENV} must be JSON ({exc.msg})") from None
+    if not isinstance(task, list) or not all(is_item_id(item) for item in task):
+        raise ValueError(f"{TASK_ENV} must be a list of item ids")
+    if (not isinstance(resume, dict) or set(resume) != {"done", "quarantined"}
+            or not all(isinstance(ids, list) and all(is_item_id(i) for i in ids) for ids in resume.values())):
+        raise ValueError(f"{RESUME_ENV} must be {{\"done\": [ids], \"quarantined\": [ids]}}")
+    return task, resume
+
+
+async def work_task(call: Call, report: Report, *, task: list[str], resume: dict, tool: str, interval: float,
+                    offset: float = 0.0, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> int:
+    """Work through `task`, skipping what `resume` says was done or quarantined. Returns an exit code.
+
+    Per item: report started, one `tool` call, report done, then `interval` seconds before the next. A failed call is
+    retried for the same item. 0 = every item handled, EXIT_BURNED = burned before the end (the Gateway refused the
+    badge, or burn run answered a report with 409), 1 = the Gateway stayed unreachable, or burn run did not take a
+    progress report (no more work without it).
+    """
+    handled = set(resume.get("done", [])) | set(resume.get("quarantined", []))
+    todo = [item for item in task if item not in handled]
+    log.info("task of %d item(s): %d to do, %d done and %d quarantined before", len(task), len(todo),
+             len(resume.get("done", [])), len(resume.get("quarantined", [])))
+    await sleep(offset)
+    for n, item in enumerate(todo):
+        if n:
+            await sleep(interval)
+        if (code := await _report(report, item, "started")) is not None:
+            return code
+        failures = 0
+        while True:
+            try:
+                is_error, text = await call(tool, {})
+            except Exception as exc:  # noqa: BLE001 - a dead connection and a revoked badge look alike here
+                if is_refusal_text(str(exc)):
+                    return _burned(item)
+                problem = root_cause(exc)
+            else:
+                if is_error and is_refusal_text(text):
+                    return _burned(item)
+                if not is_error:
+                    break
+                problem = "refused: " + text[:80]
+            failures += 1
+            log.warning("%s for %s failed (%s): %s", tool, item, failures, problem)
+            if failures >= MAX_CONSECUTIVE_FAILURES:
+                return 1
+            await sleep(interval)
+        if (code := await _report(report, item, "done")) is not None:
+            return code
+        log.info("%s done", item)
+    log.info("task finished")
+    return 0
+
+
+def _burned(item: str) -> int:
+    log.info("burned at %s, stopping", item)
+    return EXIT_BURNED
+
+
+async def _report(report: Report, item: str, state: str) -> int | None:
+    """None once burn run has taken the report, else the exit code to stop with."""
+    try:
+        await report(item, state)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 409:  # burn run heard from Burn that this instance is burned
+            return _burned(item)
+        if status == 503:  # burn run could not get Burn to confirm it
+            log.error("progress not confirmed, stopping at %s %s", item, state)
+        else:
+            log.error("burn run did not take %s %s (%s): stopping", item, state, root_cause(exc))
+        return 1
+
+
+@asynccontextmanager
+async def progress_reporter(url: str, local_token: str = "", transport=None):
+    """A `Report` that posts to burn run's local progress endpoint. Never through a proxy: the endpoint is local."""
+    import httpx
+    async with httpx.AsyncClient(timeout=10, trust_env=False, transport=transport) as client:
+        async def report(item: str, state: str) -> None:
+            reply = await client.post(url, json={"item": item, "state": state},
+                                      headers={"Authorization": f"Bearer {local_token}"})
+            reply.raise_for_status()
+
+        yield report
+
+
 @asynccontextmanager
 async def mcp_call(url: str, local_token: str = ""):
     """A `Call` backed by the official MCP client over streamable HTTP."""
@@ -95,10 +201,23 @@ async def main_async(env: dict) -> int:
         print("BURN_MCP_URL is not set: run this under `burn run`", file=sys.stderr)
         return 2
     interval = float(env.get("BURN_WORKER_INTERVAL", "3"))
+    try:
+        assigned = read_task(env)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    tool, offset = env.get("BURN_WORKER_TOOL", "read_inbox"), start_offset(env.get("BURN_AGENT_ID", ""), interval)
+    if assigned:
+        if not env.get(PROGRESS_URL_ENV):
+            print(f"{PROGRESS_URL_ENV} is not set: a task needs a `burn run` that takes progress", file=sys.stderr)
+            return 2
+        local_token = env.get("BURN_LOCAL_TOKEN", "")
+        async with mcp_call(url, local_token) as call, progress_reporter(env[PROGRESS_URL_ENV], local_token) as report:
+            return await work_task(call, report, task=assigned[0], resume=assigned[1], tool=tool, interval=interval,
+                                   offset=offset)
     async with mcp_call(url, env.get("BURN_LOCAL_TOKEN", "")) as call:
-        return await work(call, tool=env.get("BURN_WORKER_TOOL", "read_inbox"), interval=interval,
-                          calls=int(env.get("BURN_WORKER_CALLS", "0")),
-                          offset=start_offset(env.get("BURN_AGENT_ID", ""), interval))
+        return await work(call, tool=tool, interval=interval, calls=int(env.get("BURN_WORKER_CALLS", "0")),
+                          offset=offset)
 
 
 def main() -> int:
@@ -109,8 +228,8 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as exc:  # noqa: BLE001
-        if is_refusal_text(str(exc)):
-            return 0
+        if is_refusal_text(str(exc)):  # a dead badge: the normal end without a task, a burn mid-task with one
+            return EXIT_BURNED if os.environ.get(TASK_ENV) else 0
         log.error("stopping: %s", root_cause(exc))
         return 1
 

@@ -55,10 +55,10 @@ class Docker:
 
 def launch(api=None, docker=None, mock=True, count=3):
     api, docker = api or FakeApi(), docker or Docker()
-    names = start_workers(api, api, "worker", count, api_url="http://localhost:8700",
+    swarm = start_workers(api, api, "worker", count, api_url="http://localhost:8700",
                           gateway_url="http://localhost:8701/mcp", mock=mock, interval=3.0,
-                          certs_dir="/repo/.run/proxy-certs", docker=docker)
-    return api, docker, names
+                          certs_dir="/repo/.run/proxy-certs", docker=docker, image="burn-swarm-worker:test")
+    return api, docker, swarm.names
 
 
 def test_each_container_is_joined_once_with_one_token_and_gets_only_its_own_values():
@@ -143,7 +143,7 @@ def test_container_urls():
 
 
 def test_argv_helper_never_embeds_a_value():
-    argv = docker_run_argv("n", "worker", {"session_id": "s"}, ["A", "B"], mock=True)
+    argv = docker_run_argv("n", "worker", {"session_id": "s"}, ["A", "B"], mock=True, image="burn-swarm-worker:t")
     assert argv.count("-e") == 2 and "A" in argv and "B" in argv
 
 
@@ -151,7 +151,9 @@ def run_main(monkeypatch, *args):
     captured = {}
     monkeypatch.setattr(sys, "argv", ["run_swarm.py", "--role", "worker", "--count", "2", *args])
     monkeypatch.setattr(run_swarm, "docker", lambda *a, **k: None)
-    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(kw, api=api, instances=instances) or [])
+    monkeypatch.setattr(run_swarm, "start_workers", lambda api, instances, role, count, **kw: captured.update(
+        kw, api=api, instances=instances) or swarm_launch.Swarm(None, role, docker=None, **{
+            k: kw[k] for k in ("api_url", "gateway_url", "mock", "interval", "certs_dir", "image")}))
     run_swarm.main()
     return captured
 
