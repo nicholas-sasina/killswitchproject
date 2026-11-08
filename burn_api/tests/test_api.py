@@ -125,3 +125,27 @@ def test_preflight_needs_no_token_but_other_methods_do(env):
         assert "x-burn-demo-token" in out["headers"]["access-control-allow-headers"]
     assert call(env, "GET", "/events", token="")[0] == 401
     assert call(env, "POST", "/burn", {"agent_id": "agent-a"}, token="")[0] == 401
+
+
+def test_burn_never_flags_credentials_the_agent_only_got_as_references(env):
+    call(env, "POST", "/sessions", {"agent_id": "agent-a"})
+    for ref, status in (("burn/shared/only_referenced", "referenced"), ("burn/shared/plaintext", "seen"),
+                        ("burn/shared/legacy_row", None)):
+        _expose(env, "agent-a", ref, "shared")
+        if status:
+            env.ddb.Table("burn-exposures").update_item(
+                Key={"agent_id": "agent-a", "secret_ref_or_fp": ref}, UpdateExpression="SET #s = :s",
+                ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":s": status})
+    status, body = call(env, "POST", "/burn", {"agent_id": "agent-a"})
+    assert status == 200
+    assert sorted(body["flagged"]) == ["burn/shared/legacy_row", "burn/shared/plaintext"]
+
+
+def test_ledger_shows_exposure_and_source(env):
+    _expose(env, "agent-a", "burn/shared/crm_db_url", "shared")
+    env.ddb.Table("burn-exposures").update_item(
+        Key={"agent_id": "agent-a", "secret_ref_or_fp": "burn/shared/crm_db_url"},
+        UpdateExpression="SET #s = :s, source_ref = :r", ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": "referenced", ":r": "read_ticket:T-1001"})
+    [entry] = call(env, "GET", "/agents/agent-a/ledger")[1]["entries"]
+    assert (entry["exposure"], entry["source_ref"], entry["status"]) == ("referenced", "read_ticket:T-1001", "active")
