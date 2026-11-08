@@ -1,8 +1,13 @@
 """burn run and task progress: the local endpoint, the queue and its trip on the heartbeat."""
+import json
+import urllib.error
+import urllib.request
+
 import pytest
 
 from burn_contracts.progress import ProgressError
 from burn_cli.runner.progress import ProgressQueue
+from burn_cli.runner.spawn_endpoint import SpawnEndpoint
 
 
 def ev(item, state="started"):
@@ -88,3 +93,58 @@ def test_a_queued_event_wakes_the_heartbeat():
     with pytest.raises(ProgressError):
         queue.add(ev("a b"))
     assert woken == [1]
+
+
+# -- the local endpoint ---------------------------------------------------------------------------
+@pytest.fixture
+def endpoint():
+    queue = ProgressQueue()
+    server = SpawnEndpoint(lambda role, command: {}, "local-token", progress=queue).start()
+    server.queue = queue
+    yield server
+    server.stop()
+
+
+def post(url, body, token="local-token"):
+    data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Authorization": f"Bearer {token}"} if token else {})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as err:
+        return err.code, json.loads(err.read())
+
+
+def test_progress_is_posted_next_to_the_spawn_endpoint(endpoint):
+    assert endpoint.progress_url == endpoint.url.removesuffix("/spawn") + "/progress"
+    assert post(endpoint.progress_url, ev("item-01")) == (200, {"queued": True})
+    assert post(endpoint.progress_url, ev("item-01")) == (200, {"queued": False})
+    assert post(endpoint.progress_url, ev("item-01", "done")) == (200, {"queued": True})
+    assert endpoint.queue.batch() == [ev("item-01"), ev("item-01", "done")]
+
+
+@pytest.mark.parametrize("body,rule", [
+    ({"item": "../etc", "state": "done"}, "item id must match"),
+    ({"item": "a", "state": "nearly"}, "state must be started or done"),
+    ({"item": "a", "state": "done", "summary": "free text"}, "exactly item and state"),
+    (b"not json", "expected a JSON object"),
+])
+def test_a_broken_rule_is_a_400_that_names_it(endpoint, body, rule):
+    status, reply = post(endpoint.progress_url, body)
+    assert status == 400 and rule in reply["error"]
+    assert endpoint.queue.pending() == 0
+
+
+def test_progress_needs_the_local_token(endpoint):
+    assert post(endpoint.progress_url, ev("a"), token="")[0] == 401
+    assert post(endpoint.progress_url, ev("a"), token="nope")[0] == 401
+    assert endpoint.queue.pending() == 0
+
+
+def test_without_a_queue_there_is_no_progress_endpoint():
+    server = SpawnEndpoint(lambda role, command: {}, "local-token").start()
+    try:
+        assert post(server.url.removesuffix("/spawn") + "/progress", ev("a"))[0] == 404
+    finally:
+        server.stop()
