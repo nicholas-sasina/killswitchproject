@@ -106,7 +106,8 @@ async def work_task(call: Call, report: Report, *, task: list[str], resume: dict
 
     Per item: report started, one `tool` call, report done, then `interval` seconds before the next. A failed call is
     retried for the same item. 0 = every item handled, EXIT_BURNED = burned before the end (the Gateway refused the
-    badge), 1 = the Gateway stayed unreachable, or burn run did not take a progress report (no more work without it).
+    badge, or burn run answered a report with 409), 1 = the Gateway stayed unreachable, or burn run did not take a
+    progress report (no more work without it).
     """
     handled = set(resume.get("done", [])) | set(resume.get("quarantined", []))
     todo = [item for item in task if item not in handled]
@@ -155,7 +156,13 @@ async def _report(report: Report, item: str, state: str) -> int | None:
         await report(item, state)
         return None
     except Exception as exc:  # noqa: BLE001
-        log.error("burn run did not take %s %s (%s): stopping", item, state, root_cause(exc))
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 409:  # burn run heard from Burn that this instance is burned
+            return _burned(item)
+        if status == 503:  # burn run could not get Burn to confirm it
+            log.error("progress not confirmed, stopping at %s %s", item, state)
+        else:
+            log.error("burn run did not take %s %s (%s): stopping", item, state, root_cause(exc))
         return 1
 
 

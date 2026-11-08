@@ -163,6 +163,43 @@ def test_a_dead_badge_raised_as_an_exception_mid_task_is_also_burned():
     assert run_task(dead, ["w01-item-01"])[0] == 3
 
 
+def rejecting(status, on="started"):
+    """A burn run progress endpoint that answers `status` to the first `on` report."""
+    import httpx
+
+    async def report(item, state):
+        if state == on:
+            request = httpx.Request("POST", "http://127.0.0.1:9/progress")
+            raise httpx.HTTPStatusError(f"{status}", request=request, response=httpx.Response(status, request=request))
+
+    return report
+
+
+@pytest.mark.parametrize("on", ["started", "done"])
+def test_progress_answered_409_means_burned(caplog, on):
+    caplog.set_level("INFO", logger="swarm_worker")
+    calls = []
+
+    async def call(tool, args):
+        calls.append(tool)
+        return False, "{}"
+
+    code, _, _ = run_task(call, ["w01-item-01", "w01-item-02"], report=rejecting(409, on))
+    assert code == 3 and "burned at w01-item-01, stopping" in caplog.text
+    assert calls == ([] if on == "started" else ["read_inbox"])  # no work after the answer
+
+
+def test_progress_burn_could_not_confirm_stops_it_with_exit_1(caplog):
+    calls = []
+
+    async def call(tool, args):
+        calls.append(tool)
+        return False, "{}"
+
+    code, _, _ = run_task(call, ["w01-item-01"], report=rejecting(503))
+    assert code == 1 and calls == [] and "progress not confirmed, stopping" in caplog.text
+
+
 def test_a_failed_call_is_retried_for_the_same_item_and_reported_done_once():
     results = [ConnectionError("down"), (True, "BURN: access refused: recipient not allowed"), (False, "{}")]
 
