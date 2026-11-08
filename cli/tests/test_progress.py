@@ -980,3 +980,91 @@ def test_an_agent_that_hangs_up_before_its_reply_costs_no_traceback(capfd, caplo
         server.stop()
     err = capfd.readouterr().err
     assert "Traceback" not in err and "Exception occurred" not in err
+
+
+# -- the egress proxy refuses the heartbeat ------------------------------------------------------------
+PROXY_SAYS = "the egress proxy refused the connection to the Burn API (Tunnel connection failed: 403 Forbidden)"
+
+
+def test_a_tunnel_403_from_the_proxy_is_its_own_error():
+    import socket
+    import urllib.request
+    from burn_cli.runner.instance_api import InstanceApi, ProxyRefused
+    proxy = socket.create_server(("127.0.0.1", 0))
+
+    def refuse():
+        conn, _ = proxy.accept()
+        conn.recv(65536)  # CONNECT burn-api.example:443
+        conn.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+        conn.close()
+
+    threading.Thread(target=refuse, daemon=True).start()
+    port = proxy.getsockname()[1]
+    urllib.request.install_opener(urllib.request.build_opener(
+        urllib.request.ProxyHandler({"https": f"http://127.0.0.1:{port}"})))
+    try:
+        with pytest.raises(ProxyRefused, match="Tunnel connection failed: 403") as caught:
+            InstanceApi("https://burn-api.example").heartbeat("sess_1", "token")
+        assert caught.value.status is None and caught.value.retryable  # not proof of a burn: retried
+    finally:
+        urllib.request.install_opener(None)
+        proxy.close()
+
+
+class ProxyRefusingApi(RecordingApi):
+    def __init__(self):
+        super().__init__()
+        self.refuse = True
+
+    def heartbeat(self, session_id, session_token, progress=None, timeout=60.0):
+        if self.refuse:
+            self.bodies.append(progress)
+            from burn_cli.runner.instance_api import ProxyRefused
+            raise ProxyRefused(PROXY_SAYS)
+        return super().heartbeat(session_id, session_token, progress, timeout)
+
+
+def test_a_proxy_refusal_answers_every_waiting_start_at_once():
+    inst = supervisor(ProxyRefusingApi())
+    inst._progress.add(ev("a"))
+    inst._progress.add(ev("b"))
+    waiters = [in_background(lambda item=item: inst._progress.wait_recorded(item, 60)) for item in ("a", "b")]
+    until(lambda: inst._progress._waiting == 2)
+    assert inst._beat() == 0  # like unreachable: retried, never a burn
+    for thread, out in waiters:
+        thread.join(10)
+        assert out["reply"] == ("interrupted", "proxy refused the heartbeat")  # at once, not after 60 s
+    assert inst._progress.pending() == 2 and not inst._stopped_by_api  # kept for the next beat
+
+
+def test_a_plain_unreachable_api_still_lets_a_start_wait_for_its_deadline():
+    inst = supervisor(RecordingApi(0))
+    inst._progress.add(ev("a"))
+    thread, out = in_background(lambda: inst._progress.wait_recorded("a", 1.0))
+    until(inst._progress.waiting)
+    assert inst._beat() == 0
+    assert inst._progress.waiting()  # nothing told it to stop waiting
+    thread.join(10)
+    assert out["reply"] == ("timeout", "")
+
+
+def test_a_proxy_refusal_is_logged_once_per_streak(capsys):
+    api = ProxyRefusingApi()
+    inst = supervisor(api)
+    for _ in range(3):
+        inst._beat()
+    api.refuse = False
+    inst._beat()
+    api.refuse = True
+    inst._beat()
+    assert capsys.readouterr().err.count("the egress proxy refused the heartbeat") == 2
+
+
+def test_a_start_interrupted_by_a_proxy_refusal_is_a_503_with_the_reason(endpoint):
+    thread, out = in_background(lambda: post(endpoint.progress_url, ev("item-01")))
+    until(endpoint.queue.waiting)
+    endpoint.queue.interrupt("proxy refused the heartbeat")
+    thread.join(5)
+    status, reply = out["reply"]
+    assert status == 503 and "proxy refused the heartbeat" in reply["error"] and "report it again" in reply["error"]
+    assert endpoint.queue.batch() == [ev("item-01")]  # still queued

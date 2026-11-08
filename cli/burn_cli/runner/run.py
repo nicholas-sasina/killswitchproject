@@ -16,7 +16,7 @@ from ..api import ApiError
 from .badge import BadgeToken
 from . import credentials as creds_mod
 from .env import TASK_NAMES, child_env, task_values
-from .instance_api import InstanceApi
+from .instance_api import InstanceApi, ProxyRefused
 from .mcp_proxy import McpProxy
 from . import privs
 from .privs import Drop
@@ -71,6 +71,7 @@ class Instance:
         self._clock, self._last_beat = time.monotonic, 0.0  # when the last heartbeat began
         self._wait = self._activity.wait  # how the loop waits for activity; tests drive it on a fake clock
         self._told_unconfirmed = False  # "did not confirm" is logged once, not on every heartbeat
+        self._proxy_refusing = False  # within a streak of proxy refusals, logged once at its start
 
     # -- session ------------------------------------------------------------------------------
     def start_session(self) -> dict:
@@ -261,6 +262,7 @@ class Instance:
         try:
             reply = self.api.heartbeat(self.session["session_id"], self._token, batch, timeout=timeout)
         except ApiError as exc:
+            self._proxy_refused(isinstance(exc, ProxyRefused), exc)
             if exc.status == 400 and batch:  # a broken progress rule, never a burn (that is a 409)
                 self._progress.dropped(len(batch), str(exc))
                 self._bare_next = True  # a 400 records nothing, so the next beat proves the instance alive
@@ -268,6 +270,7 @@ class Instance:
             elif batch and exc.status not in (404, 409):
                 self._batch_failed()
             return exc.status or 0
+        self._proxy_refusing = False
         if batch and not self._progress.confirmed_by(len(batch), reply):
             if not self._told_unconfirmed:
                 self._told_unconfirmed = True
@@ -279,6 +282,15 @@ class Instance:
             self._batch_failures = 0
         self._progress.sent(len(batch))
         return 200
+
+    def _proxy_refused(self, refused: bool, exc: ApiError) -> None:
+        """A proxy refusal is retried like an unreachable API and never taken as a burn (a misconfigured proxy
+        answers the same), but a start waiting on this beat is answered at once instead of at its deadline."""
+        if refused:
+            if not self._proxy_refusing:
+                log(f"the egress proxy refused the heartbeat ({exc}); retrying, and waiting starts are told")
+            self._progress.interrupt("proxy refused the heartbeat")
+        self._proxy_refusing = refused
 
     def _batch_failed(self) -> None:
         """The batch is kept. If only progress keeps failing, a bare beat in between keeps the instance from

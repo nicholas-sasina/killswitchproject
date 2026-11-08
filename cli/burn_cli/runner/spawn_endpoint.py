@@ -89,6 +89,9 @@ class SpawnEndpoint:
                     # same rules here, so it may well succeed if reported again.
                     return self._send(503, {"error": f"not recorded: Burn refused the heartbeat that carried it "
                                                      f"({detail}). Do not start this item yet; report it again"})
+                if outcome == "interrupted":  # e.g. the egress proxy refused the heartbeat: no point waiting
+                    return self._send(503, {"error": f"not recorded: {detail}. Do not start this item yet; "
+                                                     "report it again"})
                 self._send(503, {"error": "Burn has not recorded this start yet (it stays queued): "
                                           "do not start this item"})
 

@@ -7,10 +7,23 @@ supervisor: it is passed per call and never put in the agent's environment, argv
 """
 import http.client
 import json
+import re
 import urllib.error
 import urllib.request
 
 from ..api import ApiError
+
+
+# What http.client raises (inside urllib's URLError) when the proxy answers CONNECT with a 403.
+TUNNEL_REFUSED = re.compile(r"Tunnel connection failed: 403\b")
+
+
+class ProxyRefused(ApiError):
+    """The egress proxy refused to open a tunnel to the Burn API (CONNECT answered 403): the API never saw the call.
+
+    The proxy shuts out a burned instance, but a misconfigured proxy answers the same, so this is not proof of a
+    burn. It is retried like an unreachable API (status None). It is told apart so waiting starts hear it at once.
+    """
 
 
 class SentButUnanswered(ApiError):
@@ -44,7 +57,10 @@ class InstanceApi:
             raise ApiError(f"{method} {path} failed with HTTP {err.code}" + (f": {detail}" if detail else ""),
                            err.code) from None
         except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-            raise ApiError(f"cannot reach the Burn API ({getattr(exc, 'reason', exc)})") from None
+            reason = getattr(exc, "reason", exc)
+            if TUNNEL_REFUSED.search(str(reason)):
+                raise ProxyRefused(f"the egress proxy refused the connection to the Burn API ({reason})") from None
+            raise ApiError(f"cannot reach the Burn API ({reason})") from None
         # urllib passes some failures through unwrapped once the request was sent: RemoteDisconnected when the
         # connection drops before the status line, IncompleteRead. A heartbeat or an exit is safe to send again
         # (left uncaught, one would end the heartbeat thread); a join or a spawn may already have happened.
