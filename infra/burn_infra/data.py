@@ -42,6 +42,7 @@ class BurnDataStack(cdk.Stack):
             )
 
         # The stream feeds notifications (notifications/infra): new rows only, writers unchanged.
+        # TTL expiries reach the stream as REMOVE records; the Pipe forwards INSERTs only, so they are dropped.
         events = table("burn-events", "stream", "event_id",
                        stream=ddb.StreamViewType.NEW_IMAGE, expires=True)
         cdk.CfnOutput(self, "EventsStreamArn", value=events.table_stream_arn or "")
