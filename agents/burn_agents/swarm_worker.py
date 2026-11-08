@@ -63,6 +63,7 @@ REGION = "us-east-1"
 MAX_MODEL_CALLS = 10  # per turn; a ticket takes three to five
 MAX_TOKENS = 1024  # output per model call; a ticket's calls write about 90 each. Without it Strands asks for 64,000
 TURN_SECONDS = 300  # no model call starts after this; a ticket takes 15 s, or a few minutes when throttled
+BEARER_ENV = "AWS_BEARER_TOKEN_BEDROCK"  # botocore sends this instead of signing with the instance's own key
 DEFAULT_WORKER_CALLS = 40  # per worker, unless --max-model-calls says otherwise: about ten tickets
 USAGE = "model calls used: {used} of {limit}"  # the worker's last line; the launcher reads it (USAGE_RE)
 USAGE_RE = re.compile(r"model calls used: (\d+) of (\d+)\s*$")
@@ -409,6 +410,10 @@ def ai_inbox(client, model, *, interval: float, offset: float, budget,
 async def run_ai(env: dict, *, assigned: tuple[list[str], dict] | None, interval: float, offset: float,
                  max_calls: int) -> int:
     from .turn import CallBudget
+    if env.get(BEARER_ENV) or os.environ.get(BEARER_ENV):
+        print(f"{BEARER_ENV} is set, so Bedrock calls would not use this instance's own key: refusing to start",
+              file=sys.stderr)
+        return 2
     session = own_aws_session(env)
     if session is None:
         print("this instance has no AWS key of its own, so it has no model: give its role credentials [\"aws_key\"]",

@@ -405,3 +405,14 @@ def test_the_key_check_at_start_stops_at_once_on_a_burn(refusal):
     with pytest.raises(type(refusal)):
         swarm_worker.wait_for_key(SimpleNamespace(client=lambda name: Sts()), sleep=slept.append)
     assert Sts.calls == 1 and slept == []
+
+
+def test_a_bedrock_bearer_token_in_the_environment_stops_the_worker_before_any_model(monkeypatch, capsys):
+    """botocore would send the bearer token instead of signing with the instance's own key."""
+    monkeypatch.setattr(swarm_worker, "own_aws_session", lambda env: pytest.fail("must not build a session"))
+    env = {"BURN_MCP_URL": "http://127.0.0.1:1/mcp", "BURN_TASK": '["w01-item-01"]',
+           "BURN_PROGRESS_URL": "http://127.0.0.1:1/progress", "AWS_ACCESS_KEY_ID": "AKIAFAKEFAKEFAKEFAKE",
+           "AWS_SECRET_ACCESS_KEY": "fake-secret", "AWS_BEARER_TOKEN_BEDROCK": "bedrock-api-key-fake"}
+    assert asyncio.run(swarm_worker.main_async(env)) == 2
+    err = capsys.readouterr().err
+    assert "AWS_BEARER_TOKEN_BEDROCK is set" in err and "bedrock-api-key-fake" not in err
