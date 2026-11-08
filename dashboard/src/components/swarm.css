@@ -68,6 +68,11 @@
 .swarm-table th {
   color: #a7b5c5;
 }
+.swarm-table .burn-button {
+  display: inline-flex;
+  width: auto;
+  white-space: nowrap;
+}
 .swarm-table td:first-child {
   overflow-wrap: anywhere;
   max-width: 360px;
