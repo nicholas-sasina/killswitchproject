@@ -6,8 +6,9 @@ VITE_BURN_DEMO_TOKEN holds, and `make env` puts the token in dashboard/.env.loca
 sign-in is off. A hosted dashboard is public, so it is built and checked here before it is deployed.
 
     build         Refuse unless people sign-in is on. Build dashboard/ with the API URL and the people
-                  sign-in values from SSM, local development off and an empty demo token, all in the
-                  process environment, which Vite prefers over .env files. Then fail if dashboard/dist
+                  sign-in values from SSM, the gateway URL from SSM when it is there (the join commands
+                  show it), local development off and an empty demo token, all in the process
+                  environment, which Vite prefers over .env files. Then fail if dashboard/dist
                   holds a demo token (from .env, dashboard/.env*, or the deployed secret), or sets the
                   demo-token header to a value. Run by `make dashboard-deploy` before it deploys.
     check-hosted  Refuse unless people sign-in is on and the hosted dashboard is live: its address is in
@@ -37,6 +38,9 @@ BUILD_PARAMS = {
     "VITE_BURN_PEOPLE_CLIENT_ID": names.PEOPLE_CLIENT_ID_PARAM,
 }
 BUILD_FIXED = {"VITE_BURN_LOCAL_DEV": "0", "VITE_BURN_DEMO_TOKEN": ""}
+# Shown in the join commands, so burn run knows where the gateway is. The build goes ahead without it:
+# the commands then leave that line out. Missing, it is set empty, so a local value never reaches the build.
+BUILD_OPTIONAL_PARAMS = {"VITE_BURN_GATEWAY_URL": names.GATEWAY_URL_PARAM}
 
 # The header name or the Vite variable, then a non-empty string literal: {"x-burn-demo-token":"..."},
 # .set("x-burn-demo-token","..."), {VITE_BURN_DEMO_TOKEN:"..."}. The name alone, as in
@@ -72,7 +76,8 @@ def build_env(ssm, base: dict[str, str]) -> dict[str, str]:
     missing = [BUILD_PARAMS[var] for var, value in values.items() if not value]
     if missing:
         raise Refused(f"missing in SSM: {', '.join(missing)}. Deploy BurnApi and BurnPeople first.")
-    return {**base, **values, **BUILD_FIXED}
+    optional = {var: param(ssm, name) for var, name in BUILD_OPTIONAL_PARAMS.items()}
+    return {**base, **values, **optional, **BUILD_FIXED}
 
 
 def _env_file_values(path: pathlib.Path, key: str) -> list[str]:
@@ -118,6 +123,9 @@ def build(ssm, secrets, repo: pathlib.Path | None = None, run=None) -> None:
     repo, run = repo or REPO, run or subprocess.run
     require_sign_in(ssm)
     env = build_env(ssm, dict(os.environ))
+    if not env["VITE_BURN_GATEWAY_URL"]:
+        print(f"note: {names.GATEWAY_URL_PARAM} is not in SSM, so the dashboard's join commands leave out "
+              "BURN_GATEWAY_URL. Deploy BurnGateway and run make dashboard-deploy again to add it.", file=sys.stderr)
     dashboard = repo / "dashboard"
     for command in (["npm", "ci"], ["npm", "run", "build"]):
         run(command, cwd=dashboard, env=env, check=True)
