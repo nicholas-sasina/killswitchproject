@@ -65,59 +65,53 @@ paths:
           description: Session started
           content:
             application/json:
-              schema:
-                type: object
-                required: [session_id, agent_id, badge_ref, credentials]
-                properties:
-                  session_id: { type: string }
-                  agent_id: { $ref: '#/components/schemas/AgentId' }
-                  badge_ref:
-                    type: string
-                    description: Secrets Manager name holding the badge (OAuth client id/secret, token URL, scope).
-                    example: burn/agent-reader/badge
-                  credentials:
-                    type: array
-                    items: { $ref: '#/components/schemas/CredentialRef' }
-                  role: { $ref: '#/components/schemas/RoleName' }
-                  parent_session: { type: string, nullable: true }
-                  token_id: { type: string, nullable: true }
-                  tools: { type: array, items: { type: string } }
-                  egress: { type: array, items: { type: string }, nullable: true }
-                  secrets:
-                    type: object
-                    required: [badge, session_token]
-                    description: |
-                      The instance's own secret values, returned ONLY when a role instance starts
-                      (`enroll_token` or `parent_session`); the scenario `agent_id` form never returns it.
-                      Returned once: Burn never sends these values again. The caller hands them to the
-                      instance and must not log or store them. The join token is the authority to receive them.
-                    properties:
-                      badge:
-                        type: object
-                        required: [client_id, client_secret, token_url, scope]
-                        properties:
-                          client_id: { type: string }
-                          client_secret: { type: string }
-                          token_url: { type: string }
-                          scope: { type: string }
-                      session_token:
-                        type: string
-                        pattern: '^bst_[A-Za-z0-9_-]{43}$'
-                        description: |
-                          Authenticates this instance's own calls as `Authorization: Bearer <session_token>`,
-                          in place of the admin token: its heartbeat and exit, and POST /sessions
-                          {role, parent_session} to spawn a child of it. Only its sha256 is stored. The
-                          supervisor keeps it and never hands it to the agent process.
-                      api_key: { type: string, description: Present if the role mints an api_key. }
-                      aws_key:
-                        type: object
-                        description: Present if the role mints an aws_key.
-                        required: [access_key_id, secret_access_key]
-                        properties:
-                          access_key_id: { type: string }
-                          secret_access_key: { type: string }
+              schema: { $ref: '#/components/schemas/SessionStarted' }
         '403': { description: join token invalid, expired, used up or revoked; or role not in the parent's may_spawn }
         '404': { description: agent_id is not in the loaded scenario, or the role or parent session does not exist }
+        '429': { description: rate limited while issuing credentials; retry with backoff }
+  /instances:
+    post:
+      summary: Start a role instance (join or spawn). The same two role forms as POST /sessions.
+      security:
+        - sessionToken: []   # {role, parent_session}: the parent's session token
+        - {}                 # {role, enroll_token}: the join token in the body is the authority
+      description: |
+        A path of its own for the two role forms, so an authorizer in front of the API can decide by
+        method and path alone: these two requests carry their own authority (the join token, or the
+        parent's session token), while every other route needs a person or the admin token.
+        - `{role, enroll_token}`: a new instance of a role, joining with a join token. No auth header.
+        - `{role, parent_session}`: a child spawned by a running instance, with
+          `Authorization: Bearer <the parent's session_token>`. The role must be in the parent role's
+          `may_spawn`; the child never gets more tools, credentials or egress than its parent.
+        The reply is the same as for the role forms of `POST /sessions` (secrets included, once).
+        Any other body shape is refused with 401. `POST /sessions` keeps working unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [role, enroll_token]
+                  additionalProperties: false
+                  properties:
+                    role: { $ref: '#/components/schemas/RoleName' }
+                    enroll_token: { type: string, description: 'bjt_<token_id>.<secret>' }
+                - type: object
+                  required: [role, parent_session]
+                  additionalProperties: false
+                  properties:
+                    role: { $ref: '#/components/schemas/RoleName' }
+                    parent_session: { type: string }
+      responses:
+        '201':
+          description: Instance started
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionStarted' }
+        '401': { description: no valid authority for this body (a malformed, mixed or unknown shape, or a wrong or missing session token) }
+        '403': { description: join token invalid, expired, used up or revoked; or role not in the parent's may_spawn; or the parent is not active }
+        '404': { description: the role or parent session does not exist }
         '429': { description: rate limited while issuing credentials; retry with backoff }
   /burn:
     post:
@@ -521,6 +515,58 @@ components:
       scheme: bearer
       description: A role instance's own session token (bst_...), returned once in its join reply.
   schemas:
+    SessionStarted:
+      description: The reply that starts a session or an instance (POST /sessions, POST /instances).
+      type: object
+      required: [session_id, agent_id, badge_ref, credentials]
+      properties:
+        session_id: { type: string }
+        agent_id: { $ref: '#/components/schemas/AgentId' }
+        badge_ref:
+          type: string
+          description: Secrets Manager name holding the badge (OAuth client id/secret, token URL, scope).
+          example: burn/agent-reader/badge
+        credentials:
+          type: array
+          items: { $ref: '#/components/schemas/CredentialRef' }
+        role: { $ref: '#/components/schemas/RoleName' }
+        parent_session: { type: string, nullable: true }
+        token_id: { type: string, nullable: true }
+        tools: { type: array, items: { type: string } }
+        egress: { type: array, items: { type: string }, nullable: true }
+        secrets:
+          type: object
+          required: [badge, session_token]
+          description: |
+            The instance's own secret values, returned ONLY when a role instance starts
+            (`enroll_token` or `parent_session`); the scenario `agent_id` form never returns it.
+            Returned once: Burn never sends these values again. The caller hands them to the
+            instance and must not log or store them. The join token is the authority to receive them.
+          properties:
+            badge:
+              type: object
+              required: [client_id, client_secret, token_url, scope]
+              properties:
+                client_id: { type: string }
+                client_secret: { type: string }
+                token_url: { type: string }
+                scope: { type: string }
+            session_token:
+              type: string
+              pattern: '^bst_[A-Za-z0-9_-]{43}$'
+              description: |
+                Authenticates this instance's own calls as `Authorization: Bearer <session_token>`,
+                in place of the admin token: its heartbeat and exit, and POST /sessions
+                {role, parent_session} to spawn a child of it. Only its sha256 is stored. The
+                supervisor keeps it and never hands it to the agent process.
+            api_key: { type: string, description: Present if the role mints an api_key. }
+            aws_key:
+              type: object
+              description: Present if the role mints an aws_key.
+              required: [access_key_id, secret_access_key]
+              properties:
+                access_key_id: { type: string }
+                secret_access_key: { type: string }
     Flag:
       type: object
       description: One flag per credential. Never contains a credential value.
