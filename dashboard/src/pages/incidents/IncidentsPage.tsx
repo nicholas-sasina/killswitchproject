@@ -3,15 +3,19 @@
  * burned, what Burn did and whether anything is still open; beside it, the
  * shared keys still waiting on their owners and how the burns started.
  *
+ * The list can be searched (the query lives in the hash, as ?q=) and each
+ * row opens in place to show what Burn did, what the agent saw and what is
+ * still open, without leaving the page.
+ *
  * Counts come from the console's one model (useConsole().incidents and
  * incidentCounts), so the navigation's Incidents number and the Open filter
- * always agree.
+ * always agree; under a search, the tabs count the rows the search kept.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import { FlagActions } from "../../features/flags/FlagActions";
 import { flagKey, flagTag, seenByKey } from "../../features/flags/describe";
-import { agentHref, routeHref, useHashParam } from "../../router";
+import { routeHref, useHashParam } from "../../router";
 import {
   Card,
   CardNote,
@@ -35,9 +39,19 @@ import {
   statusLabel,
   stillOpenBody,
 } from "./describe";
+import { IncidentDetail } from "./IncidentDetail";
+import {
+  inTab,
+  matches,
+  searchTerms,
+  searchText,
+  tabCounts,
+  type IncidentFilter,
+} from "./search";
+import { useLedgers } from "./useLedgers";
 import "./incidents.css";
 
-type Filter = "all" | "open" | "burned";
+type Filter = IncidentFilter;
 
 /** Rows drawn before "Show all". */
 const ROW_CAP = 60;
@@ -54,33 +68,86 @@ export function IncidentsPage() {
     flagsLoaded,
     flagsError,
     instancesLoaded,
+    api,
   } = useConsole();
   const [show, setShow] = useHashParam("show");
   const filter: Filter = show === "open" || show === "burned" ? show : "all";
+  const [query, setQuery, clearQuery] = useSearchText();
   const [everyRow, setEveryRow] = useState(false);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const search = useRef<HTMLInputElement>(null);
+  useSlashToFocus(search);
 
   const burns = useMemo(() => burnEvents(events), [events]);
   const rows = useMemo(
     () =>
       incidents.map((incident) => {
         const cause = burnCause(incident.agent, burns);
+        const why = causeSentence(cause);
+        const status = statusLabel(incident);
         return {
           incident,
           cause,
-          why: causeSentence(cause),
+          why,
           did: outcomeSentence(incident, burns, model),
-          status: statusLabel(incident),
+          status,
+          text: searchText({ incident, why, status: status.text }),
         };
       }),
     [incidents, burns, model],
   );
-  const matching = rows.filter(
-    (row) =>
-      filter === "all" ||
-      (filter === "open" ? row.incident.open : !row.incident.open),
-  );
+  const terms = searchTerms(query);
+  const found = terms.length
+    ? rows.filter((row) => matches(row.text, terms))
+    : rows;
+  const tabs = tabCounts(found);
+  const matching = found.filter((row) => inTab(row.incident, filter));
   const shown = everyRow ? matching : matching.slice(0, ROW_CAP);
   const causes = causeCounts(rows.map((row) => row.cause));
+
+  const openIds = shown
+    .filter((row) => expanded.has(row.incident.agent.key))
+    .map((row) => row.incident.agent.agentId);
+  const { ledgers, retry } = useLedgers(api, openIds);
+  const toggle = (key: string) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const canExpand = shown.some((row) => !expanded.has(row.incident.agent.key));
+  const canCollapse = shown.some((row) => expanded.has(row.incident.agent.key));
+  const clearSearch = () => {
+    clearQuery();
+    search.current?.focus();
+  };
+  /**
+   * Once a key is decided, its row can leave the list (the Open tab, or a
+   * search). FlagActions keeps focus in the row when the row stays; when it
+   * goes, focus moves to the list's heading instead of the page.
+   */
+  const keepFocusAfter = (detailId: string, tries = 10) => {
+    window.setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      const heading = search.current
+        ?.closest("section")
+        ?.querySelector<HTMLElement>("h2");
+      if (
+        !heading ||
+        heading.closest("[inert]") ||
+        document.getElementById(detailId)
+      ) {
+        if (tries > 0) keepFocusAfter(detailId, tries - 1);
+        return;
+      }
+      heading.tabIndex = -1;
+      heading.focus();
+    }, 16);
+  };
 
   const open = useMemo(
     () => flags.filter((flag) => flag.state === "open"),
@@ -103,9 +170,9 @@ export function IncidentsPage() {
     flagsLoaded ? keysWaitingLine(counts.keysWaiting) : "",
   ];
   const options: SegmentOption<Filter>[] = [
-    { value: "all", label: "All", count: counts.all },
-    { value: "open", label: "Open", count: counts.open },
-    { value: "burned", label: "Burned", count: counts.closed },
+    { value: "all", label: "All", count: tabs.all },
+    { value: "open", label: "Open", count: tabs.open },
+    { value: "burned", label: "Burned", count: tabs.burned },
   ];
 
   return (
@@ -208,7 +275,13 @@ export function IncidentsPage() {
       >
         <Card
           title="Burned agents"
-          sub={instancesLoaded ? `${counts.all}, newest first` : undefined}
+          sub={
+            !instancesLoaded
+              ? undefined
+              : terms.length
+                ? `${found.length} of ${counts.all} match`
+                : `${counts.all}, newest first`
+          }
           aside={
             instancesLoaded && counts.all > 0 ? (
               <Segmented
@@ -230,77 +303,181 @@ export function IncidentsPage() {
               No agent has been burned. When Burn stops an agent, it moves here
               with why it was burned, what Burn did and what is still open.
             </EmptyState>
-          ) : !matching.length ? (
-            <EmptyState>
-              {filter === "open"
-                ? "Nothing is open. Every burned agent's shared keys have been decided."
-                : "No incident is closed yet. One closes once its shared keys are decided and its replacement is running."}
-            </EmptyState>
           ) : (
             <>
-              <div className="inc-head cap" aria-hidden="true">
-                <span>Agent</span>
-                <span>Why it was burned</span>
-                <span>What Burn did</span>
-                <span>Status</span>
-              </div>
-              <ol className="inc-rows">
-                {shown.map(({ incident, why, did, status }) => {
-                  const { agent } = incident;
-                  const when = burnWhen(agent, model.now);
-                  return (
-                    <li key={agent.key}>
-                      <a
-                        className="inc-row"
-                        href={agentHref(agent.sessionId ?? agent.key)}
-                        aria-label={`${agent.name}, ${when}. Why it was burned: ${why}. What Burn did: ${did}. Status: ${status.text}.`}
-                      >
-                        <span className="inc-agent">
-                          <span
-                            className="square square-burned square-14"
-                            aria-hidden="true"
-                          />
-                          <span>
-                            <span className="inc-name id">{agent.name}</span>
-                            <span className="inc-when">{when}</span>
-                          </span>
-                        </span>
-                        <span className="inc-text inc-why">
-                          <span className="inc-label cap" aria-hidden="true">
-                            Why
-                          </span>
-                          {why}
-                        </span>
-                        <span className="inc-text inc-did">
-                          <span className="inc-label cap" aria-hidden="true">
-                            What Burn did
-                          </span>
-                          {did}
-                        </span>
-                        <span className="inc-status">
-                          <Pill tone={status.tone}>{status.text}</Pill>
-                        </span>
-                      </a>
-                    </li>
-                  );
-                })}
-              </ol>
-              {matching.length > ROW_CAP && (
-                <div className="inc-more">
+              <div className="inc-tools">
+                <label className="inc-search">
+                  <span className="visually-hidden">Search incidents</span>
+                  <input
+                    ref={search}
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search agents, keys, reasons"
+                    aria-keyshortcuts="/"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <kbd className="inc-search-key" aria-hidden="true">
+                    /
+                  </kbd>
+                </label>
+                <div className="inc-tools-buttons">
+                  {/* aria-disabled, not disabled: the button keeps focus once used. */}
                   <button
                     type="button"
                     className="btn btn-sm"
-                    onClick={() => setEveryRow((current) => !current)}
+                    aria-disabled={!canExpand}
+                    onClick={() => {
+                      if (!canExpand) return;
+                      setExpanded(
+                        (current) =>
+                          new Set([
+                            ...current,
+                            ...shown.map((row) => row.incident.agent.key),
+                          ]),
+                      );
+                    }}
                   >
-                    {everyRow
-                      ? `Show the first ${ROW_CAP}`
-                      : `Show all ${matching.length}`}
+                    Expand all
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    aria-disabled={!canCollapse}
+                    onClick={() => {
+                      if (canCollapse) setExpanded(new Set());
+                    }}
+                  >
+                    Collapse all
                   </button>
                 </div>
+              </div>
+              {!matching.length ? (
+                <EmptyState
+                  action={
+                    terms.length ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={clearSearch}
+                      >
+                        Clear
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  {terms.length
+                    ? found.length
+                      ? `No ${filter} incidents match “${query.trim()}”.`
+                      : `No incidents match “${query.trim()}”.`
+                    : filter === "open"
+                      ? "Nothing is open. Every burned agent's shared keys have been decided."
+                      : "No incident is closed yet. One closes once its shared keys are decided and its replacement is running."}
+                </EmptyState>
+              ) : (
+                <>
+                  <div className="inc-head cap" aria-hidden="true">
+                    <span>Agent</span>
+                    <span>Why it was burned</span>
+                    <span>What Burn did</span>
+                    <span>Status</span>
+                    <span />
+                  </div>
+                  <ol className="inc-rows">
+                    {shown.map(({ incident, why, did, status }) => {
+                      const { agent } = incident;
+                      const when = burnWhen(agent, model.now);
+                      const isOpen = expanded.has(agent.key);
+                      const detailId = `inc-detail-${agent.key}`;
+                      return (
+                        <li
+                          key={agent.key}
+                          className={isOpen ? "inc-item is-open" : "inc-item"}
+                        >
+                          <button
+                            type="button"
+                            className="inc-row"
+                            aria-expanded={isOpen}
+                            aria-controls={detailId}
+                            aria-label={`${agent.name}, ${when}. Why it was burned: ${why}. What Burn did: ${did}. Status: ${status.text}.`}
+                            onClick={() => toggle(agent.key)}
+                          >
+                            <span className="inc-agent">
+                              <span
+                                className="square square-burned square-14"
+                                aria-hidden="true"
+                              />
+                              <span>
+                                <span className="inc-name id">
+                                  {agent.name}
+                                </span>
+                                <span className="inc-when">{when}</span>
+                              </span>
+                            </span>
+                            <span className="inc-text inc-why">
+                              <span
+                                className="inc-label cap"
+                                aria-hidden="true"
+                              >
+                                Why
+                              </span>
+                              {why}
+                            </span>
+                            <span className="inc-text inc-did">
+                              <span
+                                className="inc-label cap"
+                                aria-hidden="true"
+                              >
+                                What Burn did
+                              </span>
+                              {did}
+                            </span>
+                            <span className="inc-status">
+                              <Pill tone={status.tone}>{status.text}</Pill>
+                            </span>
+                            <span className="inc-chevron" aria-hidden="true" />
+                          </button>
+                          <div
+                            id={detailId}
+                            className="inc-detail"
+                            hidden={!isOpen}
+                          >
+                            {isOpen && (
+                              <IncidentDetail
+                                incident={incident}
+                                events={events}
+                                model={model}
+                                flags={flags}
+                                ledger={ledgers.get(agent.agentId)}
+                                onRetry={() => retry(agent.agentId)}
+                                onResolved={() => keepFocusAfter(detailId)}
+                              />
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  {matching.length > ROW_CAP && (
+                    <div className="inc-more">
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => setEveryRow((current) => !current)}
+                      >
+                        {everyRow
+                          ? `Show the first ${ROW_CAP}`
+                          : `Show all ${matching.length}`}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
               <CardNote>
-                Open an incident for the agent&rsquo;s exposure ledger,
-                timeline, blast radius and replacement.
+                Open a row for what Burn did, what the agent saw and what is
+                still open. Its own page has the full ledger, timeline, blast
+                radius and replacement.
               </CardNote>
             </>
           )}
@@ -308,4 +485,66 @@ export function IncidentsPage() {
       </Columns>
     </div>
   );
+}
+
+/**
+ * The search box's text, kept in the hash as ?q=. The list follows every
+ * key at once; the hash follows 250 ms after the last one, since a burst of
+ * history updates is refused by some browsers. A hash changed elsewhere (a
+ * link, Back) is followed.
+ */
+function useSearchText(): [string, (text: string) => void, () => void] {
+  const [query, setQuery] = useHashParam("q");
+  const [text, setText] = useState(query ?? "");
+  const written = useRef(query ?? "");
+  const write = useRef(setQuery);
+  write.current = setQuery;
+
+  useEffect(() => {
+    const next = query ?? "";
+    if (next === written.current) return;
+    written.current = next;
+    setText(next);
+  }, [query]);
+
+  const save = (value: string) => {
+    try {
+      write.current(value || undefined);
+      written.current = value;
+    } catch {
+      // History refused the update; the next change tries again.
+    }
+  };
+  useEffect(() => {
+    if (text === written.current) return;
+    const timer = window.setTimeout(() => save(text), 250);
+    return () => window.clearTimeout(timer);
+    // save reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
+  const clear = () => {
+    setText("");
+    save("");
+  };
+  return [text, setText, clear];
+}
+
+/** "/" puts the cursor in the search box, unless the cursor is in a field already. */
+function useSlashToFocus(target: RefObject<HTMLInputElement | null>) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const from = event.target instanceof Element ? event.target : null;
+      if (from?.closest("input, textarea, select, [contenteditable]")) return;
+      const input = target.current;
+      if (!input || input.closest("[inert]")) return;
+      event.preventDefault();
+      input.focus();
+      input.select();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [target]);
 }
