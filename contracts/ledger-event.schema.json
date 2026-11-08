@@ -88,8 +88,8 @@
     },
     "actor": {
       "type": ["string", "null"],
-      "pattern": "^(system|instance:[A-Za-z0-9_.:-]{1,128}|[^@\\s]{1,64}@[^@\\s]{1,255})$",
-      "description": "Who caused this: the signed-in person's email, \"instance:<session_id>\" for an instance acting on its own session, or \"system\" for Burn itself. null or absent for events written before sign-in."
+      "pattern": "^(system|admin|instance:[A-Za-z0-9_.:-]{1,128}|[^@\\s]{1,64}@[^@\\s]{1,255})$",
+      "description": "Who caused this: the signed-in person's email, \"instance:<session_id>\" for an instance acting on its own session, \"admin\" for a caller with the admin header (before sign-in is switched on, or in local development), or \"system\" for Burn itself. null or absent for events written before sign-in."
     },
     "parent_session": {
       "type": ["string", "null"],

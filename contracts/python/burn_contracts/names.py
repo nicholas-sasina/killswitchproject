@@ -41,15 +41,22 @@ MINTER_FUNCTION = "burn-minter"
 # honors it only when its environment sets LOCAL_DEV_ENV to "1", which a deployment never does.
 DEMO_TOKEN_HEADER = "x-burn-demo-token"
 LOCAL_DEV_ENV = "BURN_LOCAL_DEV"
+# Set to "1" on the deployed API once people sign-in is switched on for the stack: from then on
+# every non-exempt route needs a person's token. Unset, the API behaves as before sign-in.
+PEOPLE_AUTH_ENV = "BURN_PEOPLE_AUTH"
 
 # People sign-in (an invite-only user pool, separate from the instances' badge pool). The stack
-# publishes these four values to SSM so the CLI, the dashboard and the API find them by name.
+# publishes these values to SSM so the CLI, the dashboard and the API find them by name. The domain
+# is the managed login origin, e.g. https://<prefix>.auth.us-east-1.amazoncognito.com (no path).
 PEOPLE_POOL_NAME = "burn-people"
 PEOPLE_SSM_PREFIX = "/burn/people"
 PEOPLE_USER_POOL_ID_PARAM = f"{PEOPLE_SSM_PREFIX}/user-pool-id"
 PEOPLE_CLIENT_ID_PARAM = f"{PEOPLE_SSM_PREFIX}/client-id"
 PEOPLE_DOMAIN_PARAM = f"{PEOPLE_SSM_PREFIX}/domain"
 PEOPLE_ISSUER_PARAM = f"{PEOPLE_SSM_PREFIX}/issuer"
+# "on" once the stack requires a person's token (the API's PEOPLE_AUTH_ENV is set), else "off".
+# make_env reads it to decide whether the dashboard still gets the local admin token.
+PEOPLE_ENABLED_PARAM = f"{PEOPLE_SSM_PREFIX}/enabled"
 # Scripts and tests that run without a person (e2e, smoke, load) sign in as an "automation" person
 # through a second, confidential app client that alone accepts the admin password flow. Its client
 # id is published next to the others. The person's credentials live in Secrets Manager as the JSON

@@ -36,7 +36,7 @@ OPTIONAL_FIELDS = (
 _SECRET_REF_RE = re.compile(r"^burn/(agent-[a-z0-9-]{1,40}|shared)/[a-z0-9_]{1,40}$")
 _FP_RE = re.compile(r"^[0-9a-f]{64}$")
 _AGENT_RE = re.compile(r"^(agent-[a-z0-9-]{1,40}|system)$")
-_ACTOR_RE = re.compile(r"^(system|instance:[A-Za-z0-9_.:-]{1,128}|[^@\s]{1,64}@[^@\s]{1,255})$")
+_ACTOR_RE = re.compile(r"^(system|admin|instance:[A-Za-z0-9_.:-]{1,128}|[^@\s]{1,64}@[^@\s]{1,255})$")
 _ROLE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 

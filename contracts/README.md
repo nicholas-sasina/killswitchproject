@@ -228,7 +228,8 @@ is returned once in the join reply and never stored; the supervisor never hands 
   and `parent_session` set. A call carrying a badge Burn never issued is `agent_id: system`,
   source `gateway`, action `unregistered`.
 - `actor` (optional) says who caused an event: the signed-in person's email, `instance:<session_id>`
-  for an instance acting on its own session, or `system` for Burn itself. Events written before
+  for an instance acting on its own session, `admin` for a caller with the admin header (before
+  sign-in is switched on, or in local development), or `system` for Burn itself. Events written before
   sign-in have none.
 - `detail` is for humans. Never put a credential value, a full URL with a query string, or a
   request body in it.

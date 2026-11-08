@@ -454,7 +454,7 @@ def test_created_by_and_actor_are_nullable_and_leave_owner_alone():
 def test_actor_is_a_person_an_instance_or_the_system():
     from burn_contracts import events
     schema = json.loads((ROOT / "ledger-event.schema.json").read_text())
-    for actor in ("ada@example.com", "instance:sess_0123456789abcdef", "system", None):
+    for actor in ("ada@example.com", "instance:sess_0123456789abcdef", "system", "admin", None):
         event = events.make_event(agent_id="agent-a", source="session", action="issued", actor=actor)
         jsonschema.validate(event, schema)
     for bad in ("", "someone", "instance:", "instance:a b", "a@b c", "x" * 400 + "@example.com"):
@@ -471,6 +471,8 @@ def test_sign_in_names():
             names.PEOPLE_DOMAIN_PARAM, names.PEOPLE_ISSUER_PARAM] == [
         "/burn/people/user-pool-id", "/burn/people/client-id", "/burn/people/domain", "/burn/people/issuer"]
     assert names.LOCAL_DEV_ENV == "BURN_LOCAL_DEV"
+    assert names.PEOPLE_AUTH_ENV == "BURN_PEOPLE_AUTH"
+    assert names.PEOPLE_ENABLED_PARAM == "/burn/people/enabled"
     assert names.CLI_LOOPBACK_PORT == 8976
     assert names.CLI_REDIRECT_URI == "http://localhost:8976/callback"
     assert names.DASHBOARD_REDIRECT_URI == "http://localhost:5173/"
