@@ -1,11 +1,11 @@
 """Compare normalized tokens and distinct shingles with registered fingerprints."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 from typing import Callable
 
 from burn_contracts.fingerprint import fingerprint, shingle_fingerprint, shingle_windows
 
-from .normalize import TOKENS, candidates, variants
+from .normalize import _URL, TOKENS, candidates, segments, variants
 from .window import SessionWindow
 
 _FORMATS = (
@@ -25,6 +25,13 @@ class Finding:
     kind: str
     encoding: str
     coverage: float
+    # Where it is in the scanned text (optional, additive). For a decoded match the span covers
+    # the whole encoded segment. Only exact and format matches can be located; None / () means
+    # "not located" (a fragment, or a whole-text transform such as reversal).
+    start: int | None = None
+    end: int | None = None
+    spans: tuple[tuple[int, int], ...] = ()
+    canary: bool = False  # the fingerprint row marks a canary (a decoy that never authenticates)
 
 
 def _finding(row: dict, fp: str, kind: str, encoding: str, coverage: float) -> Finding:
@@ -43,14 +50,53 @@ class Scanner:
         self.threshold = threshold
 
     def scan(self, text: str, window: SessionWindow | None = None) -> list[Finding]:
-        exact, shingles, formats = self._collect_candidates(text)
+        exact, shingles, formats, token_fps = self._collect_candidates(text)
         rows = self._lookup_fingerprints(exact, shingles, formats)
         found = self._exact_matches(rows, exact)
         evidence = self._add_shingle_matches(found, rows, shingles, window)
         self._add_format_only_findings(found, rows, formats, evidence)
-        return sorted(found.values(), key=lambda f: (f.secret_ref or "", f.fingerprint, f.kind))
+        findings = self._locate(text, rows, list(found.values()), token_fps)
+        return sorted(findings, key=lambda f: (f.secret_ref or "", f.fingerprint, f.kind))
 
-    def _collect_candidates(self, text: str) -> tuple[dict, dict, dict]:
+    def _positions(self, text: str, known: dict | None = None) -> dict[str, list[tuple[int, int]]]:
+        """Exact fingerprint -> spans in `text`: plain tokens, URLs and formats, then decoded segments.
+        known: token -> fingerprint already computed by this scan, so no token is hashed twice."""
+        fps, positions = dict(known or {}), {}
+
+        def add(candidate: str, span: tuple[int, int]) -> None:
+            if candidate not in fps:
+                fps[candidate] = fingerprint(candidate, self.key)
+            positions.setdefault(fps[candidate], []).append(span)
+
+        stripped = text.strip()
+        if stripped:
+            add(stripped, (len(text) - len(text.lstrip()), len(text.rstrip())))
+        matchers = [TOKENS, *(pattern for pattern, _ in _FORMATS)] + ([_URL] if "://" in text else [])
+        for matcher in matchers:
+            for match in matcher.finditer(text):
+                add(match[0], match.span())
+        for value, span in segments(text):
+            for candidate in candidates(value):
+                add(candidate, span)
+            for pattern, _ in _FORMATS:
+                for match in pattern.finditer(value):
+                    add(match[0], span)
+        return positions
+
+    def _locate(self, text: str, rows: dict, findings: list[Finding], known: dict | None = None) -> list[Finding]:
+        """Attach spans and the canary flag. Costs nothing when nothing was found."""
+        if not findings:
+            return findings
+        positions = self._positions(text, known) if any(f.kind in ("exact", "format") for f in findings) else {}
+        located = []
+        for f in findings:
+            spans = tuple(sorted(set(positions.get(f.fingerprint, ())))) if f.kind in ("exact", "format") else ()
+            start, end = spans[0] if spans else (None, None)
+            canary = bool(rows.get(f.fingerprint, {}).get("canary"))
+            located.append(replace(f, start=start, end=end, spans=spans, canary=canary))
+        return located
+
+    def _collect_candidates(self, text: str) -> tuple[dict, dict, dict, dict]:
         exact, shingles, formats = {}, {}, {}
         token_cache = {}
         shingle_cache = {}
@@ -83,7 +129,7 @@ class Scanner:
                     exact.setdefault(fp, encoding)
                     token = match[0].lower()
                     formats.setdefault(fp, (secret_type, encoding, parts(token)))
-        return exact, shingles, formats
+        return exact, shingles, formats, token_cache
 
     def _lookup_fingerprints(self, exact: dict, shingles: dict, formats: dict) -> dict:
         # A lookup can cross the network, so collect every candidate into one batch.
