@@ -320,6 +320,68 @@ describe("containment dashboard", () => {
     expect(screen.getByText(/CloudTrail event history can lag/)).toBeTruthy();
   });
 
+  it("polls /instances once per interval, and not at all on Alerts", async () => {
+    const worker = "agent-worker-a1b2";
+    const calls: string[] = [];
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      calls.push(path);
+      let body: unknown;
+      if (path === "/events") body = { events: [], agents: [] };
+      else if (path === "/instances")
+        body = {
+          instances: [
+            {
+              session_id: "sess_w",
+              agent_id: worker,
+              role: "worker",
+              status: "active",
+              tools: [],
+              created_at: "2026-11-08T05:00:00.000Z",
+              exposures: 0,
+            },
+          ],
+        };
+      else if (path === "/roles") body = { roles: [] };
+      else if (path.endsWith("/ledger"))
+        body = { agent_id: worker, entries: [] };
+      else throw new Error(`Unexpected endpoint ${path}`);
+      return new Response(JSON.stringify(body));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const count = () => calls.filter((path) => path === "/instances").length;
+    await act(async () => {
+      render(
+        <App
+          config={{
+            burnUrl: "https://burn.example.test",
+            demoToken: crypto.randomUUID(),
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    // One poll for the page: the first call, then one every five seconds.
+    expect(count()).toBe(5);
+
+    await act(async () => {
+      goTo("alerts");
+    });
+    const onAlerts = count();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(count()).toBe(onAlerts);
+
+    await act(async () => {
+      goTo("overview");
+    });
+    const roster = screen.getByRole("region", { name: "Active agents" });
+    expect(within(roster).getByText(worker)).toBeTruthy();
+  });
+
   it.each(["handoff", "egress"] as const)(
     "keeps blocked %s traffic visible in the live stream",
     async (source) => {

@@ -12,9 +12,16 @@ export function SwarmPanel({
   api,
   enabled,
   defaultStatus = "",
+  sharedInstances,
 }: {
   api: BurnApi;
   enabled: boolean;
+  /**
+   * The instance list from a poll the page already runs. When given, the
+   * panel does not poll /instances itself: each call scans the sessions and
+   * counts every instance's exposures, so one poll per page is enough.
+   */
+  sharedInstances?: { data?: { instances: Instance[] }; error: string };
   /**
    * Status the filter starts on. The overview passes "active" so contained
    * instances stay on the Contained view; the filter itself still offers
@@ -31,7 +38,11 @@ export function SwarmPanel({
     [api],
   );
   const rolePoll = usePolling(enabled ? loadRoles : null, 5_000);
-  const instancePoll = usePolling(enabled ? loadInstances : null, 5_000);
+  const ownPoll = usePolling(
+    enabled && !sharedInstances ? loadInstances : null,
+    5_000,
+  );
+  const instancePoll = sharedInstances ?? ownPoll;
   const [created, setCreated] = useState<Role[]>([]);
   const [revoked, setRevoked] = useState<string[]>([]);
   const [adding, setAdding] = useState<{ role?: Role }>();
