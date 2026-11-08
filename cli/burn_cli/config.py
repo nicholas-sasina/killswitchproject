@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 
+from burn_contracts import names
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -31,7 +33,7 @@ def load(dotenv: Path | None = None) -> tuple[str, str]:
     url = get("BURN_API_URL", dotenv)
     if not url:
         raise ConfigError("BURN_API_URL not set. Export it or run `make env` to write .env.")
-    if get("BURN_LOCAL_DEV", dotenv) != "1":
+    if get(names.LOCAL_DEV_ENV, dotenv) != "1":
         return url.rstrip("/"), ""
     token = get("BURN_DEMO_TOKEN", dotenv)
     if not token:

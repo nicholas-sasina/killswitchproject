@@ -3,6 +3,8 @@ import json
 import urllib.error
 import urllib.request
 
+from burn_contracts import names
+
 from . import config, signin
 
 
@@ -33,8 +35,8 @@ class Api:
         with BURN_LOCAL_DEV=1 (the mock servers) is the demo token sent instead. A subclass may authenticate
         differently (the swarm launcher signs in as the automation person).
         """
-        if config.get("BURN_LOCAL_DEV") == "1":
-            return {"x-burn-demo-token": self._token}
+        if config.get(names.LOCAL_DEV_ENV) == "1":
+            return {names.DEMO_TOKEN_HEADER: self._token}
         try:
             return {"authorization": f"Bearer {signin.current_id_token()}"}
         except signin.SignInError as exc:

@@ -19,8 +19,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Callable
 
-CALLBACK_PORT = 8976
-REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
+from burn_contracts import names
+
+CALLBACK_PORT = names.CLI_LOOPBACK_PORT
+REDIRECT_URI = names.CLI_REDIRECT_URI  # registered on the people pool's public client
 SCOPE = "openid email profile"
 REFRESH_MARGIN = 60  # seconds: refresh when the ID token has less than this left
 CALLBACK_TIMEOUT = 180
