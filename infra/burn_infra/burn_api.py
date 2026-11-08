@@ -50,15 +50,17 @@ class BurnApiStack(cdk.Stack):
                      "dynamodb:Scan"],
             resources=[table_arn(names.SESSIONS_TABLE), f"{table_arn(names.SESSIONS_TABLE)}/index/by_agent"],
         ))
-        role.add_to_policy(iam.PolicyStatement(  # roles and join tokens
-            actions=["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem",
-                     "dynamodb:Scan"],
-            resources=[table_arn(names.ROLES_TABLE), table_arn(names.ENROLL_TOKENS_TABLE),
-                       f"{table_arn(names.ENROLL_TOKENS_TABLE)}/index/by_role"],
-        ))
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:GetItem"],
             resources=[table_arn(names.SCENARIO_TABLE), table_arn(names.CREDENTIALS_TABLE)],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # roles: get, put and list (Scan) only
+            actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan"],
+            resources=[table_arn(names.ROLES_TABLE)],
+        ))
+        role.add_to_policy(iam.PolicyStatement(  # join tokens: create, redeem (conditional update), revoke
+            actions=["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+            resources=[table_arn(names.ENROLL_TOKENS_TABLE)],
         ))
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem", "dynamodb:Query"], resources=[table_arn(names.EVENTS_TABLE)]))
