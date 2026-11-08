@@ -1,6 +1,6 @@
 # Burn eval results
 
-Generated 2026-11-08T00:32:20+00:00 at commit `09d9668`. Every credential is freshly generated per run; no value appears here.
+Generated 2026-11-08T01:41:48+00:00 at commit `a313078`. Every credential is freshly generated per run; no value appears here.
 
 Uncommitted source changes: False.
 
@@ -10,33 +10,35 @@ Exit-check results below measure the scanner offline, not the whole containment 
 
 ### References
 
-Scope: **local-emulator**. Source commit `09d966876d127123141ddf02dd932b331906171b`, measured 2026-11-08T00:32:18.238+00:00.
+Scope: **local-emulator**. Source commit `f07b606c564d0950a72248e928e9afbfd1019edc`, measured 2026-11-08T01:41:45.847+00:00.
 
-Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures. Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called. Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior. Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution.
+Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures. Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called. Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior. Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution. Reference tokens and ledger entries marked referenced with the expected source_ref are counted separately. Tool-side reference resolution is outside this response probe.
 
 Product checkout has uncommitted changes: False.
 
-Inspected product source SHA-256: `b906cb73ed4c1069dc39133698db3367304753d7eb8638034086f9d910ae2b3a`.
+Inspected product source SHA-256: `72d411b7952afc03084c8c18274841053e90eec07e2cda82b4556d73dbc352f9`.
 
-Credentials in agent context: 10/10 (100.0%).
+Credentials in agent context: 0/10 (0.0%).
 
 Additional observed checks:
 
 - responses: 5
 - withheld responses: 0
 - tool errors: 0
+- reference tokens: 10
+- referenced ledger entries: 10
 
 ### Canaries
 
-Scope: **local-emulator**. Source commit `2c36726bbea37aa21786d6bf26f6b2ed858c13b7`, measured 2026-11-08T00:32:18.779+00:00.
+Scope: **local-emulator**. Source commit `a3130785347a0a880a06a1c2dcefab7df1cef249`, measured 2026-11-08T01:41:46.478+00:00.
 
 Real provider, Burn API and minter Lambda handlers execute against moto from the selected canary source commit. Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py. Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency. Optional negative_checks are fault-injection/replay observations, excluded from the ordinary-use detection-rate denominator; a revoked session with failed credential rotation is not complete containment. Optional policy_checks measure alert-only cases separately; session-origin headers and additional ledger holders are synthetic harness inputs, not a full proxy-to-provider network flow.
 
 Product checkout has uncommitted changes: False.
 
-Inspected product source SHA-256: `3003cbdc690fa38ff620609bdaa4624de36eea61b18fec460e3ea8dda432dab3`.
+Inspected product source SHA-256: `0516cd1ab2364070b4d4e9409859a52d3da4165ffe7a2ef1c53afea362ad215d`.
 
-Uses detected: 5/5 (100.0%). Recorded revocations: 5/5. Time from use to revocation: p50 0.015935 s; p95 0.019309 s.
+Uses detected: 5/5 (100.0%). Recorded revocations: 5/5. Time from use to revocation: p50 0.015714 s; p95 0.043862 s.
 
 Additional observed checks:
 
@@ -48,7 +50,7 @@ Additional observed checks:
 Replay and injected-failure checks (excluded from the positive-use detection rate):
 
 - duplicate replay: presentations=2; provider rejections=2; new incidents=0; extra api rotations=0; extra canary events=0
-- rotation failure: incomplete containment flagged=True; session revoked=True; provider rejected=True; old api key accepted=True; outcome=contained_rotation_failed; rotated credentials=0
+- rotation failure: session revoked=True; old api key accepted=True; provider rejected=True; incomplete containment flagged=True; outcome=contained_rotation_failed; rotated credentials=0
 
 Origin and policy checks (excluded from the positive-use detection rate):
 
@@ -83,8 +85,8 @@ Post-cache read-unit measurements have not been supplied. This report does not c
 
 | Metric | Result |
 |---|---|
-| Catch rate, named credential (31 forms x 4 credential types x 10 trials) | **75.8%** |
-| Catch rate, blocked at all (incl. format-only matches) | 79.0% |
+| Catch rate, named credential (31 forms x 4 credential types x 10 trials) | **76.2%** |
+| Catch rate, blocked at all (incl. format-only matches) | 79.3% |
 | False positives (31 normal payload types x 10 trials) | **0.0%** (0/310) |
 | Cost estimate per 1M tool calls (usage assumptions listed below) | **$17.45** |
 
@@ -132,14 +134,14 @@ Named: 30.6%; blocked: 30.6%; 320 payload runs.
 | markdown_code_block | 40/40 | 40/40 | caught |
 | gzip_base64 | 0/40 | 0/40 | missed |
 | rot13 | 0/40 | 10/40 | partial |
-| homoglyph | 14/40 | 24/40 | partial |
-| junk_interleaved | 38/40 | 38/40 | partial |
+| homoglyph | 15/40 | 25/40 | partial |
+| junk_interleaved | 39/40 | 39/40 | partial |
 | base32 | 0/40 | 0/40 | missed |
-| zero_width | 38/40 | 38/40 | partial |
+| zero_width | 39/40 | 39/40 | partial |
 | hex_of_base64 | 40/40 | 40/40 | caught |
 | base64_of_reversed | 40/40 | 40/40 | caught |
 | url_encoded_base64 | 40/40 | 40/40 | caught |
-| split_query_params | 20/40 | 30/40 | partial |
+| split_query_params | 22/40 | 30/40 | partial |
 | caesar_shift_1 | 0/40 | 10/40 | partial |
 
 ## Known misses
@@ -151,11 +153,11 @@ Measured, not tuned. These forms were not fully caught:
 - **partial_first_half**: only the first half is sent (0/40 named)
 - **gzip_base64**: gzip then base64 (0/40 named)
 - **rot13**: ROT13 (0/40 named)
-- **homoglyph**: Latin letters swapped for Cyrillic look-alikes (14/40 named)
-- **junk_interleaved**: random junk character after each character (38/40 named)
+- **homoglyph**: Latin letters swapped for Cyrillic look-alikes (15/40 named)
+- **junk_interleaved**: random junk character after each character (39/40 named)
 - **base32**: base32 (0/40 named)
-- **zero_width**: zero-width spaces between characters (38/40 named)
-- **split_query_params**: two halves in two query params of one URL (20/40 named)
+- **zero_width**: zero-width spaces between characters (39/40 named)
+- **split_query_params**: two halves in two query params of one URL (22/40 named)
 - **caesar_shift_1**: every letter/digit shifted by one (0/40 named)
 
 The outbound allowlist is the backstop for these.
