@@ -355,7 +355,7 @@ def test_references_role_field_ledger_fields_and_by_source_route():
     assert names.EXPOSURES_BY_SOURCE_INDEX == "by_source"
 
 
-@pytest.mark.parametrize("spec", ["burn-api.openapi.yaml", "leaktest.openapi.yaml"])
+@pytest.mark.parametrize("spec", ["burn-api.openapi.yaml", "leaktest.openapi.yaml", "minter.openapi.yaml"])
 def test_specs_have_no_duplicate_yaml_keys(spec):
     """A repeated key makes YAML keep only the last one, silently dropping the first (e.g. a path's GET)."""
     class Strict(yaml.SafeLoader):

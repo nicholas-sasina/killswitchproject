@@ -236,6 +236,18 @@ paths:
                         flag_level: { $ref: '#/components/schemas/FlagLevel' }
                         changed: { type: boolean, description: true if this call raised the level }
                         instance_count: { type: integer, description: distinct instances (agent ids) whose evidence flagged it }
+    get:
+      summary: Flagged credentials awaiting (or after) owner review, highest level first.
+      responses:
+        '200':
+          description: Flags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flags]
+                properties:
+                  flags: { type: array, items: { $ref: '#/components/schemas/Flag' } }
   /shared/credentials:
     post:
       summary: Issue a shared credential (used by several agents). Idempotent by name.
@@ -267,19 +279,6 @@ paths:
       summary: Delete all shared credentials (demo reset / teardown).
       responses:
         '200': { description: Deleted }
-  /flags:
-    get:
-      summary: Flagged credentials awaiting (or after) owner review, highest level first.
-      responses:
-        '200':
-          description: Flags
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [flags]
-                properties:
-                  flags: { type: array, items: { $ref: '#/components/schemas/Flag' } }
   /flags/resolve:
     post:
       summary: Owner decision on one flag - rotate the credential or dismiss the flag, with a reason.
