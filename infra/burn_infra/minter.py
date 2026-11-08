@@ -8,6 +8,7 @@ The minter can create IAM users, which is the riskiest thing in Burn, so:
 - there are no wildcard actions anywhere.
 """
 import json
+import sys
 
 import aws_cdk as cdk
 from aws_cdk import aws_apigatewayv2 as apigw
@@ -17,7 +18,11 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
-from burn_infra.assets import lambda_asset
+from burn_infra.assets import REPO, lambda_asset
+
+# Fixed resource names live in the contracts package; infra has no dependency on it, so add its path.
+sys.path.insert(0, str(REPO / "contracts" / "python"))
+from burn_contracts import names  # noqa: E402
 
 BEDROCK_MODEL = "anthropic.claude-haiku-4-5-20251001-v1:0"
 BOUNDARY_NAME = "burn-agent-boundary"
@@ -80,6 +85,13 @@ class BurnMinterStack(cdk.Stack):
             actions=["dynamodb:PutItem"], resources=self._table_arns("burn-events")))
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"], resources=[self._fingerprint_key_arn()]))
+        role.add_to_policy(iam.PolicyStatement(  # canary counters; shared-credential flag lookups
+            actions=["dynamodb:GetItem", "dynamodb:UpdateItem"],
+            resources=[f"arn:aws:dynamodb:{region}:{acct}:table/{names.CREDENTIALS_TABLE}"]))
+        role.add_to_policy(iam.PolicyStatement(  # hand a canary incident to the Burn API; report to the minter
+            actions=["lambda:InvokeFunction"],
+            resources=[f"arn:aws:lambda:{region}:{acct}:function:{fn_name}"
+                       for fn_name in (names.BURN_API_FUNCTION, names.MINTER_FUNCTION)]))
         fn = lambda_.Function(
             self, "ProviderFn", function_name="burn-provider",
             runtime=lambda_.Runtime.PYTHON_3_12, handler="provider_app.handler",
@@ -125,11 +137,14 @@ class BurnMinterStack(cdk.Stack):
                      "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:BatchWriteItem"],
             resources=self._table_arns("burn-credentials", "burn-fingerprints"),
         ))
+        role.add_to_policy(iam.PolicyStatement(  # GET /flags lists flagged credentials
+            actions=["dynamodb:Scan"],
+            resources=[f"arn:aws:dynamodb:{region}:{acct}:table/{names.CREDENTIALS_TABLE}"]))
         role.add_to_policy(iam.PolicyStatement(  # CloudTrail LookupEvents has no resource-level
             actions=["cloudtrail:LookupEvents"], resources=["*"],  # permissions: "*" is unavoidable.
         ))
         lambda_.Function(
-            self, "MinterFn", function_name="burn-minter",
+            self, "MinterFn", function_name=names.MINTER_FUNCTION,
             runtime=lambda_.Runtime.PYTHON_3_12, handler="minter_app.handler",
             code=lambda_.Code.from_asset(lambda_asset("minter", "minter/lambdas/minter")),
             role=role, timeout=cdk.Duration.seconds(60), memory_size=256,
