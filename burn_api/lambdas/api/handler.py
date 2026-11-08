@@ -10,6 +10,7 @@ from burn_contracts import names
 import auth
 import burn
 import burn_scopes
+import by_source
 import canary
 import db
 import errors
@@ -75,6 +76,8 @@ def route(method: str, path: str, query: dict, body: dict):
     swarm = _swarm_route(method, path, query, body)
     if swarm is not None:
         return swarm
+    if method == "POST" and path == "/burn/by-source":
+        return 200, by_source.burn_by_source(body)
     return 404, {"error": "no such route"}
 
 
