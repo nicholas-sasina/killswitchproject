@@ -12,7 +12,8 @@ burning an instance, a role, a lineage or a join token in one call.
   - **Sign-in off** (the default): every request carries `x-burn-demo-token`, compared in constant time with
     `burn-system/demo-token`, except a join (its join token) and an instance's own calls (its session token,
     `Authorization: Bearer bst_...`).
-  - **Sign-in on** (`BURN_PEOPLE_AUTH=1`, set by deploying with `-c burn:people_auth=on`): every route except
+  - **Sign-in on** (`BURN_PEOPLE_AUTH=1`, set by deploying with `-c burn:people_auth=on`, e.g.
+    `make deploy-BurnApi PEOPLE_AUTH=on`; later `make deploy` runs keep it on): every route except
     `POST /instances` and an instance's own heartbeat and exit needs a signed-in person. API Gateway's JWT
     authorizer verifies the person's ID token, and the Lambda checks again that its claims are in
     `requestContext`; it never reads them from a header or the body. The demo token then works only with

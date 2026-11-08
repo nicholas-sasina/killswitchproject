@@ -87,6 +87,9 @@ if tool == "uv" and "scripts/hosted_dashboard.py" in args:
         print(os.environ.get("FAKE_HOSTED_URL", ""))
     else:
         sys.exit(int(os.environ.get("FAKE_CHECK_EXIT", "0")))
+if tool == "uv" and "scripts/deploy_flags.py" in args:
+    print(os.environ.get("FAKE_FLAGS", "-c burn:people_auth=off -c burn:dashboard_hosted=off"))
+    sys.exit(int(os.environ.get("FAKE_FLAGS_EXIT", "0")))
 if tool == "aws":
     print("https://dfake.cloudfront.net")
 '''
@@ -172,3 +175,31 @@ def test_dashboard_hosted_keeps_sign_in_on_and_deploys_only_people_and_api(hosti
     assert args[args.index("deploy") + 1:args.index("deploy") + 3] == ["BurnPeople", "BurnApi"]
     assert "--exclusively" in args  # BurnDashboard is not redeployed without its build
     assert " ".join(args).endswith("-c burn:people_auth=on -c burn:dashboard_hosted=on")
+
+
+# --- deploys follow the account's sign-in and hosted-dashboard state --------------------------------
+
+@pytest.mark.parametrize("target,stack", [("deploy", "--all"), ("deploy-BurnApi", "BurnApi")])
+def test_deploys_pass_the_flags_the_account_runs_with(hosting, target, stack):
+    result, calls = hosting(target, FAKE_FLAGS="-c burn:people_auth=on -c burn:dashboard_hosted=on")
+    assert result.returncode == 0, result.stderr
+    [flags] = [c for c in calls if c["tool"] == "uv" and "scripts/deploy_flags.py" in c["args"]]
+    assert flags["cwd"] == "burn_api" and flags["args"][-1] == "scripts/deploy_flags.py"  # no override
+    [deploy] = [c for c in calls if c["tool"] == "npx"]
+    assert deploy["args"][deploy["args"].index("deploy") + 1] == stack
+    assert deploy["args"][-4:] == ["-c", "burn:people_auth=on", "-c", "burn:dashboard_hosted=on"]
+
+
+def test_overrides_reach_the_flags_script(hosting):
+    result, calls = hosting("deploy-BurnApi", "PEOPLE_AUTH=on", "DASHBOARD_HOSTED=off")
+    assert result.returncode == 0, result.stderr
+    [flags] = [c for c in calls if c["tool"] == "uv" and "scripts/deploy_flags.py" in c["args"]]
+    assert flags["args"][-2:] == ["--people-auth=on", "--dashboard-hosted=off"]
+
+
+@pytest.mark.parametrize("target", ["deploy", "deploy-BurnPeople"])
+def test_a_deploy_that_cannot_read_the_account_does_not_run(hosting, target):
+    result, calls = hosting(target, FAKE_FLAGS="", FAKE_FLAGS_EXIT="1")
+    assert result.returncode != 0
+    assert not any(c["tool"] == "npx" for c in calls)
+

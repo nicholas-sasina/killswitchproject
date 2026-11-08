@@ -21,6 +21,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 
 import boto3
@@ -126,14 +127,21 @@ def build(ssm, secrets, repo: pathlib.Path | None = None, run=None) -> None:
         raise Refused("the dashboard build holds a demo token, so it is not deployed:\n  " + "\n  ".join(leaks))
 
 
-def serves_a_page(url: str) -> bool:
+def page_status(url: str) -> int | None:
+    """The HTTP status url answers with (an empty distribution says 403), or None for no answer or not https."""
     if not url.startswith("https://"):
-        return False
+        return None
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
-            return response.status == 200
-    except Exception:  # an empty distribution answers 403
-        return False
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
+        return None
+
+
+def serves_a_page(url: str) -> bool:
+    return page_status(url) == 200
 
 
 def live_url(ssm, fetch=serves_a_page) -> str:
