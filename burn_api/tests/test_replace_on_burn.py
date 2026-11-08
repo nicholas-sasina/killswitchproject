@@ -337,8 +337,11 @@ def test_the_hook_costs_few_dynamodb_calls(env):
     assert counted == ["GetItem", "GetItem", "Query", "UpdateItem"]  # + its evidence, + the conditional write
 
 
-def test_a_single_instance_burn_is_not_noticeably_slower(env, monkeypatch):
-    """Median time of an instance burn on moto, with the hook and with it switched off."""
+def test_instance_burn_timing_with_and_without_the_hook(env, monkeypatch):
+    """Prints the median time of an instance burn on moto, with the hook and with it switched off (run with -s).
+
+    Information only: wall-clock times vary with machine load, so the cost is pinned by the call-count test above.
+    """
     replacing_role(env)
     runs = 15
     victims = instances(env, 2 * runs)
@@ -358,7 +361,7 @@ def test_a_single_instance_burn_is_not_noticeably_slower(env, monkeypatch):
     monkeypatch.setattr(replace, "after_burn", real)
     with_hook = timed(victims[runs + 1:])
     print(f"\ninstance burn median on moto: {without:.1f} ms without the hook, {with_hook:.1f} ms with it")
-    assert with_hook - without < 50  # four small DynamoDB calls; generous for a loaded test machine
+    assert replacement_of(env, victims[-1]["session_id"])["status"] == "pending"  # the hook really ran
 
 
 # --- a burn by source ----------------------------------------------------------------------------
