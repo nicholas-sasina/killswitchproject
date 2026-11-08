@@ -21,6 +21,7 @@ import badges  # noqa: E402
 import detection  # noqa: E402
 import ledger  # noqa: E402
 import placeholders  # noqa: E402
+import resolve  # noqa: E402
 import sessions  # noqa: E402
 import store  # noqa: E402
 from burn_contracts import fingerprint as fp  # noqa: E402
@@ -38,7 +39,7 @@ TABLES = {
 def _reset_caches():
     for cached in (sessions._dynamodb, store._dynamodb, placeholders._secrets,
                    badges._cognito, badges.identity_config,
-                   detection._dynamodb, detection.scanner, ledger._table):
+                   detection._dynamodb, detection.scanner, ledger._table, resolve._secrets, resolve._exposures):
         cached.cache_clear()
     sessions._session_ids.clear()
     detection.reset_cache()
@@ -104,7 +105,8 @@ def ledger_rows(dynamodb, agent_id: str) -> dict[str, dict]:
 
 
 def put_session(dynamodb, agent_id="agent-alpha", status="active",
-                tools=("list_tickets", "read_config", "send_message"), send_to=("agent-beta",)) -> dict:
+                tools=("list_tickets", "read_config", "send_message"), send_to=("agent-beta",),
+                **extra) -> dict:
     session = {
         "session_id": "s-" + secrets.token_hex(4),
         "agent_id": agent_id,
@@ -112,6 +114,7 @@ def put_session(dynamodb, agent_id="agent-alpha", status="active",
         "status": status,
         "tools": list(tools),
         "send_to": list(send_to),
+        **extra,
     }
     dynamodb.Table("burn-sessions").put_item(Item=session)
     return session

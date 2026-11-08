@@ -9,9 +9,11 @@ REQUEST (before the tool runs):
      from the gateway, and an agent-supplied value must not be trusted).
   5. send_message / notify: block known credentials; a message that passes
      hands the sender's ledger to the receiver (exit_check.py).
+  6. Arguments a tool declares in accepts_secret_refs: swap permitted
+     {{burn:ref:...}} references for the real value (resolve.py).
 RESPONSE (before the reply reaches the agent):
-  - tools/call: credentials in the tool output go into the agent's ledger
-    (record.py).
+  - tools/call: credentials in the tool output go into the agent's ledger, and
+    by default the agent gets a {{burn:ref:...}} reference instead (record.py).
   - tools/list is filtered to the agent's allowed tools.
 Agents see the plain tool names from contracts/mcp-tools.json; the gateway's
 "<target>___" prefix is added and removed here, so it never leaks to agents.
@@ -21,6 +23,7 @@ import os
 
 import exit_check
 import record
+import resolve
 import sessions
 import shapes
 from burn_contracts.events import make_event
@@ -74,6 +77,11 @@ def on_request(event: dict) -> dict:
     denial = exit_check.check(event, session, tool, arguments)
     if denial:
         return denial
+
+    try:
+        arguments = resolve.resolve_arguments(session["agent_id"], tool, arguments)
+    except resolve.NotAllowed as exc:
+        return refuse(body, session, str(exc), tool)
 
     params = {**(body.get("params") or {}), "name": _gateway_tool_name(tool), "arguments": arguments}
     return shapes.pass_request({**body, "params": params})

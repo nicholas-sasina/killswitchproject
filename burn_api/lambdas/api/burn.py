@@ -21,11 +21,12 @@ BLOCKING_SOURCES = {"egress", "gateway", "handoff"}
 
 
 def exposed_refs(agent_id: str) -> list[str]:
+    """Credentials whose plaintext reached the agent. Unknown-format ones have no secret_ref, and
+    an exposure with status "referenced" means it only ever got {{burn:ref:...}}: nothing to flag."""
     rows = db.query_all(
         db.table(names.EXPOSURES_TABLE), KeyConditionExpression=Key("agent_id").eq(agent_id)
     )
-    # Unknown-format credentials have no secret_ref; there is nothing to rotate for them.
-    return sorted({r["secret_ref"] for r in rows if r.get("secret_ref")})
+    return sorted({r["secret_ref"] for r in rows if r.get("secret_ref") and r.get("status") != "referenced"})
 
 
 def _flag_event(agent_id: str, ref: str, level: str | None, **ids) -> None:
