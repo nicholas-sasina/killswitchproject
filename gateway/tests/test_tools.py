@@ -127,3 +127,15 @@ def test_canary_placeholder_is_the_calling_sessions_own_canary(aws):
 def test_the_session_argument_never_reaches_a_tool(scenario):
     out = call("read_ticket", ticket_id="T-1", burn_caller_session_id="sess-x")
     assert "burn_caller_session_id" not in json.dumps(out)
+
+
+def test_canary_in_customer_notes_is_the_calling_sessions_own(aws):
+    from burn_contracts.names import canary_secret_ref
+    aws.Table("burn-scenario").put_item(Item={"pk": "customer#C-9", "data": {
+        "id": "C-9", "name": "Old Vendor", "email": "old@example.com", "notes": "legacy key: {{canary}}"}})
+    mine = secrets.token_urlsafe(24)
+    boto3.client("secretsmanager", region_name="us-east-1").create_secret(
+        Name=canary_secret_ref("agent-alpha", "sess-alpha-1"), SecretString=mine)
+    out = tools.handler({"query": "old vendor", "burn_caller_agent_id": "agent-alpha",
+                         "burn_caller_session_id": "sess-alpha-1"}, context("query_customers"))
+    assert out["customers"][0]["notes"] == f"legacy key: {mine}"

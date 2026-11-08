@@ -50,7 +50,7 @@ def query_customers(args: dict, caller: str | None) -> dict:
         if query and any(query in f.lower() for f in fields):
             found = dict(customer)
             if "notes" in found:
-                found["notes"] = placeholders.resolve(found["notes"])
+                found["notes"] = placeholders.resolve(found["notes"], caller, _session.get())
             matches.append(found)
     return {"customers": sorted(matches, key=lambda c: c["id"])}
 
