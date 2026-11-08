@@ -68,6 +68,28 @@ def test_burns_readers_including_an_exited_one_and_whoever_they_messaged(env, le
     assert f"/agents/{bystander['agent_id']}/rotate" not in rotated
 
 
+def read_row(table, agent_id, *, source_ref, first_seen, source="tool_response", via="read_ticket"):
+    """A read row the way the Gateway writes it: no credential, only what was read."""
+    table.put_item(Item={"agent_id": agent_id, "secret_ref_or_fp": "read#" + source_ref, "source_ref": source_ref,
+                         "source": source, "via": via, "first_seen": first_seen})
+
+
+def test_readers_of_a_source_without_credentials_are_found_and_kept_out_of_the_ledger(env, ledger):
+    reader, messaged = instances(env, 2)
+    read_row(ledger, reader["agent_id"], source_ref=SOURCE, first_seen="2026-11-07T20:00:00.000Z")
+    read_row(ledger, messaged["agent_id"], source_ref=SOURCE, first_seen="2026-11-07T20:02:00.000Z",
+             source="handoff", via=reader["agent_id"])
+    row(ledger, reader["agent_id"], "burn/shared/x", source_ref="read_ticket:T-7", first_seen="2026-11-07T19:00:00.000Z")
+    listed = {i["agent_id"]: i for i in call(env, "GET", "/instances")[1]["instances"]}
+    assert listed[reader["agent_id"]]["exposures"] == 1 and listed[messaged["agent_id"]]["exposures"] == 0
+    entries = call(env, "GET", f"/agents/{reader['agent_id']}/ledger")[1]["entries"]
+    assert [e["secret_ref"] for e in entries] == ["burn/shared/x"]
+    out = call(env, "POST", "/burn/by-source", {"source_ref": SOURCE})[1]
+    assert {(r["agent_id"], r["via"]) for r in out["readers"]} == {(reader["agent_id"], "read"),
+                                                                   (messaged["agent_id"], "handoff")}
+    assert {b["agent_id"] for b in out["burned"]} == {reader["agent_id"], messaged["agent_id"]}
+
+
 def test_since_limits_the_window(env, ledger):
     early, late = instances(env, 2)
     row(ledger, early["agent_id"], "burn/shared/x", source_ref=SOURCE, first_seen="2026-11-07T19:00:00.000Z")

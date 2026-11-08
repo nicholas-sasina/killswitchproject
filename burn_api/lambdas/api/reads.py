@@ -1,5 +1,5 @@
 """Read-only routes: events feed, ledger, badge status, blast radius."""
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from burn_contracts import names
 
 import db
@@ -11,8 +11,9 @@ MAX_LIMIT = 500
 
 
 def _exposure_count(agent_id: str) -> int:
-    resp = db.table(names.EXPOSURES_TABLE).query(
-        KeyConditionExpression=Key("agent_id").eq(agent_id), Select="COUNT"
+    resp = db.table(names.EXPOSURES_TABLE).query(  # credential rows only: read rows have no fingerprint
+        KeyConditionExpression=Key("agent_id").eq(agent_id), FilterExpression=Attr("fingerprint").exists(),
+        Select="COUNT"
     )
     return resp["Count"]
 
@@ -58,6 +59,8 @@ def ledger(agent_id: str) -> dict:
     creds = db.table(names.CREDENTIALS_TABLE)
     entries = []
     for row in rows:
+        if row["secret_ref_or_fp"].startswith(names.READ_ROW_PREFIX):
+            continue  # a record of what the agent read, not a credential
         ref = row.get("secret_ref")
         status, flag_level = "active", None
         if ref:

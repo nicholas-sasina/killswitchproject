@@ -24,6 +24,8 @@ ENROLL_TOKENS_TABLE = "burn-enroll-tokens"
 FINGERPRINTS_VERSION_KEY = "_version"
 # burn-exposures index for "who read this source": PK source_ref, SK first_seen.
 EXPOSURES_BY_SOURCE_INDEX = "by_source"
+# burn-exposures sort-key prefix of a read row: that an agent read a source, credential or not.
+READ_ROW_PREFIX = "read#"
 
 # Partition key value for the single global event stream in burn-events.
 EVENTS_STREAM = "all"

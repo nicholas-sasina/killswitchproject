@@ -54,8 +54,8 @@ def inherit(session: dict, receiver: str, call: str) -> int:
     sender = session["agent_id"]
     copied = 0
     for entry in ledger.entries(sender):
-        if not ledger.copy_entry(entry, receiver, via=sender, call=call):
-            continue
+        if not ledger.copy_entry(entry, receiver, via=sender, call=call) or ledger.is_read_row(entry):
+            continue  # nothing new, or only a record of what the sender read: no event
         copied += 1
         sessions.put_event(make_event(
             agent_id=receiver, source="handoff", action="inherited", session_id=session["session_id"],

@@ -101,6 +101,9 @@ replays the pre-rotation key without anyone having stored a copy.
   never for `send_message` or `notify`.
 - Ledger rows record `source_ref` = `<tool>:<resource>` from the tool's `resource_arg`
   (`burn_contracts.tools.source_ref`), so `POST /burn/by-source` can find everyone who read a source.
+  Every delivered call that names a resource also writes a read row, sort key `read#<source_ref>`
+  (`names.READ_ROW_PREFIX`), credential or not, and `send_message` copies it to the receiver. Read rows
+  have no `secret_ref`, `fingerprint` or `status`; burns, ledger reads and exposure counts skip them.
 - `burn-fingerprints` holds one extra item, `fingerprint = "_version"` (`names.FINGERPRINTS_VERSION_KEY`),
   which the minter bumps on every register, rotate and delete. The Gateway keeps all fingerprints in
   memory and reloads them only when that number changes.

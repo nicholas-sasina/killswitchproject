@@ -124,6 +124,13 @@ A forwarded `tools/call` is edited in two ways:
   message receivers, and indexed by `by_source` for `POST /burn/by-source`. Absent when unknown.
 - `report`: only in `report` mode, what `replace` would have done on the latest call.
 
+Read rows: every `tools/call` that names a resource and is delivered also writes
+`{"agent_id", "secret_ref_or_fp": "read#<source_ref>", "source_ref", "source", "via", "first_seen", "last_seen", "seen_in"}`,
+credential or not, so `POST /burn/by-source` finds everyone who read a poisoned source. A
+`send_message` copies them to the receiver (source `handoff`) without an event. They have no
+`secret_ref`, `fingerprint` or `status`, so a burn never flags them and the API's ledger views and
+exposure counts leave them out.
+
 - Credentials that match only a known format (not minted by Burn) have no `secret_ref`; their sort
   key is `fp#<fingerprint>` and `owner` is `unknown`.
 - `source`, `via` and `first_seen` keep the first sighting; later sightings only update `last_seen`
