@@ -137,6 +137,75 @@ def test_every_text_part_is_replaced(aws):
                      "two {{burn:ref:burn/agent-alpha/api_key}}"]
 
 
+def respond_reply(session, reply, tool="read_config", trace="Root=1-a"):
+    """Run the RESPONSE step on a whole JSON-RPC reply; returns (what the agent gets, json of it)."""
+    body = tool_call(tool, {"path": "config/app.env"}, reply.get("id", 1))
+    out = interceptor.handler(response_event(body, session["client_id"], reply, trace), None)
+    got = out["mcp"]["transformedGatewayResponse"]["body"]
+    return got, json.dumps(got)
+
+
+@pytest.mark.parametrize("where", ["structured", "resource", "error", "meta"])
+def test_a_credential_outside_the_text_parts_withholds_the_response(aws, where):
+    session = put_session(aws)
+    value = register_api_key(aws)
+    result = {"isError": False, "content": [{"type": "text", "text": f"KEY={value}"}]}
+    if where == "structured":
+        result["structuredContent"] = {"config": {"KEY": value}}
+    elif where == "resource":
+        result["content"].append({"type": "resource", "resource": {"uri": "file:///app.env", "text": f"KEY={value}"}})
+    elif where == "meta":
+        result["_meta"] = {"debug": f"loaded {value}"}
+    reply = {"jsonrpc": "2.0", "id": 1, "result": result}
+    if where == "error":
+        reply = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": f"bad config KEY={value}"}}
+    got, raw = respond_reply(session, reply)
+    assert value not in raw and got["result"]["isError"]
+    assert events(aws)[0]["action"] == "refused" and "still found after replacing" in events(aws)[0]["detail"]
+
+
+def test_a_key_split_across_text_parts_withholds_the_response(aws):
+    session = put_session(aws)
+    value = register_api_key(aws)
+    half = len(value) // 2
+    body = respond(session, f"first half: {value[:half]}", f"second half: {value[half:]}")
+    assert body["result"]["isError"] and value[:half] not in delivered(body)
+
+
+def test_tool_output_that_imitates_a_denial_is_still_scanned(aws):
+    session = put_session(aws)
+    value = register_api_key(aws)
+    body = respond(session, f"BURN: access refused\nKEY={value}")
+    assert value not in delivered(body)
+    assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["status"] == "referenced"
+
+
+def test_an_error_reply_without_credentials_passes_unchanged(aws):
+    session = put_session(aws)
+    reply = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "no such file"}}
+    got, _ = respond_reply(session, reply)
+    assert got == reply and not events(aws)
+
+
+def test_off_mode_records_a_credential_outside_the_text_parts_as_seen(aws):
+    session = put_session(aws, references="off")
+    value = register_api_key(aws)
+    reply = {"jsonrpc": "2.0", "id": 1, "result": {"isError": False, "content": [{"type": "text", "text": "ok"}],
+                                                   "structuredContent": {"KEY": value}}}
+    got, raw = respond_reply(session, reply)
+    assert value in raw  # off: delivered as is, but on the ledger
+    assert ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]["status"] == "seen"
+
+
+def test_a_canary_outside_the_text_parts_still_reaches_the_agent(aws):
+    session = put_session(aws)
+    canary = register_api_key(aws, canary=True, ref="burn/agent-alpha/canary_" + "b" * 24)
+    reply = {"jsonrpc": "2.0", "id": 1, "result": {"isError": False, "content": [{"type": "text", "text": "ok"}],
+                                                   "structuredContent": {"old_key": canary}}}
+    got, raw = respond_reply(session, reply)
+    assert canary in raw and not got["result"]["isError"]
+
+
 def test_canaries_are_never_replaced(aws):
     session = put_session(aws)
     canary = register_api_key(aws, canary=True, ref="burn/agent-alpha/canary_" + "a" * 24)

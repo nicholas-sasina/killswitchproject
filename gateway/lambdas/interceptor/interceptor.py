@@ -92,11 +92,14 @@ def on_response(event: dict) -> dict:
     reply = shapes.gateway_response(event)
     status, reply_body = reply.get("statusCode", 200), reply.get("body")
 
-    if shapes.is_burn_denial(reply_body) or not isinstance(reply_body, dict) or "result" not in reply_body:
-        return shapes.pass_response(status, reply_body)
-
     method = body.get("method")
-    if method not in ("tools/list", "tools/call"):
+    if not isinstance(reply_body, dict):
+        return shapes.pass_response(status, reply_body)
+    # Every tools/call reply is scanned, errors and Burn's own denials included: a tool's output could
+    # imitate a denial, and scanning one costs little.
+    scanned = method == "tools/call" and ("result" in reply_body or "error" in reply_body)
+    listed = method == "tools/list" and "result" in reply_body and not shapes.is_burn_denial(reply_body)
+    if not (scanned or listed):
         return shapes.pass_response(status, reply_body)
     session = sessions.session_for_client((shapes.jwt_claims(event) or {}).get("client_id"))
     if session is None:  # REQUEST already refused it; nothing to attribute
