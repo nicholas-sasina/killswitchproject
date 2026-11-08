@@ -3,9 +3,16 @@ import { webcrypto } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { createPeopleAuth } from "../auth";
 import { App } from "../App";
+import { LocalSignIn } from "./SignIn";
 
 const config = {
   peopleDomain: "people.example.test",
@@ -71,9 +78,9 @@ describe("people sign-in screen", () => {
     await act(async () => {
       render(<App config={dashboardConfig} />);
     });
-    expect(screen.getByRole("button", { name: "Sign in" }).disabled).toBe(
-      false,
-    );
+    expect(
+      screen.getByRole("button", { name: "Continue with email" }).disabled,
+    ).toBe(false);
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.queryByText("Instances by role")).toBeNull();
     expect(fetcher).not.toHaveBeenCalled();
@@ -137,7 +144,9 @@ describe("people sign-in screen", () => {
     await act(async () => {
       render(<App config={dashboardConfig} />);
     });
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Continue with email" }),
+    ).toBeTruthy();
     expect(screen.queryByText("Instances by role")).toBeNull();
     expect(sessionStorage.getItem("burn.people.session")).toBeNull();
   });
@@ -199,6 +208,103 @@ describe("people sign-in screen", () => {
     expect(screen.getByText("VITE_BURN_API_URL")).toBeTruthy();
     expect(screen.getByText("VITE_BURN_PEOPLE_DOMAIN")).toBeTruthy();
     expect(screen.getByText("VITE_BURN_PEOPLE_CLIENT_ID")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Continue with email" }),
+    ).toBeNull();
+  });
+});
+
+describe("sign-in screen states", () => {
+  const dashboardConfig = { burnUrl: "https://burn.example.test", ...config };
+
+  it("links back to the website", async () => {
+    await act(async () => {
+      render(<App config={dashboardConfig} />);
+    });
+    expect(screen.getByRole("link", { name: "Back to the website" }).href).toBe(
+      "http://localhost:5174/",
+    );
+  });
+
+  it("reads Opening sign-in and disables the button while the redirect starts", async () => {
+    // PKCE never finishes hashing, so sign-in stays on its way out.
+    vi.stubGlobal("crypto", {
+      getRandomValues: (bytes) => webcrypto.getRandomValues(bytes),
+      subtle: { digest: () => new Promise(() => {}) },
+    });
+    await act(async () => {
+      render(<App config={dashboardConfig} />);
+    });
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue with email" }),
+      );
+    });
+    const button = screen.getByRole("button", { name: "Opening sign-in" });
+    expect(button.disabled).toBe(true);
+  });
+
+  it("says Signing you in while the callback is exchanged", async () => {
+    const fixture = setup();
+    await fixture.auth.signIn();
+    const state = new URL(fixture.navigate.mock.calls[0][0]).searchParams.get(
+      "state",
+    );
+    window.history.replaceState(null, "", `/?code=test-code&state=${state}`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => {})),
+    );
+    await act(async () => {
+      render(<App config={dashboardConfig} />);
+    });
+    expect(
+      screen.getByRole("heading", { name: "Signing you in" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain(
+      "Finishing your sign-in with Amazon Cognito.",
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("says what failed and offers Try again", async () => {
+    window.history.replaceState(null, "", "/?code=test-code&state=unknown");
+    await act(async () => {
+      render(<App config={dashboardConfig} />);
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Sign-in failed. The callback was invalid or expired. Please sign in again.",
+    );
+    expect(screen.getByRole("button", { name: "Try again" }).disabled).toBe(
+      false,
+    );
+  });
+
+  it("shows the local development screen once per tab", async () => {
+    const view = render(
+      <LocalSignIn>
+        <p>Dashboard</p>
+      </LocalSignIn>,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Local development" }),
+    ).toBeTruthy();
+    expect(screen.queryByText("Dashboard")).toBeNull();
+    act(() => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue as admin" }),
+      );
+    });
+    expect(screen.getByText("Dashboard")).toBeTruthy();
+    view.unmount();
+    render(
+      <LocalSignIn>
+        <p>Dashboard</p>
+      </LocalSignIn>,
+    );
+    expect(screen.getByText("Dashboard")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Continue as admin" }),
+    ).toBeNull();
   });
 });

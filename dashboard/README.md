@@ -63,7 +63,14 @@ signed-in email and Sign out. API calls use the ID bearer; a 401 refreshes and r
 returns to Sign in on failure. Sign out clears Burn's sign-in state and uses managed logout.
 
 For local mocks only, set `VITE_BURN_LOCAL_DEV=1` and `VITE_BURN_DEMO_TOKEN`. This bypasses
-people sign-in and uses the demo header; otherwise that header is never sent.
+people sign-in and uses the demo header; otherwise that header is never sent. A Local development
+screen asks once per tab before the dashboard opens, so local runs show the same hand-off as a
+real sign-in.
+
+The sign-in screen continues from the website: the same night stage and dot grid, one white card,
+and "Back to the website" to `VITE_SITE_URL`. When someone signs in, the card shrinks into the
+dashboard's brand as the dashboard fades in (a view transition; instant where the browser has none
+or reduced motion is on).
 
 ## How it works
 
@@ -130,13 +137,14 @@ cp .env.example .env.local
 
 Set these local fields, then run `npm run dev` and open http://localhost:5173 (the only origin the Burn API accepts; the dev server listens on localhost only and will not move to another port):
 
-| Variable                     | Meaning                                         |
-| ---------------------------- | ----------------------------------------------- |
-| `VITE_BURN_API_URL`          | Burn API base URL, without an endpoint path     |
-| `VITE_BURN_PEOPLE_DOMAIN`    | Cognito managed-login hostname or HTTPS origin  |
-| `VITE_BURN_PEOPLE_CLIENT_ID` | Public people app client ID                     |
-| `VITE_BURN_LOCAL_DEV`        | `1` for local mocks only; defaults to `0`       |
-| `VITE_BURN_DEMO_TOKEN`       | Local mock token, used only with local-dev mode |
+| Variable                     | Meaning                                                                      |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| `VITE_BURN_API_URL`          | Burn API base URL, without an endpoint path                                  |
+| `VITE_BURN_PEOPLE_DOMAIN`    | Cognito managed-login hostname or HTTPS origin                               |
+| `VITE_BURN_PEOPLE_CLIENT_ID` | Public people app client ID                                                  |
+| `VITE_BURN_LOCAL_DEV`        | `1` for local mocks only; defaults to `0`                                    |
+| `VITE_BURN_DEMO_TOKEN`       | Local mock token, used only with local-dev mode                              |
+| `VITE_SITE_URL`              | The website, for "Back to the website"; defaults to `http://localhost:5174/` |
 
 For local development, start `mocks/burn_api_mock.py` from the repository root according to its README.
 Use its local URL (port 8700) for the Burn API URL and set `VITE_BURN_LOCAL_DEV=1`. Generate a local test token if needed; the mock accepts any token.

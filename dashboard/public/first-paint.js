@@ -19,4 +19,16 @@
   } catch (error) {
     // No matchMedia: the light default already on <html> stands.
   }
+  // Without a session in this tab, the sign-in screen comes first. Paint
+  // its night stage from the start (see src/components/signin.css), so the
+  // website's fade to night is not followed by a flash of paper.
+  try {
+    if (
+      !sessionStorage.getItem("burn.people.session") &&
+      !sessionStorage.getItem("burn.local.continued")
+    )
+      document.documentElement.dataset.stage = "signin";
+  } catch (error) {
+    // No session storage: the page paints as usual.
+  }
 })();
