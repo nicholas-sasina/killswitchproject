@@ -31,7 +31,8 @@ the event stream. It is the terminal twin of the dashboard. `import burn` is a s
 | `burn_cli/runner/credentials.py` | The instance's own values, taken from the join reply's `secrets` |
 | `burn_cli/runner/badge.py` | Badge token minting and refresh |
 | `burn_cli/runner/mcp_proxy.py` | The local MCP endpoint |
-| `burn_cli/runner/spawn_endpoint.py` | The local spawn endpoint |
+| `burn_cli/runner/spawn_endpoint.py` | The local spawn and progress endpoint |
+| `burn_cli/runner/progress.py` | Task progress the agent reports, queued for the next heartbeat |
 | `burn/__init__.py` | The SDK: `burn.session`, `burn.spawn` |
 | `burn_cli/api.py` | The HTTP client |
 | `burn_cli/signin.py` | `burn login`/`logout`/`whoami`: browser sign-in, the cached session, refresh |
@@ -76,9 +77,12 @@ burn env            # what an instance's environment would hold (values hidden; 
    including `AWS_*` credentials, `BURN_JOIN_TOKEN`, the API token, database passwords, DSNs and proxy URLs with
    credentials in them. It sets the instance's own values: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`,
    `BURN_API_KEY`, `BURN_SESSION_ID`, `BURN_AGENT_ID`, `BURN_ROLE`, `BURN_MCP_URL`, `BURN_SPAWN_URL`,
-   `BURN_LOCAL_TOKEN`, and `HTTPS_PROXY`/`HTTP_PROXY` when `BURN_PROXY_URL` is set (with the agent id and session id
-   as the proxy user and password, which is how the egress proxy attributes traffic). `burn env` lists every host
-   variable that would be removed, by name.
+   `BURN_PROGRESS_URL`, `BURN_LOCAL_TOKEN`, and `HTTPS_PROXY`/`HTTP_PROXY` when `BURN_PROXY_URL` is set (with the
+   agent id and session id as the proxy user and password, which is how the egress proxy attributes traffic).
+   `BURN_TASK` (a JSON list of item ids) and `BURN_RESUME` (`{"done": [...], "quarantined": [...]}`) are passed on
+   from your environment when they are set, but only if they hold item ids and nothing else; otherwise `burn run`
+   refuses to start, before it joins. A child started with `burn.spawn` does not inherit them. `burn env` lists
+   every host variable that would be removed, by name.
 4. `BURN_MCP_URL` is a local endpoint (127.0.0.1, random port) that forwards to `BURN_GATEWAY_URL` and adds
    `Authorization: Bearer <badge token>`. The token comes from the badge's client-credentials token URL and is
    refreshed before it expires. The agent never sees the badge secret or token, and MCP activity triggers heartbeats.
@@ -89,9 +93,23 @@ burn env            # what an instance's environment would hold (values hidden; 
    `BURN_SPAWN_URL` is a local endpoint: `POST {role, command}` starts a child with `POST /instances
    {role, parent_session}` with the parent's session token and runs it under its own `burn run` (own credentials, own endpoints). It returns
    `{session_id, agent_id}`. Children stop when their parent's `burn run` ends.
+   `BURN_PROGRESS_URL` is on the same port: `POST {"item": "<id>", "state": "started" | "done"}` reports task
+   progress. It is checked with the same rules as the API (item ids match `^[A-Za-z0-9_.:-]{1,64}$`, at most 500
+   items per instance); a broken rule is a 400 that names it. A `done` is answered at once, 200 `{"queued": true}`
+   (`false` for a repeat that changes nothing), and sent with the next heartbeat. A `started` is answered only
+   once Burn has recorded it, because the agent must not act on an item Burn does not know it touched: 200
+   `{"queued": ..., "recorded": true}` means go ahead; 409 means the instance was burned, 400 that Burn refused
+   the start, and 503 that Burn has not confirmed it within 15 s (it stays queued). Only a 200 means go ahead.
 6. Heartbeats go to `/instances/{id}/heartbeat`; a 409 (burned or exited) stops the agent (SIGTERM, then SIGKILL
    after 5 s) and `burn run` exits with 3. A normal exit posts `/instances/{id}/exit`. SIGINT and SIGTERM are
-   forwarded to the agent.
+   forwarded to the agent. Queued progress goes in the heartbeat body, `{"progress": [...]}`, oldest first and at
+   most 50 events per heartbeat. New progress sends a heartbeat at once, but never sooner than the minimum gap
+   after the last one. A 400 means a progress rule was broken: that batch is logged and dropped, the agent keeps
+   running, and a heartbeat without progress follows at once, because the refused one did not count. A 429 or any
+   other transient failure keeps the batch for the next heartbeat. If a batch fails twice in a row, one heartbeat
+   goes without it, so the instance is never swept as idle while only its progress fails. Progress still queued
+   when the agent exits is sent before the exit is reported, keeping the minimum gap, for at most 10 s. A 409 then
+   means burned, and `burn run` exits with 3.
 
 `HTTPS_PROXY` is a convenience so well-behaved clients use the egress proxy. It is **not containment**: a process
 can ignore it. Containment is the network rule in the demo stack, which gives agents no route except the proxy.
@@ -153,6 +171,18 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
 - **Can I sign in on a machine without a browser?** `burn login` prints the sign-in address when it cannot open
   a browser. The reply comes back to `localhost:8976`, so open it on the same machine (or forward that port).
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
+- **What is task progress for?** When an instance of a role with "replace on burn" is burned, its launcher starts
+  a clean replacement, which skips the items finished before the breach. Progress is how Burn knows which those
+  are: the agent posts item ids to `BURN_PROGRESS_URL` and they reach Burn with the next heartbeat, stamped with
+  Burn's own clock. Only item ids are sent, never free text.
+- **Why does reporting "started" take a moment?** It returns only once Burn has recorded it, usually within one
+  heartbeat. If the instance were burned between the agent starting an item and Burn hearing of it, a replacement
+  would do that item again. Waiting closes that gap. Treat anything but a 200 as "stop, do not start this item".
+- **Why does `burn run` refuse to start with my `BURN_TASK` or `BURN_RESUME`?** They must hold item ids only:
+  `BURN_TASK` a JSON list such as `["item-01", "item-02"]` (at most 500), `BURN_RESUME` exactly
+  `{"done": [...], "quarantined": [...]}`. The error names the variable and the rule. An empty value counts as unset.
+- **My agent finished its task. Will it be replaced?** No. It exits 0, `burn run` reports the exit, and the instance
+  ends as exited. Only a burned instance is ever replaced.
 - **Where can I see a join token again?** Nowhere: only its hash is stored. Create another one.
 - **Why is the blast radius empty right after a burn?** CloudTrail can lag 5-15 minutes; the CLI says so when there is nothing yet.
 - **Can it print credentials?** No. The API never returns credential values; the CLI shows secret refs and 8-character fingerprint prefixes only.

@@ -19,7 +19,9 @@ RUN_HELP = """Run COMMAND as one Burn instance: burn run --role worker -- python
 burn run joins with a join token (--token or BURN_JOIN_TOKEN), fetches the instance's own credentials, and
 starts COMMAND with only those, and with only an allow-list of your environment (PATH, LANG, LC_*, TZ, TERM,
 the AWS region and CA-bundle variables): every other variable, credentials included, is removed. The agent gets BURN_MCP_URL (a local endpoint that adds the badge token), BURN_SPAWN_URL
-(POST {role, command} to start a child instance), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE.
+(POST {role, command} to start a child instance), BURN_PROGRESS_URL (POST {item, state} to report task
+progress; a start is answered once Burn has recorded it), BURN_SESSION_ID, BURN_AGENT_ID and BURN_ROLE. BURN_TASK and BURN_RESUME
+are passed on from your environment only if they hold item ids; otherwise burn run refuses to start.
 It sends heartbeats, stops the agent if the instance is burned, and reports a clean exit.
 
 HTTPS_PROXY / HTTP_PROXY (from BURN_PROXY_URL) are a convenience so well-behaved clients route through the
@@ -248,6 +250,7 @@ def cmd_token_create(api, args):
 
 def cmd_run(args):
     from .runner import privs
+    from .runner.env import BadTask
     from .runner.run import ADOPT_SECRETS, Instance
     command = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
     if not command:
@@ -277,9 +280,19 @@ def cmd_run(args):
     api_url = config.get("BURN_API_URL", args.dotenv)
     if not api_url:
         raise UsageError("BURN_API_URL not set (run `make env`, or export it)")
-    return Instance(InstanceApi(api_url), args.role, command, secrets=secrets, gateway_url=gateway.rstrip("/"), enroll_token=token,
-                    session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv), drop=drop, user_arg=args.user,
-                    stdin_devnull=args.token_stdin).run()
+    try:
+        instance = Instance(InstanceApi(api_url), args.role, command, secrets=secrets, gateway_url=gateway.rstrip("/"),
+                            enroll_token=token, session=session, proxy_url=config.get("BURN_PROXY_URL", args.dotenv),
+                            drop=drop, user_arg=args.user, stdin_devnull=args.token_stdin)
+    except BadTask as exc:
+        if session and isinstance(secrets, dict) and secrets.get("session_token"):
+            # A launcher already started this session: end it now rather than leave it to time out.
+            try:
+                InstanceApi(api_url).exit(session["session_id"], secrets["session_token"])
+            except ApiError:
+                pass
+        raise UsageError(f"{exc}; refusing to start") from None
+    return instance.run()
 
 
 def cmd_env(args):
