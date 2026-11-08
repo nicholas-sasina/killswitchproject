@@ -42,6 +42,14 @@ def _agent_id(value) -> str | None:
 
 def route(method: str, path: str, query: dict, body: dict):
     """Return (status, body). Raises NotFound / MinterError for the caller to map."""
+    if method == "POST" and path == "/instances":
+        # The two role forms of POST /sessions on a path of their own; auth has already limited
+        # non-admin callers to exactly those two body shapes.
+        fields = [body.get(key) for key in ("role", "enroll_token", "parent_session")]
+        if "agent_id" in body or not isinstance(fields[0], str) or any(
+                f is not None and not isinstance(f, str) for f in fields[1:]):
+            return 400, {"error": "send role with exactly one of enroll_token and parent_session"}
+        return 201, sessions.start_instance(*fields)
     if method == "POST" and path == "/sessions" and "role" in body and "agent_id" not in body:
         return 201, sessions.start_instance(body.get("role"), body.get("enroll_token"), body.get("parent_session"))
     if method == "POST" and path == "/sessions":

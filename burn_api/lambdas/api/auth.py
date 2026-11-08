@@ -1,12 +1,12 @@
 """Who may call which route.
 
 - The admin (demo) token in the x-burn-demo-token header may call every route.
-- A join needs no admin token: POST /sessions with exactly {role, enroll_token} carries its own authority, the
+- A join needs no admin token: POST /sessions or POST /instances with exactly {role, enroll_token} carries its own authority, the
   join token, which the route checks (hash, expiry, uses left, revocation). Any other body shape on that route,
   for example one that also names a parent_session or an agent_id, needs the admin token.
 - An instance's own calls accept its session token (issued once in its join reply) as
   `Authorization: Bearer bst_...`: POST /instances/{id}/heartbeat and /exit for that instance, and
-  POST /sessions with exactly {role, parent_session} to spawn a child of it. Auth only proves whose token it
+  POST /sessions or POST /instances with exactly {role, parent_session} to spawn a child of it. Auth only proves whose token it
   is; the routes still decide on the session's status (a burned instance's heartbeat gets 409, its spawn 403).
 
 Everything else needs the admin token.
@@ -18,6 +18,9 @@ import boto3
 from burn_contracts import names
 
 import db
+
+# The two paths that start a role instance. A gateway can then authorize them by path alone.
+START_PATHS = ("/sessions", "/instances")
 
 _token: bytes | None = None
 
@@ -41,7 +44,7 @@ def is_admin(headers: dict) -> bool:
 
 def is_join(method: str, path: str, body: dict) -> bool:
     """A join with a well-formed join token and nothing else. The shape check costs no lookup."""
-    return (method == "POST" and path == "/sessions" and set(body) == {"role", "enroll_token"}
+    return (method == "POST" and path in START_PATHS and set(body) == {"role", "enroll_token"}
             and isinstance(body["role"], str) and isinstance(body["enroll_token"], str)
             and names.JOIN_TOKEN_RE.fullmatch(body["enroll_token"]) is not None)  # "$" would allow a "\n"
 
@@ -56,7 +59,7 @@ def instance_session(method: str, path: str, body: dict) -> str | None:
     parts = path.strip("/").split("/")
     if len(parts) == 3 and parts[0] == "instances" and parts[2] in ("heartbeat", "exit"):
         return parts[1]
-    if path == "/sessions" and set(body) == {"role", "parent_session"} and isinstance(body["role"], str) \
+    if path in START_PATHS and set(body) == {"role", "parent_session"} and isinstance(body["role"], str) \
             and isinstance(body["parent_session"], str):
         return body["parent_session"]
     return None
