@@ -9,20 +9,28 @@ from burn_contracts import names
 from burn_contracts.events import make_event
 
 _local = threading.local()
+_session: boto3.session.Session | None = None
+_session_lock = threading.Lock()
 
 
 def resource():
-    # One resource per thread (boto3 resources are not thread-safe; scoped burns use a pool).
-    # Created lazily so tests can start moto before the first call.
+    # One resource per thread (boto3 resources are not thread-safe; scoped burns and the exposure counts use
+    # pools), all made from ONE session. A session holds the parsed service models, about 10 MB, so a session
+    # per thread filled the 256 MB Lambda once the 16 count threads were up. Sessions are not thread-safe
+    # either, so resources are made from it one at a time. Created lazily so tests can start moto first.
     if getattr(_local, "resource", None) is None:
-        _local.resource = boto3.session.Session().resource("dynamodb", region_name=names.REGION)
+        global _session
+        with _session_lock:
+            if _session is None:
+                _session = boto3.session.Session()
+            _local.resource = _session.resource("dynamodb", region_name=names.REGION)
     return _local.resource
 
 
 def reset():
     """Forget cached clients (tests only)."""
-    global _local
-    _local = threading.local()
+    global _local, _session
+    _local, _session = threading.local(), None
 
 
 def table(name: str):
