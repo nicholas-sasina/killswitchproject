@@ -18,8 +18,9 @@ export function Why() {
           </p>
           <p className="body-lg">
             Burn keeps a ledger of which instance saw which key. So it rotates
-            only the keys that instance owned, flags the shared ones it saw for
-            their owners, and only the instance with evidence against it stops.
+            only the keys that instance owned, flags for review any shared key
+            whose value it saw, and stops only the instance with evidence
+            against it.
           </p>
           <p className="measured">
             Measured on AWS: a single instance was revoked 2.01 s after the

@@ -85,11 +85,11 @@ export const PIPELINE_STEPS: readonly { title: string; body: string }[] = [
   },
   {
     title: "Burn contains that worker only.",
-    body: "Its identity is revoked and the keys it owned are rotated. Shared keys it saw are flagged for their owners, not rotated blindly.",
+    body: "Its identity is revoked and the keys it owned are rotated. Shared keys whose value it saw are flagged for review, never rotated blindly.",
   },
   {
     title: "People review only what needs them.",
-    body: "Shared credentials, and anything Burn couldn’t fully contain, are flagged for a person to review, with the evidence attached.",
+    body: "Shared keys whose value an instance saw, and anything Burn couldn’t fully contain, go on one review list with the evidence attached.",
   },
   {
     title: "One worker contained. Nineteen keep running.",
