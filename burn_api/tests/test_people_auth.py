@@ -236,3 +236,24 @@ def test_older_rows_without_created_by_read_as_null(env):
         "token_id": OLD_TOKEN_ID, "role": "worker", "secret_sha256": "0" * 64, "uses": 1, "uses_left": 1,
         "revoked": False, "expires_at": "2099-01-01T00:00:00.000Z", "created_at": "2026-01-01T00:00:00.000Z"})
     assert request(env, "DELETE", f"/tokens/{OLD_TOKEN_ID}", admin=True)[1]["created_by"] is None
+
+
+def test_a_failed_creator_lookup_after_redeeming_gives_the_use_back(env, monkeypatch):
+    """The join token's use is spent before the creator is looked up, so that lookup failing refunds it."""
+    from botocore.exceptions import ClientError
+    import tokens
+    make_role(env, WORKER)
+    token = token_for(env)
+    real_get = tokens.get
+
+    def throttled(token_id, consistent=False):
+        raise ClientError({"Error": {"Code": "ThrottlingException", "Message": "slow down"}}, "GetItem")
+
+    monkeypatch.setattr(tokens, "get", throttled)
+    status, _ = request(env, "POST", "/instances", {"role": "worker", "enroll_token": token["token"]})
+    assert status == 429  # a retryable throttle, not a lost join
+    row = env.ddb.Table("burn-enroll-tokens").get_item(Key={"token_id": token["token_id"]})["Item"]
+    assert row["uses_left"] == 1  # the use was given back
+    assert env.ddb.Table("burn-sessions").scan()["Items"] == []
+    monkeypatch.setattr(tokens, "get", real_get)
+    assert request(env, "POST", "/instances", {"role": "worker", "enroll_token": token["token"]})[0] == 201

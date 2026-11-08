@@ -186,9 +186,10 @@ def start_instance(role_name: str, enroll_token: str | None = None, parent_sessi
         token_id = tokens.redeem(role_name, enroll_token)
         limits = {"tools": list(role["tools"]), "credentials": list(role.get("credentials") or []),
                   "egress": role.get("egress")}
-    # The person behind the instance: whoever is signed in, else whoever made its token or its parent.
-    limits["created_by"] = caller.get().person or _inherited_creator(token_id, parent_session)
     try:
+        # The person behind the instance: whoever is signed in, else whoever made its token or its parent.
+        # Inside the try: the token use is already spent, so a failed lookup must give it back too.
+        limits["created_by"] = caller.get().person or _inherited_creator(token_id, parent_session)
         return _create_instance(role_name, role, limits, token_id, parent_session)
     except BaseException:
         if token_id:  # the join failed; the token keeps its use
