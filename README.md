@@ -28,10 +28,16 @@ credential the agent held or saw, without touching any other agent or service.
 ## Quick start
 
 ```bash
-make hooks && make deploy && make env   # once per AWS account (us-east-1)
-make demo                               # egress proxy + three agents in Docker
-make dashboard                          # http://localhost:5173
+make hooks && make deploy                        # once per AWS account (us-east-1)
+make deploy-BurnApi PEOPLE_AUTH=on               # switch on sign-in
+make dashboard-deploy && make dashboard-hosted   # host the console on CloudFront, behind sign-in
+make env                                         # write .env from the deployed stacks
+make person EMAIL=you@example.com                # invite yourself; Cognito emails a temporary password
+make demo                                        # egress proxy + three agents in Docker
 ```
+
+`make dashboard-deploy` prints the console's address. [infra/README.md](infra/README.md) explains the
+hosting. For development, `make dashboard` serves the same console on http://localhost:5173.
 
 ### Run your own agent under Burn
 

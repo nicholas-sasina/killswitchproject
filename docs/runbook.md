@@ -30,12 +30,13 @@ only.
 
 ## Run the demo
 
-Two terminals:
-
 ```bash
 make demo            # resets demo state, mints fresh credentials, starts proxy + agents in Docker
-make dashboard       # http://localhost:5173
 ```
+
+Open the hosted console (its address is printed by `make dashboard-deploy`; see
+[infra/README.md](../infra/README.md)). For development, `make dashboard` serves the same console on
+http://localhost:5173 in a second terminal.
 
 `make demo-step` holds the reader and advances one ticket per Enter.
 `make demo SCENARIO=scenarios/billing-ops.yaml` runs a second scenario through the same code.

@@ -7,10 +7,10 @@ and change the deployed stack's state, so run them only on a stack you operate.
 
 ```bash
 make demo
-make dashboard
 ```
 
-Run these in separate terminals. Open http://localhost:5173. The current scenario starts
+Open the hosted console, or run `make dashboard` in a second terminal and open
+http://localhost:5173. The current scenario starts
 three agents with separate badges and credentials. Agent activity appears in the event feed
 and credential references appear in the exposure ledger. A MOCK DATA banner identifies a
 mock connection. `make demo-step` advances work one ticket at a time.
