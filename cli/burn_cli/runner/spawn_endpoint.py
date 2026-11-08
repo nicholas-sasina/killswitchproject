@@ -52,6 +52,11 @@ class SpawnEndpoint:
                     body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
                 except ValueError:
                     body = None
+                except (BrokenPipeError, ConnectionResetError):
+                    # The agent was stopped, usually by a burn, while it was still sending: nobody to answer.
+                    self.close_connection = True
+                    _log.debug("the agent hung up while sending its request to %s", self.path)
+                    return
                 if self.path == "/progress" and outer._progress is not None:
                     return self._report(body)
                 if self.path != "/spawn":
