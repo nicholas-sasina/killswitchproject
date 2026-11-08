@@ -669,3 +669,8 @@ def test_the_cutoff_compares_times_not_strings():
     for bad in ("2026-11-07T10:00:00", "yesterday", None, 5):  # no time zone, or not a timestamp at all
         with pytest.raises(ValueError):
             progress.parse_time(bad)
+
+
+def test_a_burned_instance_learns_it_before_its_body_is_checked():
+    description = _api()["paths"]["/instances/{session_id}/heartbeat"]["post"]["description"]
+    assert "404, then 409, then 400" in description

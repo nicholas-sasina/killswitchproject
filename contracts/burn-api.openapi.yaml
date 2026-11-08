@@ -386,7 +386,8 @@ paths:
         - A repeated `started` keeps the first `started_at`; a repeated `done` keeps the first `done_at`.
         - Only item ids are stored. Reads return counts (`items_started`, `items_done`), never the map.
         A broken rule is a 400 naming the rule, and nothing from that heartbeat is recorded. It is never a 409,
-        so a supervisor cannot mistake it for its instance being burned.
+        so a supervisor cannot mistake it for its instance being burned. The order is 404, then 409, then 400: an
+        instance that is not active gets 409 whatever its body holds, so a burned instance always learns it.
       security: [{ instanceBearer: [] }, { adminHeader: [] }]   # the session token of this instance
       parameters:
         - { name: session_id, in: path, required: true, schema: { type: string } }
