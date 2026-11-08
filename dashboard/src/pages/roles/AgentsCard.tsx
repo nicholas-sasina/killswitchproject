@@ -165,7 +165,7 @@ export function AgentsCard({
     { value: "finished", label: LABELS.finished, count: counts.finished },
     { value: "all", label: LABELS.all, count: counts.agents },
   ];
-  const add = canAdd ? ` Add ${plural} to start one.` : "";
+  const add = canAdd ? " Connect more agents to start one." : "";
   const empty: Record<Filter, string> = {
     running: `No ${plural} running.${add}`,
     burned: `No ${role} has been burned.`,

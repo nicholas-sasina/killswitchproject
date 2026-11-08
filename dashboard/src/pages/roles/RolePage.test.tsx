@@ -192,6 +192,8 @@ describe("the role page", () => {
     expect(document.body.textContent).toContain(
       "Owned by Support automation, managed in burn.yaml.",
     );
+    // worker narrows its tools, so it is Limited.
+    expect(document.querySelector(".hero .pill")?.textContent).toBe("Limited");
     const stats = document.querySelector(".hero-stats")!;
     expect(
       [...stats.querySelectorAll("div")].map((stat) => [
@@ -202,7 +204,9 @@ describe("the role page", () => {
       ["Running", "2"],
       ["Burned today", "1"],
     ]);
-    expect(screen.getByRole("button", { name: "Add workers" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Connect more agents" }),
+    ).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Burn every worker" }),
     ).toBeTruthy();
@@ -304,10 +308,10 @@ describe("the role page", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
-  it("opens Add agents for this role", async () => {
+  it("connects more agents to this role", async () => {
     setup();
     await show();
-    await pick(/^Add workers$/);
+    await pick(/^Connect more agents$/);
     expect(screen.getByText("Adding to worker")).toBeTruthy();
   });
 });
@@ -331,7 +335,7 @@ describe("the role page's other states", () => {
     setup({ instances: [] });
     await show();
     expect(
-      screen.getByText("No workers running. Add workers to start one."),
+      screen.getByText("No workers running. Connect more agents to start one."),
     ).toBeTruthy();
     expect(
       (
@@ -425,10 +429,9 @@ describe("what the role may do, its protections and its join tokens", () => {
     const tokens = card(/Join tokens/i);
     expect(tokens.textContent).toContain("7ff596f9");
     expect(tokens.textContent).toMatch(/2 workers joined with it, first at/);
-    // A role managed in code takes tokens from Add workers, not New token.
-    expect(
-      within(tokens).queryByRole("button", { name: "New token" }),
-    ).toBeNull();
+    expect(tokens.textContent).toContain(
+      "A role is reusable: connect as many agents as you like. Each join token has its own uses and expiry.",
+    );
     await act(async () => {
       fireEvent.click(
         within(tokens).getByRole("button", { name: "Revoke token 7ff596f9" }),
@@ -458,18 +461,20 @@ describe("what the role may do, its protections and its join tokens", () => {
     ).toBeTruthy();
   });
 
-  it("offers New token for a role made in the dashboard", async () => {
-    setup({ roles: [{ ...worker, managed_by: "ui" }], instances: [] });
+  it("makes a new token for the role from its card", async () => {
+    setup({ instances: [] });
     await show();
     const tokens = card(/Join tokens/i);
     expect(tokens.textContent).toContain(
-      "No join tokens used yet. Add workers to make one.",
+      "No join tokens used yet. New token makes one.",
     );
     await act(async () => {
       fireEvent.click(
         within(tokens).getByRole("button", { name: "New token" }),
       );
     });
-    expect(screen.getByText("Adding to worker")).toBeTruthy();
+    expect(
+      within(screen.getByRole("dialog")).getByText("New join token / worker"),
+    ).toBeTruthy();
   });
 });

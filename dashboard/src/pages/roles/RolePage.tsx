@@ -4,11 +4,12 @@ import { BurnDialog, type BurnTarget } from "../../features/burn/BurnDialog";
 import { joinable } from "../../fleet";
 import { roleCounts, type ConsoleAgent } from "../../model";
 import { useHashParam } from "../../router";
-import { Columns, EmptyState, Hero } from "../../ui";
+import { Columns, EmptyState, Hero, Pill } from "../../ui";
 import { AgentsCard } from "./AgentsCard";
 import { JoinTokensCard } from "./JoinTokensCard";
 import { MayDoCard, ProtectionsCard } from "./RoleCards";
 import {
+  accessLevel,
   filterOf,
   managedIn,
   rolePlural,
@@ -109,6 +110,7 @@ export function RolePage({ name }: { name: string }) {
         crumbs={[{ label: "Roles", href: "#/roles" }, { label: name }]}
         title={name}
         lede={<Lede name={name} owner={role?.owner} where={managedIn(role)} />}
+        status={role && <Pill>{accessLevel(role)}</Pill>}
         statSize="md"
         stats={[
           { label: "Running", value: counts.running },
@@ -122,7 +124,7 @@ export function RolePage({ name }: { name: string }) {
                 type="button"
                 onClick={() => openAddAgents(name)}
               >
-                Add {plural}
+                Connect more agents
               </button>
             )}
             <button
@@ -148,12 +150,7 @@ export function RolePage({ name }: { name: string }) {
               shared={shared}
             />
             <ProtectionsCard role={role} />
-            <JoinTokensCard
-              role={name}
-              agents={agents ?? []}
-              canAdd={canAdd}
-              canMint={role?.managed_by === "ui"}
-            />
+            <JoinTokensCard role={name} agents={agents ?? []} canAdd={canAdd} />
           </>
         }
       >

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import type { ConsoleAgent } from "../../model";
 import { Card, CardNote, EmptyState, Notice } from "../../ui";
+import { TokenDialog } from "./TokenDialog";
 import {
   rolePlural,
   roleTokens,
@@ -13,24 +14,23 @@ import { rememberToken, useKnownTokens } from "./tokens";
 
 /**
  * "Join tokens": the tokens this role's agents joined with, and the ones
- * made or revoked here, with Revoke and, for a role made in the dashboard,
- * New token. The API can't list a role's tokens, so a token's uses and
- * expiry show only once this tab has its record.
+ * made or revoked here, with Revoke and New token. A role is reusable, and
+ * each token has its own uses and expiry. The API can't list a role's
+ * tokens, so a token's uses and expiry show only once this tab has its
+ * record.
  */
 export function JoinTokensCard({
   role,
   agents,
   canAdd,
-  canMint,
 }: {
   role: string;
   agents: ConsoleAgent[];
   /** Whether the role takes join tokens at all. */
   canAdd: boolean;
-  /** Whether to offer New token (roles made in the dashboard). */
-  canMint: boolean;
 }) {
-  const { api, model, openAddAgents } = useConsole();
+  const { api, model } = useConsole();
+  const [minting, setMinting] = useState(false);
   const known = useKnownTokens();
   const rows = useMemo(
     () => roleTokens(agents, [...known], role),
@@ -63,17 +63,23 @@ export function JoinTokensCard({
       pad="narrow"
       className="role-tokens"
       aside={
-        canMint ? (
+        canAdd ? (
           <button
             className="btn btn-sm"
             type="button"
-            onClick={() => openAddAgents(role)}
+            onClick={() => setMinting(true)}
           >
             New token
           </button>
         ) : undefined
       }
     >
+      {canAdd && (
+        <p className="role-token-reuse">
+          A role is reusable: connect as many agents as you like. Each join
+          token has its own uses and expiry.
+        </p>
+      )}
       {rows.length ? (
         <ul className="role-token-list">
           {rows.map((row) => {
@@ -104,7 +110,7 @@ export function JoinTokensCard({
       ) : (
         <EmptyState>
           {canAdd
-            ? `No join tokens used yet. Add ${plural} to make one.`
+            ? "No join tokens used yet. New token makes one."
             : "This role's agent is started by the scenario, without a join token."}
         </EmptyState>
       )}
@@ -117,6 +123,7 @@ export function JoinTokensCard({
           table.
         </CardNote>
       )}
+      {minting && <TokenDialog role={role} onClose={() => setMinting(false)} />}
     </Card>
   );
 }

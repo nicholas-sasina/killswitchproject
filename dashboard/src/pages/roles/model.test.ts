@@ -453,7 +453,7 @@ describe("rolesList", () => {
       owner: "Support automation",
       managed_by: "code",
     },
-    { name: "triage", tools: [], managed_by: "ui" },
+    { name: "triage", tools: [...FULL_ACCESS_TOOLS], managed_by: "ui" },
     { name: "reader", tools: [], managed_by: "code" },
   ];
   // worker-02 was last seen, so burned, at 7:30 PM today.
@@ -474,11 +474,11 @@ describe("rolesList", () => {
     ]);
   });
 
-  it("says who owns a role and where it is managed", () => {
+  it("says whether a role has Full access, who owns it and where it is managed", () => {
     expect(list.map((found) => found.line)).toEqual([
-      "Support automation · managed in burn.yaml",
-      "Managed in burn.yaml",
-      "Managed in this dashboard",
+      "Limited · Support automation · managed in burn.yaml",
+      "Limited · managed in burn.yaml",
+      "Full access · managed in this dashboard",
     ]);
   });
 

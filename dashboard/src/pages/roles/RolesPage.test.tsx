@@ -150,11 +150,16 @@ describe("the roles list", () => {
     expect(rows()).toEqual([
       [
         "worker",
-        "Support automation · managed in burn.yaml",
+        "Limited · Support automation · managed in burn.yaml",
         3,
         "2 running1 burned today",
       ],
-      ["triage", "Managed in this dashboard", 0, "0 runningNo agents yet"],
+      [
+        "triage",
+        "Limited · managed in this dashboard",
+        0,
+        "0 runningNo agents yet",
+      ],
     ]);
     expect(
       screen.getByRole("link", { name: "worker" }).getAttribute("href"),

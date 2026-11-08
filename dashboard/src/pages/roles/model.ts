@@ -498,7 +498,7 @@ export interface ListSquare {
 
 export interface ListRow {
   name: string;
-  /** "Support automation · managed in burn.yaml" */
+  /** "Full access · Support automation · managed in burn.yaml" */
   line: string;
   /** A square per agent running now and per agent burned today. */
   squares: ListSquare[];
@@ -521,9 +521,11 @@ export function rolesList(model: ConsoleModel): ListRow[] {
       group.agents.find((agent) => agent.owner)?.owner ??
       "";
     const where = managedIn(group.role);
-    const line = owner
-      ? [owner, where && `managed in ${where}`].filter(Boolean).join(" · ")
-      : where && `Managed in ${where}`;
+    const access = group.role ? accessLevel(group.role) : "";
+    const line = [access, owner, where && `managed in ${where}`]
+      .filter(Boolean)
+      .join(" · ")
+      .replace(/^m/, "M");
     const squares: ListSquare[] = group.agents
       .filter((agent) => agent.state === "running" || agent.burnedToday)
       .map((agent) => ({
