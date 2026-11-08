@@ -16,6 +16,18 @@ def evidence(records):
     return {"source_commit": "abcdef0", "measured_at": "2026-11-07T23:00:00Z", "records": records}
 
 
+@pytest.mark.parametrize("change", [{"session_active": "true"}, {"api_rotations": True},
+                                  {"outcome": "private-message"}, {"token": "private-value"}])
+def test_policy_checks_reject_unprojected_or_malformed_observations(change):
+    data = evidence([{"event_id": "one", "used_at": "2026-11-07T23:00:00Z"}])
+    case = dict(provider_rejected=True, session_active=True, old_api_key_accepted=True,
+                new_incidents=0, api_rotations=0, canary_events=1, outcome="not_dispatched")
+    case.update(change)
+    data["policy_checks"] = {"own_session": case}
+    with pytest.raises(ValueError):
+        layers.measure("canaries", data)
+
+
 def test_missing_evidence_is_unmeasured(tmp_path):
     assert all(v["status"] == "unmeasured" for v in layers.load(tmp_path).values())
 

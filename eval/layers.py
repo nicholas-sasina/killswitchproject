@@ -100,6 +100,24 @@ def measure(kind, evidence):
             safe_cases["rotation_failure"] = {**{k:case[k] for k in boolean_fields},
                 "outcome": case["outcome"], "rotated_credentials": count(case["rotated_credentials"])}
         out["negative_checks"] = safe_cases
+    if kind == "canaries" and "policy_checks" in evidence:
+        cases = evidence["policy_checks"]
+        allowed = {"own_session", "other_session", "report_only", "ambiguous_exposure"}
+        boolean_fields = {"provider_rejected", "session_active", "old_api_key_accepted"}
+        count_fields = {"new_incidents", "api_rotations", "canary_events"}
+        if not isinstance(cases, dict) or set(cases) - allowed:
+            raise ValueError("unrecognized policy check")
+        safe_cases = {}
+        for name, case in cases.items():
+            if (not isinstance(case, dict) or set(case) != boolean_fields | count_fields | {"outcome"}
+                or any(type(case[k]) is not bool for k in boolean_fields)
+                or not isinstance(case["outcome"], str)
+                or case["outcome"] not in {"not_dispatched", "report_only", "not_actionable", "contained",
+                                          "contained_rotation_failed", "contained_rotation_deferred"}):
+                raise ValueError("invalid policy observations")
+            safe_cases[name] = {**{k:case[k] for k in boolean_fields},
+                                **{k:count(case[k]) for k in count_fields}, "outcome": case["outcome"]}
+        out["policy_checks"] = safe_cases
     if kind == "references":
         recognized = exposed = 0
         for r in records:

@@ -175,6 +175,16 @@ failure as separate observations; they are excluded from the ordinary-use detect
 denominator. Revoking a session while its old credentials remain usable is incomplete
 containment, not a successful credential rotation.
 
+For a canary source that supports origin proofs, role policy and exposure-ledger attribution,
+also pass `--policy-checks`. This measures four alert-only cases separately: presentation
+through the owning session, through a different Burn session, outside use with `auto_burn`
+disabled, and a canary exposed to an additional holder absent from the scenario agent list.
+The report records whether sessions and old API keys remain active, rotations, event counts,
+and incident outcomes. These cases do not enter the positive-use detection denominator.
+The harness supplies origin headers and ledger rows directly; these are handler-policy
+observations, not a deployed proxy-to-provider flow. An older source without these hooks
+fails the requested probe instead of producing a passing observation.
+
 Both probes run in a subprocess with outbound socket connections denied. They write private
 observation files and print counts and provenance rather than credentials. Each artifact
 identifies its source commit and source hashes; inspect the dirty-source flag and the scope

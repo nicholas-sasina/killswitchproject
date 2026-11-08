@@ -125,7 +125,7 @@ def references(root, trials):
     return result
 
 
-def canaries(root, trials, *, negative_checks=False):
+def canaries(root, trials, *, negative_checks=False, policy_checks=False):
     source_paths(root)
     path = root/"burn_api/scripts/canary_harness.py"
     if not path.is_file():
@@ -136,7 +136,7 @@ def canaries(root, trials, *, negative_checks=False):
     from boto3.dynamodb.conditions import Key
     os.environ.update(harness.ENV)
     result = provenance(root, ("burn_api/lambdas", "burn_api/scripts", "minter/lambdas", "contracts/python"))
-    stack = harness.Stack(workers=trials+1+int(negative_checks))
+    stack = harness.Stack(workers=trials+1+int(negative_checks)+4*int(policy_checks))
     stack.wire(setattr)
     sessions = {agent: stack.start_session(agent) for agent in stack.agents}
     records = []
@@ -211,12 +211,40 @@ def canaries(root, trials, *, negative_checks=False):
             "incomplete_containment_flagged": any(e.get("action") == "flagged" and "containment incomplete" in e.get("detail", "")
                                                   for e in agent_events(failed_agent)),
         }
+    policies = {}
+    if policy_checks:
+        for index, case in enumerate(("own_session", "other_session", "report_only", "ambiguous_exposure")):
+            agent = sorted(sessions)[trials+int(negative_checks)+index]
+            session = sessions[agent]
+            api_ref = f"burn/{agent}/api_key"
+            old_key = stack.secret(api_ref)
+            value = stack.read_canary(session)
+            before_version = int(stack.credential(api_ref)["version"])
+            before_incidents = len(stack.incidents)
+            if case == "report_only":
+                stack.set_role(session["session_id"], "probe-report-only", auto_burn=False)
+            elif case == "ambiguous_exposure":
+                # This holder deliberately does not appear in the scenario agent list.
+                stack.expose("agent-unlisted-abcdef", session["canary"]["canary_ref"])
+            via = (session["session_id"] if case == "own_session" else
+                   sessions[sorted(sessions)[-1]]["session_id"] if case == "other_session" else None)
+            status, _ = stack.present(value, via_session=via)
+            new_incidents = stack.incidents[before_incidents:]
+            policies[case] = {
+                "provider_rejected": status == 401,
+                "session_active": stack.session_status(session["session_id"]) == "active",
+                "old_api_key_accepted": stack.present(old_key)[0] == 200,
+                "new_incidents": len(new_incidents),
+                "api_rotations": int(stack.credential(api_ref)["version"])-before_version,
+                "canary_events": sum(e.get("action") == "canary_used" for e in agent_events(agent)),
+                "outcome": new_incidents[-1]["outcome"] if new_incidents else "not_dispatched",
+            }
     control = sessions[sorted(sessions)[-1]]
     outcomes = {}
     for incident in positive_incidents:
         outcome = incident.get("outcome", "unknown")
         outcomes[outcome] = outcomes.get(outcome, 0)+1
-    result.update(records=records, negative_checks=negative, checks={"provider_rejections": rejection_count,
+    result.update(records=records, negative_checks=negative, policy_checks=policies, checks={"provider_rejections": rejection_count,
                                           "rotated_old_api_key_rejections": old_key_rejections,
                                           "control_session_active": stack.session_status(control["session_id"]) == "active",
                                           "containment_outcomes": outcomes},
@@ -225,6 +253,7 @@ def canaries(root, trials, *, negative_checks=False):
         "Enrollment/identity, canary planting/exposure, leak and attacker decoding are simulated by the owner's canary_harness.py.",
         "Lambda incident dispatch is synchronous in-process here. Observed use-to-revoke times exclude real AWS networking and async dispatch; they are not deployed end-to-end latency.",
         "Optional negative_checks are fault-injection/replay observations, excluded from the ordinary-use detection-rate denominator; a revoked session with failed credential rotation is not complete containment.",
+        "Optional policy_checks measure alert-only cases separately; session-origin headers and additional ledger holders are synthetic harness inputs, not a full proxy-to-provider network flow.",
     ]))
     return result
 
@@ -235,6 +264,7 @@ def main():
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--trials", type=int, required=True)
     parser.add_argument("--negative-checks", action="store_true")
+    parser.add_argument("--policy-checks", action="store_true")
     args = parser.parse_args()
     root = args.source_root.resolve()
     if not 1 <= args.trials <= 100:
@@ -253,9 +283,10 @@ def main():
             stack.enter_context(patch.object(socket.socket, method, deny))
         stack.enter_context(mock_aws())
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            if args.negative_checks and args.kind != "canaries":
-                raise ValueError("negative checks apply only to canaries")
-            result = references(root, args.trials) if args.kind == "references" else canaries(root, args.trials, negative_checks=args.negative_checks)
+            if (args.negative_checks or args.policy_checks) and args.kind != "canaries":
+                raise ValueError("additional checks apply only to canaries")
+            result = references(root, args.trials) if args.kind == "references" else canaries(
+                root, args.trials, negative_checks=args.negative_checks, policy_checks=args.policy_checks)
     print(json.dumps(result, allow_nan=False))
 
 

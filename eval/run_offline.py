@@ -188,6 +188,11 @@ def markdown(r: dict) -> str:
                 for case, observations in layer["negative_checks"].items():
                     out += [f"- {case.replace('_', ' ')}: " + "; ".join(f"{k.replace('_', ' ')}={v}" for k,v in observations.items())]
                 out += [""]
+            if layer.get("policy_checks"):
+                out += ["Origin and policy checks (excluded from the positive-use detection rate):", ""]
+                for case, observations in layer["policy_checks"].items():
+                    out += [f"- {case.replace('_', ' ')}: " + "; ".join(f"{k.replace('_', ' ')}={v}" for k,v in observations.items())]
+                out += [""]
     audit = r.get("destinations")
     if audit:
         out += ["", "## Destinations", "", audit["scope"], "",

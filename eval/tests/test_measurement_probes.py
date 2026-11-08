@@ -91,6 +91,29 @@ def test_actual_canary_negative_checks_keep_replay_and_rotation_failure_visible(
 def test_reference_probe_rejects_canary_only_negative_mode():
     with pytest.raises(ValueError, match="only for canaries"):
         run_probe("references", ROOT, 1, negative_checks=True)
+    with pytest.raises(ValueError, match="only for canaries"):
+        run_probe("references", ROOT, 1, policy_checks=True)
+
+
+def test_actual_canary_alert_policies_preserve_sessions_and_credentials():
+    source = os.getenv("BURN_CANARY_PROBE_SOURCE")
+    if not source:
+        pytest.skip("Set BURN_CANARY_PROBE_SOURCE to the canary owner's checkout")
+    result = run_probe("canaries", Path(source), 2, negative_checks=True, policy_checks=True)
+    summary = layers.measure("canaries", result)
+    assert summary["uses"] == summary["detected"] == summary["burned"] == 2
+    assert result["checks"]["containment_outcomes"] == {"contained": 2}
+    assert result["checks"]["control_session_active"]
+    policies = summary["policy_checks"]
+    assert set(policies) == {"own_session", "other_session", "report_only", "ambiguous_exposure"}
+    for name, case in policies.items():
+        assert case["provider_rejected"] and case["session_active"] and case["old_api_key_accepted"]
+        assert case["api_rotations"] == 0 and case["canary_events"] == 1
+        assert case["new_incidents"] == (1 if name in {"report_only", "ambiguous_exposure"} else 0)
+    assert policies["own_session"]["outcome"] == policies["other_session"]["outcome"] == "not_dispatched"
+    assert policies["report_only"]["outcome"] == "report_only"
+    assert policies["ambiguous_exposure"]["outcome"] == "not_actionable"
+    assert "synthetic harness inputs" in result["notes"]
 
 
 @pytest.mark.parametrize("kind,trials", [("not-a-probe", 1), ("references", 0), ("canaries", 101)])

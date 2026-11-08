@@ -94,6 +94,9 @@ with `--destination-evidence`; it does not contact the endpoints or certify remo
 The same guide describes local handler probes, including replay and failed-rotation checks,
 and read-only quota snapshots. Keep each run's evidence in its own ignored output directory.
 An applied quota snapshot does not identify the cause of a throttled request.
+The canary probe's optional `--policy-checks` also verifies alert-only behavior for internal
+use, report-only roles and ambiguous exposure. Inspect these alongside successful burns:
+detecting a canary does not by itself justify revoking a session.
 
 ## What it costs
 
