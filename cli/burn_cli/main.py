@@ -1,13 +1,12 @@
 """Command parsing and the commands. Exit codes: 0 ok, 1 API/network error, 2 usage/config."""
 import argparse
-import getpass
 import json
 import os
 import sys
 import time
 from pathlib import Path
 
-from . import config, render, spec
+from . import config, render, signin, spec
 from .api import Api, ApiError
 from .runner.credentials import MissingSecrets
 from .runner.instance_api import InstanceApi
@@ -30,7 +29,8 @@ demo stack, which gives the agent no route except the proxy.
 Who the agent runs as: when burn run is root (a container's PID 1) the agent runs as an unprivileged uid of its
 own (or --user), so it cannot read burn run's environment or files, and no instance can read another's, so a
 child never sees its parent's credentials. When burn run is not root, the agent runs as
-you: it can read your files and burn run's environment (/proc/<pid>/environ). Containment against a hostile
+you: it can read your files, including your `burn login` sign-in in ~/.config/burn, and burn run's environment
+(/proc/<pid>/environ). Containment against a hostile
 agent then needs a container or a separate user.
 """
 
@@ -55,10 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
     scope.add_argument("--token", metavar="TOKEN_ID", help="burn every instance that joined with this token")
     kill.add_argument("--reason", default="")
     kill.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
-    login = sub.add_parser("login", help="store the API URL and token")
-    login.add_argument("--url", help="Burn API URL (default: BURN_API_URL or a prompt)")
-    login.add_argument("--token-stdin", action="store_true", help="read the token from stdin instead of prompting")
-    login.add_argument("--no-verify", action="store_true", help="store without checking them against the API")
+    sub.add_parser("login", help="sign in with your browser")
+    sub.add_parser("logout", help="sign out and delete the saved sign-in")
+    sub.add_parser("whoami", help="show who you are signed in as")
     init = sub.add_parser("init", help="write a starter burn.yaml")
     init.add_argument("-f", "--file", default=spec.DEFAULT_FILE)
     init.add_argument("--force", action="store_true", help="overwrite an existing file")
@@ -185,15 +184,24 @@ def cmd_events(api, args):
         time.sleep(1)
 
 
-def cmd_login(args, dotenv):
-    url = (args.url or config.get("BURN_API_URL", dotenv) or input("Burn API URL: ")).strip().rstrip("/")
-    token = (sys.stdin.readline() if args.token_stdin else getpass.getpass("Demo token (hidden): ")).strip()
-    if not url or not token:
-        raise UsageError("both a URL and a token are required")
-    if not args.no_verify:
-        Api(url, token).request("GET", "/roles")  # a wrong URL or token stops here, before anything is stored
-    path = config.save(url, token, dotenv)
-    print(f"logged in to {url}; settings saved to {path}")
+def cmd_login(args):
+    domain, client_id = config.get("BURN_PEOPLE_DOMAIN", args.dotenv), config.get("BURN_PEOPLE_CLIENT_ID", args.dotenv)
+    missing = [n for n, v in (("BURN_PEOPLE_DOMAIN", domain), ("BURN_PEOPLE_CLIENT_ID", client_id)) if not v]
+    if missing:
+        raise UsageError(f"{' and '.join(missing)} not set. Export them or run `make env` to write .env.")
+    credentials = signin.login(domain, client_id)
+    print(f"Signed in as {credentials['email'] or 'an account without an email address'}")  # never the tokens
+
+
+def cmd_logout(args):
+    print("Signed out." if signin.logout() else "Not signed in.")
+
+
+def cmd_whoami(args):
+    cached = signin.load_cache()
+    if cached is None:
+        return print("not signed in")
+    print(signin.claims(cached["id_token"]).get("email") or cached.get("email") or "signed in (no email address)")
 
 
 def cmd_init(args):
@@ -311,13 +319,16 @@ def run(argv: list[str] | None = None, dotenv=None) -> int:
     if args.command == "kill" and not (args.target or args.role or args.lineage or args.token):
         parser.error("name what to burn: a SESSION, an agent id, --role, --lineage or --token")
     try:
-        if args.command in ("login", "init", "env", "run"):  # these need no person credentials
+        if args.command in ("login", "logout", "whoami", "init", "env", "run"):  # these need no person credentials
             if args.command == "run":  # an instance authenticates as itself: no admin or person token
                 return cmd_run(args)
-            {"login": lambda: cmd_login(args, dotenv), "init": lambda: cmd_init(args), "env": lambda: cmd_env(args)}[args.command]()
+            {"login": cmd_login, "logout": cmd_logout, "whoami": cmd_whoami, "init": cmd_init, "env": cmd_env}[args.command](args)
             return 0
         url, token = config.load(dotenv)
         return COMMANDS[args.command](Api(url, token), args) or 0
+    except signin.SignInError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     except (config.ConfigError, UsageError, spec.SpecError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

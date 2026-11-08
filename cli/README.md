@@ -7,10 +7,16 @@ the event stream. It is the terminal twin of the dashboard. `import burn` is a s
 
 ## How it works
 - `argparse` + `urllib` for the API client; PyYAML and jsonschema for `burn.yaml`.
-- `BURN_API_URL` and `BURN_DEMO_TOKEN` come from the environment, else from the repo-root `.env` (`make env`
-  or `burn login`).
-- The token is only sent as a request header in one function (`Api.request`) and is never printed. The one
-  secret the CLI prints is a join token, once, from `burn token create`.
+- `BURN_API_URL` comes from the environment, else from the repo-root `.env` (`make env`).
+- People sign in with `burn login`: it opens the sign-in page in your browser (authorization code with PKCE and
+  a random state), receives the reply on `http://localhost:8976/callback` and keeps the session in
+  `~/.config/burn/credentials.json` (directory 700, file 600, written atomically). `BURN_PEOPLE_DOMAIN` and
+  `BURN_PEOPLE_CLIENT_ID` say where to sign in (environment, else `.env`).
+- Once the stack requires sign-in (`BURN_PEOPLE_ENABLED=on`, which `make env` writes to `.env`), every
+  person-side request carries `Authorization: Bearer <ID token>`, added in one function (`Api.auth_headers`) and
+  refreshed when under a minute remains. Until then, the API takes only `BURN_DEMO_TOKEN`, so that is what is sent.
+  No token is ever printed; the one secret the CLI prints is a join token, once, from `burn token create`.
+- Local development against the mock servers: `BURN_LOCAL_DEV=1` always sends `BURN_DEMO_TOKEN`.
 - Calls that can fail transiently (429, 5xx, network) retry with exponential backoff and jitter (`burn_cli/retry.py`).
 - `--json` prints the raw API response. Exit codes: 0 ok, 1 API or network error, 2 usage or missing config.
 
@@ -28,12 +34,15 @@ the event stream. It is the terminal twin of the dashboard. `import burn` is a s
 | `burn_cli/runner/spawn_endpoint.py` | The local spawn endpoint |
 | `burn/__init__.py` | The SDK: `burn.session`, `burn.spawn` |
 | `burn_cli/api.py` | The HTTP client |
+| `burn_cli/signin.py` | `burn login`/`logout`/`whoami`: browser sign-in, the cached session, refresh |
 | `burn_cli/config.py` | URL and token lookup |
 | `burn_cli/render.py` | Plain-text tables and event lines |
 
 ### Swarms
 ```bash
-make burn ARGS="login"                      # prompts for the token (hidden), checks it, stores URL + token in .env
+make burn ARGS="login"                      # sign in with your browser; prints "Signed in as <email>"
+make burn ARGS="whoami"                     # your email, or "not signed in"
+make burn ARGS="logout"                     # ends the session on this machine
 make burn ARGS="init"                       # writes a starter burn.yaml
 make burn ARGS="apply"                      # validates burn.yaml, then PUT /roles/{name} (managed_by code) for each role
 make burn ARGS="pull"                       # writes dashboard-made roles out to burn.yaml
@@ -58,7 +67,7 @@ burn env            # what an instance's environment would hold (values hidden; 
    returns once, along with the instance's session token (`bst_...`). The session token authenticates the
    supervisor's heartbeat, exit and spawn calls (`Authorization: Bearer ...`) and stays in the supervisor: never in
    the agent's environment or any argv, and `burn run` refuses to pass on anything that looks like one. `burn run`
-   never uses or forwards the admin token (`BURN_DEMO_TOKEN`); it needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
+   never uses or forwards your sign-in or the local-development token (`BURN_DEMO_TOKEN`); it needs only `BURN_API_URL`. No AWS access is needed on the host. An API that returns no `secrets` is an error ("API too old"),
    not a reason to look elsewhere. A child started with `burn.spawn` gets its values from its parent's reply and
    receives them in its supervisor's exec environment (`BURN_ADOPT_SECRETS`), never on a command line, where every
    user in the container could read them.
@@ -96,7 +105,7 @@ uid of its own from a reserved range (or `--user NAME`, shared by every instance
 read `burn run`'s environment (`/proc/1/environ`), which holds the API token and the join token, and one agent
 cannot read another's: a child never sees its parent's credentials. Child supervisors stay root; only agent commands
 are dropped. When `burn run` is **not** root (directly on a laptop), the agent runs as you: it can read your
-files and `burn run`'s environment. Containment against a hostile agent then needs a container or a separate user.
+files, including your `burn login` sign-in in `~/.config/burn`, and `burn run`'s environment. Containment against a hostile agent then needs a container or a separate user.
 
 `burn run` also needs `BURN_GATEWAY_URL` (written by `make env`) and, optionally, `BURN_PROXY_URL`.
 
@@ -132,6 +141,17 @@ cd cli && uv run pytest -q    # runs against a stub HTTP server, no AWS needed
   made in the dashboard. Run `burn pull` to bring it into `burn.yaml` first.
 - **Does the agent get my AWS credentials?** No. `burn run` removes them from the agent's environment and gives it
   only its own key, which it received from the API when the instance joined. `burn run` needs no AWS access.
+- **Why does a command say "not signed in: run `burn login`"?** There is no sign-in on this machine, or it
+  can no longer be refreshed. Run `burn login` again.
+- **Do I need to sign in?** Only once your stack requires it. Until then the commands work as before, with
+  `BURN_DEMO_TOKEN` from `.env`. When it is switched on, run `make env` again, then `burn login`. A command that
+  gets "HTTP 401" says which of the two to do.
+- **Where is my sign-in kept, and who can read it?** In `~/.config/burn/credentials.json`, readable only by you.
+  `burn logout` revokes the session and deletes the file.
+- **Does `burn run` need me to sign in?** No. An instance authenticates as itself with the join token and then
+  its own session token. Your sign-in is never sent from `burn run`, even when you are signed in on that machine.
+- **Can I sign in on a machine without a browser?** `burn login` prints the sign-in address when it cannot open
+  a browser. The reply comes back to `localhost:8976`, so open it on the same machine (or forward that port).
 - **Is `HTTPS_PROXY` a sandbox?** No. See above: it is a convenience, the network rule is the containment.
 - **Where can I see a join token again?** Nowhere: only its hash is stored. Create another one.
 - **Why is the blast radius empty right after a burn?** CloudTrail can lag 5-15 minutes; the CLI says so when there is nothing yet.

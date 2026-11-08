@@ -148,7 +148,7 @@ def test_missing_config_exits_2(capsys, monkeypatch, tmp_path):
     monkeypatch.delenv("BURN_DEMO_TOKEN", raising=False)
     code = run(["agents"], dotenv=tmp_path / "none.env")
     err = capsys.readouterr().err
-    assert code == 2 and "BURN_API_URL and BURN_DEMO_TOKEN not set" in err
+    assert code == 2 and "BURN_API_URL not set" in err
 
 
 def test_config_from_dotenv(capsys, monkeypatch, tmp_path):
