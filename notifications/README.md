@@ -18,7 +18,7 @@ EventBridge schedule (1 min) ─▶ Lambda burn-notify-flush ─▶ aggregate su
 DynamoDB burn-notify-state: delivery claims and history, ordering facts, windows (TTL)
 ```
 
-Guides: [live testing with real channels](docs/LIVE_TESTING.md) · [deployment runbook](docs/DEPLOYMENT.md).
+Guides: [live testing with real channels](docs/LIVE_TESTING.md) · [deployment runbook](docs/DEPLOYMENT.md) · [verification report](docs/HACKATHON_VERIFICATION.md).
 
 **Why a Pipe instead of a Lambda on the stream:** the Pipe filters to INSERTs and drops them on SQS
 with no code. SQS then provides per-message retries, a visibility timeout we can set from
