@@ -187,6 +187,9 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
             onClick={() => setTokens((open) => !open)}
           >
             For CI, containers or swarms: use a join token
+            <span className="add-disclosure-mark" aria-hidden="true">
+              {tokens ? "\u2212" : "+"}
+            </span>
           </button>
           {tokens && (
             <div className="connect-token-flow">

@@ -280,6 +280,7 @@
 }
 
 .add-agents .add-disclosure {
+  align-self: flex-start;
   padding: 0;
   border: 0;
   background: none;
@@ -292,13 +293,10 @@
   cursor: pointer;
 }
 
-.add-agents .add-disclosure::after {
-  content: " +";
+.add-agents .add-disclosure-mark {
+  display: inline-block;
+  margin-left: 6px;
   text-decoration: none;
-}
-
-.add-agents .add-disclosure[aria-expanded="true"]::after {
-  content: " \2212";
 }
 
 .add-agents .connect-token-flow {

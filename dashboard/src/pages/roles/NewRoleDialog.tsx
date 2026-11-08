@@ -185,6 +185,9 @@ export function NewRoleDialog({ onClose }: { onClose: () => void }) {
             onClick={() => setMore((open) => !open)}
           >
             More
+            <span className="add-disclosure-mark" aria-hidden="true">
+              {more ? "\u2212" : "+"}
+            </span>
           </button>
           {more && (
             <fieldset className="add-field">
