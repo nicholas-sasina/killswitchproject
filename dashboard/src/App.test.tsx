@@ -493,6 +493,7 @@ it("opens replacement links and quarantined details from the one shared instance
       <App
         config={{
           burnUrl: "http://burn.example.test",
+          localDev: true,
           demoToken: crypto.randomUUID(),
         }}
       />,
