@@ -71,9 +71,9 @@ python3 scripts/prepare_build.py
 ```
 
 The environment writer uses the default AWS credential chain to retrieve the proxy's dedicated
-access key; it writes only to gitignored `.run/proxy.env` with mode 600. Gateway, provider and
-Cognito token URLs come from environment variables or SSM parameters `/burn/gateway/url`,
-`/burn/provider/url`, `/burn/identity/token-url`. Missing URLs are omitted from the allowlist.
+access key; it writes only to gitignored `.run/proxy.env` with mode 600. Gateway, provider,
+Cognito token and Burn API URLs come from environment variables or SSM parameters `/burn/gateway/url`,
+`/burn/provider/url`, `/burn/identity/token-url`, `/burn/api/url`. Missing URLs are omitted from the allowlist.
 Re-run the writer when a service URL changes. All AWS clients use `us-east-1`.
 
 Use build context `.run/detection-build` relative to the repository root, with Dockerfiles
@@ -97,7 +97,8 @@ The proxy is attached to both. Set agents' `HTTP_PROXY` and `HTTPS_PROXY` to
 mitmproxy generates the CA at container startup. Do not enable flow dumps or verbose request logs.
 
 The allowlist contains Bedrock runtime, STS, global/regional S3 and the configured gateway,
-provider, Cognito token and sink hosts. Except for the explicitly configured sink endpoint,
+provider, Cognito token, Burn API and sink hosts. A role's egress list never blocks the gateway
+or the Burn API, where an instance sends its heartbeats and exit report. Except for the explicitly configured sink endpoint,
 all destinations must use port 443 and resolve exclusively to public addresses. Metadata is
 always refused. DNS answers are checked and the outgoing connection is pinned to a checked IP.
 The sink exception supports Docker's private service address; it does not open an entire subnet.

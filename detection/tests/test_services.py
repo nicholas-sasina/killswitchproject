@@ -237,3 +237,35 @@ def test_http_api_encodings_cors_and_safe_errors():
     service.run.side_effect = RuntimeError(value)
     response = client.post("/leak-test", json={"agent_id": "agent-" + secrets.token_hex(4), "free_text": value})
     assert response.status_code == 503 and value not in response.text
+
+
+def test_proxy_env_writes_the_burn_api_url(monkeypatch):
+    import scripts.proxy_env as proxy_env
+    written = {}
+
+    class Secrets:
+        def get_secret_value(self, SecretId):
+            return {"SecretString": json.dumps({"access_key_id": "AKIAEXAMPLEEXAMPLE00", "secret_access_key": "x"})}
+
+    class Ssm:
+        class exceptions:
+            class ParameterNotFound(Exception):
+                pass
+
+        def get_parameter(self, Name):
+            published = {"/burn/api/url": "https://abc123apiid.execute-api.us-east-1.amazonaws.com",
+                         "/burn/gateway/url": "https://gateway.example.test/mcp"}
+            if Name not in published:
+                raise self.exceptions.ParameterNotFound()
+            return {"Parameter": {"Value": published[Name]}}
+
+    for name in ("BURN_API_URL", "BURN_GATEWAY_URL", "BURN_PROVIDER_URL", "BURN_COGNITO_TOKEN_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(proxy_env.boto3, "client", lambda service, region_name=None: Secrets() if service == "secretsmanager" else Ssm())
+    monkeypatch.setattr(proxy_env, "write_env", lambda path, values: written.update(values))
+    proxy_env.main()
+    assert written["BURN_API_URL"] == "https://abc123apiid.execute-api.us-east-1.amazonaws.com"
+    assert written["BURN_GATEWAY_URL"] == "https://gateway.example.test/mcp"
+    monkeypatch.setenv("BURN_API_URL", "https://override.execute-api.us-east-1.amazonaws.com")
+    proxy_env.main()
+    assert written["BURN_API_URL"] == "https://override.execute-api.us-east-1.amazonaws.com"  # like the others

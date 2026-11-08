@@ -391,3 +391,69 @@ def test_refused_provider_requests_do_not_get_proof(setup, active, leak):
         proxy._process(flow)
     assert flow.response.status_code == 403
     assert PROOF_HEADER not in flow.request.headers
+
+
+# --- Burn's own API: heartbeats and exits from inside the agents' network -------------------------
+
+API_URL = "https://abc123apiid.execute-api.us-east-1.amazonaws.com"
+API_HOST = "abc123apiid.execute-api.us-east-1.amazonaws.com"
+
+
+def with_api(settings):
+    from dataclasses import replace
+    return replace(settings, api_url=API_URL)
+
+
+def run_through_proxy(state, settings, url, connect, egress):
+    state.session = lambda *_: {"status": "active", "egress": egress}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state, body=b"")
+    flow.request.url = url
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow, connect=connect)
+    return flow
+
+
+@pytest.mark.parametrize("path", ["/instances/sess_0123456789abcdef/heartbeat", "/instances/sess_0123456789abcdef/exit"])
+@pytest.mark.parametrize("egress", [["provider.example.test"], [], None])
+@pytest.mark.parametrize("connect", [False, True])
+def test_an_instance_reaches_the_burn_api_even_when_its_role_narrows_egress(setup, path, egress, connect):
+    scanner, _, agent, settings, _ = setup
+    settings = with_api(settings)
+    flow = run_through_proxy(State(scanner.key, {}, agent), settings, API_URL + path, connect, egress)
+    assert flow.response is None  # passed on, not refused
+    assert API_HOST in settings.allowed_hosts and settings.role_reason(API_HOST, {"egress": []}) is None
+
+
+@pytest.mark.parametrize("host", ["otherapiid.execute-api.us-east-1.amazonaws.com",
+                                  "abc123apiid.execute-api.us-east-1.amazonaws.com.evil.example",
+                                  "x.abc123apiid.execute-api.us-east-1.amazonaws.com"])
+def test_any_other_host_is_still_refused(setup, host):
+    scanner, _, agent, settings, _ = setup
+    settings = with_api(settings)
+    assert settings.route_reason(host, 443) == "destination_not_allowed"
+    flow = run_through_proxy(State(scanner.key, {}, agent), settings, f"https://{host}/instances/s/heartbeat", True, None)
+    assert flow.response.status_code == 403
+    assert json.loads(flow.response.content)["reason"] == "destination_not_allowed"
+
+
+def test_the_burn_api_is_reachable_only_on_443_and_over_https(setup):
+    _, _, _, settings, _ = setup
+    settings = with_api(settings)
+    assert settings.route_reason(API_HOST, 8443) == "destination_port_not_allowed"
+    assert settings.request_reason(f"http://{API_HOST}/instances/s/exit", "POST", False) == "destination_scheme_not_allowed"
+
+
+def test_without_burn_api_url_nothing_new_is_allowed(monkeypatch):
+    for name, value in {"BURN_GATEWAY_URL": "https://gateway.example.test/mcp",
+                        "BURN_PROVIDER_URL": "https://provider.example.test"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("BURN_API_URL", raising=False)
+    without = Settings.from_env()
+    assert without.api_url == ""
+    assert without.allowed_hosts == Settings(gateway_url="https://gateway.example.test/mcp",
+                                             provider_url="https://provider.example.test").allowed_hosts
+    assert without.route_reason(API_HOST, 443) == "destination_not_allowed"
+    assert without.role_reason(API_HOST, {"egress": []}) == "role_destination_not_allowed"
+    monkeypatch.setenv("BURN_API_URL", API_URL)
+    assert Settings.from_env().allowed_hosts == without.allowed_hosts | {API_HOST}

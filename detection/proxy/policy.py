@@ -46,17 +46,19 @@ class Settings:
     provider_url: str = ""
     cognito_token_url: str = ""
     sink_url: str = "http://sink:8081"
+    # Burn's own API: an instance's supervisor sends its heartbeats and exit report there. Unset adds nothing.
+    api_url: str = ""
 
     @classmethod
     def from_env(cls):
         return cls(*(os.environ.get(name, default) for name, default in (
             ("BURN_GATEWAY_URL", ""), ("BURN_PROVIDER_URL", ""),
-            ("BURN_COGNITO_TOKEN_URL", ""), ("BURN_SINK_URL", "http://sink:8081"))))
+            ("BURN_COGNITO_TOKEN_URL", ""), ("BURN_SINK_URL", "http://sink:8081"), ("BURN_API_URL", ""))))
 
     @property
     def allowed_hosts(self) -> set[str]:
         return set(AWS_HOSTS) | {host_of(url) for url in (
-            self.gateway_url, self.provider_url, self.cognito_token_url, self.sink_url) if url}
+            self.gateway_url, self.provider_url, self.cognito_token_url, self.sink_url, self.api_url) if url}
 
     def is_sink(self, host: str, port: int) -> bool:
         sink = urlsplit(self.sink_url)
@@ -124,7 +126,9 @@ class Settings:
         """The swarm session's egress field can narrow, never expand, global hosts.
 
         Missing/null preserves legacy sessions. The configured Gateway is exempt
-        from valid role restrictions; it still enforces the role's tools.
+        from valid role restrictions; it still enforces the role's tools. So is
+        Burn's own API: an instance must always be able to send its heartbeat and
+        exit report, and the API checks the instance's own session token.
         """
         hosts = session.get("egress")
         if hosts is None:
@@ -132,6 +136,8 @@ class Settings:
         if not isinstance(hosts, list) or any(not _valid_host(h) for h in hosts):
             return "role_policy_invalid"
         if self.gateway_url and host == host_of(self.gateway_url):
+            return None
+        if self.api_url and host == host_of(self.api_url):
             return None
         return None if host in {h.rstrip('.').lower() for h in hosts} else "role_destination_not_allowed"
 
