@@ -4,6 +4,12 @@ import type {
   BurnResult,
   EventsResponse,
   LedgerResponse,
+  Role,
+  RoleSpec,
+  EnrollToken,
+  Instance,
+  ScopedBurnRequest,
+  ScopedBurnResult,
 } from "./contracts";
 
 export interface ApiConfig {
@@ -72,6 +78,30 @@ export function createApi(
   }
 
   return {
+    roles: (signal?: AbortSignal) =>
+      request<{ roles: Role[] }>(config.burnUrl, "/roles", { signal }),
+    createRole: (body: RoleSpec) =>
+      request<Role>(config.burnUrl, "/roles", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    createToken: (name: string, body: { uses: number; ttl: number }) =>
+      request<EnrollToken & { token: string }>(
+        config.burnUrl,
+        `/roles/${encodeURIComponent(name)}/tokens`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    instances: (role?: string, signal?: AbortSignal) =>
+      request<{ instances: Instance[] }>(
+        config.burnUrl,
+        `/instances${role ? `?role=${encodeURIComponent(role)}` : ""}`,
+        { signal },
+      ),
+    burnScope: (body: ScopedBurnRequest) =>
+      request<ScopedBurnResult>(config.burnUrl, "/burns", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     events: (since?: string, signal?: AbortSignal) =>
       request<EventsResponse>(
         config.burnUrl,

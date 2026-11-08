@@ -75,7 +75,8 @@ def spawn(role: str, command: list[str] | str) -> dict:
         raise BurnError("BURN_SPAWN_URL is not set: spawn() only works inside `burn run`")
     argv = shlex.split(command) if isinstance(command, str) else list(command)
     req = urllib.request.Request(url, method="POST", data=json.dumps({"role": role, "command": argv}).encode(),
-                                 headers={"content-type": "application/json"})
+                                 headers={"content-type": "application/json",
+                                          "authorization": f"Bearer {os.environ.get('BURN_LOCAL_TOKEN', '')}"})
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read())

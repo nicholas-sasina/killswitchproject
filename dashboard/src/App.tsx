@@ -11,6 +11,7 @@ import { BurnOutcome } from "./components/BurnOutcome";
 import { Ledger } from "./components/Ledger";
 import { EventFeed } from "./components/EventFeed";
 import { BlastTimeline } from "./components/BlastTimeline";
+import { SwarmPanel } from "./components/SwarmPanel";
 
 export function App({ config = readConfig() }: { config?: ApiConfig }) {
   const [mock, setMock] = useState(false);
@@ -142,6 +143,11 @@ export function App({ config = readConfig() }: { config?: ApiConfig }) {
                 ? `${error} The display retains the last received data while reconnecting.`
                 : ""
             }
+          />
+          <SwarmPanel
+            key={`${config.burnUrl}:${config.demoToken}`}
+            api={api}
+            enabled={configured}
           />
           <div className="workspace-grid">
             <div className="detail-column">
