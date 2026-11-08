@@ -2,8 +2,9 @@
  * Which ledger events are alerts, how serious each one is, and what an
  * operator should understand from it.
  *
- * Derived entirely from the event stream the dashboard already polls, so the
- * alerts view costs no extra requests.
+ * Derived entirely from the event stream the console already polls, so it
+ * costs no extra requests. The Overview's evidence counts and the event
+ * sentences use its checks, so every view reads an event the same way.
  *
  * Severity is assigned by what the event actually shows, not by how alarming
  * it sounds. A canary credential being presented is proof that a credential left
@@ -58,11 +59,31 @@ interface Rule {
  * the destination, port or size with no credential involved. Only a block
  * that names a credential is evidence that one tried to leave.
  */
-function carriesCredential(event: LedgerEvent): boolean {
+export function carriesCredential(event: LedgerEvent): boolean {
   return (
     Boolean(event.secret_ref || event.fingerprint) ||
     event.detail === "credential_detected"
   );
+}
+
+/** A credential the egress proxy stopped on its way out of the network. */
+export function isBlockedAtExit(event: LedgerEvent): boolean {
+  return (
+    event.action === "blocked" &&
+    event.source === "egress" &&
+    carriesCredential(event)
+  );
+}
+
+/** A refusal's detail when the caller holds no badge Burn issued. */
+function isUnknownBadge(detail: string): boolean {
+  return detail.startsWith("unknown badge") || detail === "session_required";
+}
+
+/** A call from something Burn never enrolled, refused. */
+export function isUnknownCaller(event: LedgerEvent): boolean {
+  if (event.action === "unregistered") return true;
+  return event.action === "refused" && isUnknownBadge(event.detail ?? "");
 }
 
 /** The reason a component gave, readable. */
@@ -94,7 +115,7 @@ function classifyRefusal(event: LedgerEvent): Rule {
           : "An agent whose badge was revoked tried to call a tool and was turned away. This is containment working, visible after the fact.",
       next: "None, unless the agent keeps trying long after the burn, which means its process did not stop.",
     };
-  if (detail.startsWith("unknown badge") || detail === "session_required")
+  if (isUnknownBadge(detail))
     return {
       tier: "high",
       title: "Unknown caller refused",

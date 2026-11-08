@@ -108,7 +108,7 @@ reduced motion is on).
 | `src/events.ts`             | Deduplication, cursor handling and the bounded event list             |
 | `src/polling.ts`            | The event feed with its history, and polling without overlap          |
 | `src/fleet.ts`              | The merged fleet and burned sessions                                  |
-| `src/alerts.ts`             | Which events are blocks and refusals, and what each one means         |
+| `src/alerts.ts`             | Blocks and refusals, as the Overview and event sentences read them    |
 | `src/join.ts`               | The `burn run` join commands                                          |
 | `src/components/SignIn.tsx` | People and local sign-in                                              |
 

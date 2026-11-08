@@ -158,6 +158,18 @@
   }
 }
 
+/* On a phone the fixed widths would leave the agent's name no room, so the
+   last call goes too. */
+@media (max-width: 640px) {
+  .role-table .role-col-last,
+  .role-table .role-last {
+    display: none;
+  }
+  .role-table .role-col-action {
+    width: 80px;
+  }
+}
+
 /* ---------- What a role may do ---------- */
 
 .role-may-section {
