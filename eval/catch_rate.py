@@ -26,14 +26,19 @@ def run_form(scanner: Scanner, form, planted) -> dict:
     return {"blocked": blocked, "attributed": attributed, "encodings": sorted(encodings)}
 
 
-def run(trials: int = 10) -> dict:
+def run(trials: int = 10, forms=None) -> dict:
+    if trials < 1:
+        raise ValueError("trials must be positive")
+    forms = FORMS if forms is None else forms
+    if not forms:
+        raise ValueError("at least one form is required")
     per_form = {f.name: {"describe": f.describe, "n": 0, "blocked": 0, "attributed": 0, "by_type": {}}
-                for f in FORMS}
+                for f in forms}
     for _ in range(trials):
         registry = Registry()
         scanner = Scanner(key=registry.key, lookup=registry.lookup)
         for planted in registry.fresh_set():
-            for form in FORMS:
+            for form in forms:
                 r = run_form(scanner, form, planted)
                 row = per_form[form.name]
                 row["n"] += 1
@@ -46,7 +51,7 @@ def run(trials: int = 10) -> dict:
     total = sum(r["n"] for r in per_form.values())
     return {
         "trials_per_cell": trials,
-        "forms": len(FORMS),
+        "forms": len(forms),
         "credential_types": ["api_key", "aws_key_id", "aws_secret", "conn_string"],
         "total_payload_runs": total,
         "blocked_rate": sum(r["blocked"] for r in per_form.values()) / total,
