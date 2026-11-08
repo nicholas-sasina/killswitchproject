@@ -731,3 +731,128 @@ def test_a_failed_canary_leaves_no_session_and_cleans_up(env):
     assert env.ddb.Table("burn-sessions").scan()["Items"] == [] and env.badges.created == []
     assert [c for c in env.minter.calls if c[0] == "DELETE"]  # the minted credentials were removed
     assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201  # use refunded
+
+
+# --- the join reply carries the instance's own secret values ----------------------------------
+
+def stored_values(env, body):
+    """The api_key / aws_key values the (fake) minter put in Secrets Manager for this instance."""
+    import json
+    agent = body["agent_id"]
+    key = env.minter.stored.get(f"burn/{agent}/aws_key")
+    return {"api_key": env.minter.stored.get(f"burn/{agent}/api_key"),
+            "aws_key": json.loads(key) if key else None}
+
+
+def test_join_returns_the_values_the_minter_stored_and_the_badge(env):
+    make_role(env, WORKER)
+    status, body, _ = join(env, "worker")
+    assert status == 201
+    stored = stored_values(env, body)
+    assert body["secrets"]["api_key"] == stored["api_key"]
+    assert body["secrets"]["aws_key"] == {"access_key_id": stored["aws_key"]["access_key_id"],
+                                          "secret_access_key": stored["aws_key"]["secret_access_key"]}
+    import boto3, json
+    badge = json.loads(boto3.client("secretsmanager", region_name="us-east-1").get_secret_value(
+        SecretId=body["badge_ref"])["SecretString"])
+    assert body["secrets"]["badge"] == badge and set(badge) == {"client_id", "client_secret", "token_url", "scope"}
+    assert "iam_user" not in str(body["secrets"])
+
+
+def test_spawn_returns_only_what_the_narrowed_child_has(env):
+    make_role(env, WORKER); make_role(env, HELPER)
+    parent = join(env, "worker")[1]
+    child = spawn(env, parent["session_id"], "helper")[1]
+    assert set(child["secrets"]) == {"badge", "api_key"}  # helper mints api_key only
+    assert child["secrets"]["api_key"] == stored_values(env, child)["api_key"]
+    assert child["secrets"]["api_key"] != parent["secrets"]["api_key"]  # its own key, not the parent's
+
+
+def test_only_what_the_role_mints_is_returned(env):
+    make_role(env, {"name": "bare", "tools": ["notify"], "credentials": []})
+    assert set(join(env, "bare")[1]["secrets"]) == {"badge"}
+
+
+def test_the_scenario_path_has_no_secrets(env):
+    body = call(env, "POST", "/sessions", {"agent_id": "agent-a"})[1]
+    assert "secrets" not in body
+
+
+def test_values_are_not_stored_in_the_session_row_or_events(env):
+    make_role(env, WORKER)
+    body = join(env, "worker")[1]
+    values = [body["secrets"]["api_key"], body["secrets"]["aws_key"]["secret_access_key"],
+              body["secrets"]["badge"]["client_secret"]]
+    persisted = str(env.ddb.Table("burn-sessions").scan()["Items"]) + str(env.ddb.Table("burn-events").scan()["Items"])
+    assert not any(v in persisted for v in values)
+    assert call(env, "GET", "/instances")[0] == 200
+    assert not any(v in str(call(env, "GET", "/instances")[1]) for v in values)
+
+
+def test_a_secret_that_cannot_be_read_discards_the_instance_and_refunds_the_token(env, monkeypatch):
+    from botocore.exceptions import ClientError
+    import sessions
+    make_role(env, WORKER)
+    token = call(env, "POST", "/roles/worker/tokens", {"uses": 1})[1]["token"]
+    real = sessions._read_secret
+
+    def denied(client, ref):
+        raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "GetSecretValue")
+
+    monkeypatch.setattr(sessions, "_read_secret", denied)
+    with pytest.raises(ClientError):
+        call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
+    assert env.ddb.Table("burn-sessions").scan()["Items"] == []
+    assert len(env.badges.created) == 1 and len(env.badges.deleted) == 1
+    assert [c for c in env.minter.calls if c[0] == "DELETE" and c[1].endswith("/credentials")]
+    monkeypatch.setattr(sessions, "_read_secret", real)
+    assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201  # use refunded
+
+
+def test_reading_a_fresh_secret_retries_briefly_then_gives_up(monkeypatch):
+    from botocore.exceptions import ClientError
+    import sessions
+    monkeypatch.setattr(sessions.time, "sleep", lambda s: None)
+
+    class Client:
+        def __init__(self, failures, code):
+            self.failures, self.code, self.calls = failures, code, 0
+
+        def get_secret_value(self, SecretId):
+            self.calls += 1
+            if self.calls <= self.failures:
+                raise ClientError({"Error": {"Code": self.code, "Message": "x"}}, "GetSecretValue")
+            return {"SecretString": "value"}
+
+    assert sessions._read_secret(Client(2, "ResourceNotFoundException"), "burn/agent-x/api_key") == "value"
+    assert sessions._read_secret(Client(1, "ThrottlingException"), "burn/agent-x/api_key") == "value"
+    stuck = Client(99, "ResourceNotFoundException")
+    with pytest.raises(ClientError):
+        sessions._read_secret(stuck, "burn/agent-x/api_key")
+    assert stuck.calls == sessions.SECRET_READ_ATTEMPTS
+    denied = Client(99, "AccessDeniedException")
+    with pytest.raises(ClientError):
+        sessions._read_secret(denied, "burn/agent-x/api_key")
+    assert denied.calls == 1  # not retried
+
+
+def test_secret_values_never_reach_stdout_or_logs(env, monkeypatch, capsys, caplog):
+    import logging
+    import sessions
+    # INFO and up, like the Lambda's default. (botocore at DEBUG prints raw response bodies; that is
+    # the SDK's own logging and must stay off in production.)
+    caplog.set_level(logging.INFO)
+    make_role(env, WORKER)
+    body = join(env, "worker")[1]
+    values = [body["secrets"]["api_key"], body["secrets"]["aws_key"]["secret_access_key"],
+              body["secrets"]["aws_key"]["access_key_id"], body["secrets"]["badge"]["client_secret"]]
+    # a failing join (event writes failing too) must not print them either
+    import db
+    real_event = db.write_event
+    monkeypatch.setattr(db, "write_event", lambda **f: (_ for _ in ()).throw(RuntimeError("down")))
+    other = join(env, "worker")[1]
+    monkeypatch.setattr(db, "write_event", real_event)
+    values += [other["secrets"]["api_key"], other["secrets"]["aws_key"]["secret_access_key"]]
+    out = capsys.readouterr()
+    for value in values:
+        assert value not in out.out and value not in out.err and value not in caplog.text
