@@ -1,0 +1,874 @@
+/* ---------- How it works: the pipeline, a 1376 x 440 plane ---------- */
+
+.how {
+  background: var(--band);
+  padding: 96px 0;
+}
+
+.how-title {
+  max-width: 900px;
+  font-size: clamp(36px, 3.6vw, 52px);
+}
+
+.pipe-frame {
+  position: relative;
+  margin-top: 48px;
+  height: calc(440px * var(--s, 1));
+}
+
+.pipe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1376px;
+  height: 440px;
+  transform-origin: 0 0;
+  transform: translateX(var(--tx, 0px)) scale(var(--s, 1));
+}
+
+/* Packets: data moving along a connector. */
+.packet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.packet.is-ember {
+  background: var(--ember);
+}
+
+/* The AI workforce column */
+
+.pw {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 204px;
+  height: 440px;
+}
+
+.pw-label {
+  position: absolute;
+  left: 0;
+  top: 36px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.pw-label b {
+  font-weight: 600;
+}
+
+.pw-label span {
+  color: var(--muted);
+}
+
+.pw-agents {
+  position: absolute;
+  left: 0;
+  top: 69px;
+  width: 164px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 58px;
+  padding: 0 10px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+  font-size: 14px;
+  line-height: 18px;
+  transition: border-color var(--state-ms) ease;
+}
+
+.agent b {
+  display: block;
+  font-weight: 600;
+}
+
+.agent svg {
+  color: var(--ink);
+  transition: color var(--state-ms) ease;
+}
+
+.agent-sub {
+  display: block;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+  transition: color var(--state-ms) ease;
+}
+
+.agent.is-hot {
+  border-color: var(--ember-ink);
+}
+
+.agent.is-hot svg,
+.agent.is-hot .agent-sub {
+  color: var(--ember-ink);
+}
+
+.pw-bus {
+  position: absolute;
+  left: 0;
+  top: 0;
+  fill: none;
+  stroke: var(--connector);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Connectors: a line and an arrowhead in currentColor. */
+
+.conn {
+  position: absolute;
+  top: 196px;
+  height: 8px;
+  color: var(--connector);
+  transition: color var(--state-ms) ease;
+}
+
+.conn-bus {
+  left: 184px;
+  width: 19px;
+}
+.conn-exit {
+  left: 368px;
+  width: 23px;
+}
+.conn-canary {
+  left: 556px;
+  width: 23px;
+}
+.conn-decision {
+  left: 736px;
+  width: 23px;
+}
+.conn-human {
+  left: 956px;
+  width: 23px;
+}
+.conn-result {
+  left: 1136px;
+  width: 23px;
+}
+
+.conn-line {
+  position: absolute;
+  left: 0;
+  right: 4px;
+  top: 3.25px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.conn-head {
+  position: absolute;
+  right: 0;
+  top: 1px;
+  width: 5px;
+  height: 6px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.conn .packet {
+  top: 1px;
+}
+
+.line-ink {
+  color: var(--ink);
+}
+
+.line-ember {
+  color: var(--ember-ink);
+}
+
+/* Panels */
+
+.pp {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+  transition:
+    border-color var(--state-ms) ease,
+    background-color var(--state-ms) ease;
+}
+
+.pp.is-active {
+  border-color: var(--ink);
+}
+
+.pp.is-hot {
+  border-color: var(--ember-ink);
+  background: var(--ember-wash);
+}
+
+.pp-ledger {
+  left: 204px;
+  top: 98px;
+  width: 164px;
+  height: 204px;
+}
+.pp-exit {
+  left: 392px;
+  top: 98px;
+  width: 164px;
+  height: 204px;
+}
+.pp-canary {
+  left: 580px;
+  top: 98px;
+  width: 156px;
+  height: 204px;
+}
+.pp-decision {
+  left: 760px;
+  top: 72px;
+  width: 196px;
+  height: 256px;
+}
+.pp-human {
+  left: 980px;
+  top: 98px;
+  width: 156px;
+  height: 204px;
+}
+.pp-result {
+  left: 1160px;
+  top: 97px;
+  width: 216px;
+  height: 206px;
+}
+
+/* The scan bar runs along the active panel's top edge for its step. */
+.scan {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+.scan.is-ember {
+  background: var(--ember-ink);
+}
+
+.pp-head {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.pp-head b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  transition: color var(--state-ms) ease;
+}
+
+.pp-head > span {
+  display: block;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+.pp-canary.is-hot .pp-head b {
+  color: var(--ember-ink);
+}
+
+.pp-marks {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.pp-marks li {
+  color: var(--muted-2);
+  transition: color var(--state-ms) ease;
+}
+
+.pp-marks li.is-on {
+  color: var(--ink);
+}
+
+.pp-marks li.is-na {
+  color: var(--muted);
+}
+
+.mk {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  vertical-align: 1px;
+  border-radius: 1px;
+  background: var(--border);
+  transition: background-color var(--state-ms) ease;
+}
+
+.pp-marks li.is-on .mk {
+  background: var(--ink);
+}
+
+.pp-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pp-chips li {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--band);
+  font-size: 12px;
+  color: var(--muted);
+  transition:
+    background-color var(--state-ms) ease,
+    border-color var(--state-ms) ease,
+    color var(--state-ms) ease;
+}
+
+.pp-chips li.is-on {
+  background: var(--paper);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.pp-body {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted-2);
+  transition: color var(--state-ms) ease;
+}
+
+.pp-canary.is-hot .pp-body {
+  color: var(--ink);
+}
+
+.pp-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted-2);
+  transition: color var(--state-ms) ease;
+}
+
+.pp-foot.is-on {
+  color: var(--ink);
+}
+
+.pp-found {
+  color: var(--ember-ink);
+}
+
+.pp-found span {
+  opacity: 0;
+  transition: opacity var(--state-ms) ease;
+}
+
+.pp-found span.is-on {
+  opacity: 1;
+}
+
+.pp-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pp-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 66px;
+  padding: 0 10px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  transition:
+    border-color var(--state-ms) ease,
+    background-color var(--state-ms) ease;
+}
+
+.pp-card b {
+  font-weight: 600;
+  transition: color var(--state-ms) ease;
+}
+
+.pp-card span {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+}
+
+.pp-card.is-on {
+  border-color: var(--ink);
+}
+
+.pp-card.is-hot {
+  border-color: var(--ember-ink);
+  background: var(--ember-wash);
+}
+
+.pp-card.is-hot b {
+  color: var(--ember-ink);
+}
+
+.pp-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pp-results li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--band);
+  border: 1px solid var(--band);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted-2);
+  transition:
+    background-color var(--state-ms) ease,
+    border-color var(--state-ms) ease,
+    color var(--state-ms) ease;
+}
+
+.pp-results li svg {
+  color: var(--border);
+  transition: color var(--state-ms) ease;
+}
+
+.pp-results li.is-on {
+  background: var(--paper);
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.pp-results li.is-on svg {
+  color: var(--ink);
+}
+
+.pp-results li.is-hot {
+  border-color: var(--ember-ink);
+}
+
+.pp-results li.is-hot svg {
+  color: var(--ember-ink);
+}
+
+/* Escalation: a note and a short arrow down into Human review. */
+.pipe-escalate {
+  position: absolute;
+  left: 968px;
+  top: 44px;
+  width: 180px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--muted-2);
+  transition: color var(--state-ms) ease;
+}
+
+.pipe-escalate.is-hot {
+  color: var(--ember-ink);
+}
+
+.pipe-escalate-arrow {
+  position: absolute;
+  left: 86px;
+  top: 24px;
+  width: 8px;
+  height: 27px;
+  color: var(--border);
+  transition: color var(--state-ms) ease;
+}
+
+.pipe-escalate.is-hot .pipe-escalate-arrow {
+  color: var(--ember-ink);
+}
+
+.pipe-escalate-arrow::before {
+  content: "";
+  position: absolute;
+  left: 3.25px;
+  top: 0;
+  bottom: 4px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.pipe-escalate-arrow::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  bottom: 0;
+  width: 6px;
+  height: 5px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.pipe-note {
+  position: absolute;
+  left: 298px;
+  top: 400px;
+  width: 720px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--muted);
+}
+
+.pipe-dashes {
+  position: absolute;
+  left: 0;
+  top: 0;
+  fill: none;
+  stroke: var(--connector-dash);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 5;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.pipe-dashes .head {
+  fill: var(--connector-dash);
+  stroke: none;
+}
+
+/* Step bar, sentence and Pause */
+
+.pipe-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 32px;
+  margin-top: 24px;
+  padding: 20px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.psteps {
+  display: flex;
+  gap: 4px;
+}
+
+.pstep {
+  display: flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+}
+
+.pstep-track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+  overflow: hidden;
+  transition: background-color 160ms ease;
+}
+
+.pstep:hover .pstep-track {
+  background: var(--border);
+}
+
+.pstep-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+.pstep-fill.is-ember {
+  background: var(--ember-ink);
+}
+
+.psteps-count {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pnar {
+  flex: 1 1 480px;
+  min-width: 0;
+  min-height: 52px;
+}
+
+.pnar .xf {
+  display: grid;
+}
+
+.pnar-title {
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.pnar-body {
+  margin-top: 2px;
+  font-size: 15px;
+  color: var(--body);
+}
+
+.pipe-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 32px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+}
+
+.pipe-strip > div {
+  padding: 22px 24px;
+  border-left: 1px solid var(--rule-soft);
+}
+
+.pipe-strip > div:first-child {
+  border-left: 0;
+}
+
+.pipe-strip dt {
+  font-weight: 600;
+}
+
+.pipe-strip dd {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .pipe-strip {
+    grid-template-columns: 1fr;
+  }
+  .pipe-strip > div {
+    border-left: 0;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .pipe-strip > div:first-child {
+    border-top: 0;
+  }
+}
+
+/* ---------- Below 1100px: the same panels, stacked, with down-arrows ---------- */
+
+@media (max-width: 1099px) {
+  .how {
+    padding: 72px 0;
+  }
+
+  .pipe-frame {
+    height: auto;
+    margin-top: 40px;
+  }
+
+  .pipe {
+    position: relative;
+    width: auto;
+    height: auto;
+    max-width: 720px;
+    margin: 0 auto;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pw {
+    position: static;
+    width: auto;
+    height: auto;
+  }
+
+  .pw-label {
+    position: static;
+    margin-bottom: 12px;
+  }
+
+  .pw-agents {
+    position: static;
+    width: auto;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pw-bus,
+  .pw-packet,
+  .pipe-dashes,
+  .pipe-escalate-arrow {
+    display: none;
+  }
+
+  .conn {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: 8px;
+    height: 34px;
+    margin: 8px auto;
+    flex: none;
+  }
+
+  .conn-line {
+    left: 3.25px;
+    right: auto;
+    top: 0;
+    bottom: 4px;
+    width: 1.5px;
+    height: auto;
+  }
+
+  .conn-head {
+    left: 1px;
+    right: auto;
+    top: auto;
+    bottom: 0;
+    width: 6px;
+    height: 5px;
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+  }
+
+  .conn .packet {
+    left: 1px;
+    top: 0;
+  }
+
+  .pp {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: auto;
+    height: auto;
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    grid-template-areas:
+      "head body"
+      "head foot";
+    align-items: start;
+    column-gap: 20px;
+    padding: 16px 18px;
+  }
+
+  .pp-head {
+    grid-area: head;
+  }
+
+  .pp-marks,
+  .pp-chips,
+  .pp-body,
+  .pp-cards,
+  .pp-results {
+    grid-area: body;
+    margin-top: 0;
+  }
+
+  .pp-chips {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .pp-card {
+    height: auto;
+    padding: 10px;
+  }
+
+  .pp-foot {
+    grid-area: foot;
+    margin-top: 12px;
+  }
+
+  .pipe-escalate {
+    position: static;
+    width: auto;
+    margin-top: 14px;
+  }
+
+  .pipe-escalate + .conn {
+    margin-top: 6px;
+  }
+
+  .pipe-note {
+    position: static;
+    width: auto;
+    margin-top: 28px;
+  }
+}
+
+@media (max-width: 640px) {
+  .pw-agents {
+    grid-template-columns: 1fr;
+  }
+
+  .pp {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "body"
+      "foot";
+  }
+
+  .pp-marks,
+  .pp-chips,
+  .pp-body,
+  .pp-cards,
+  .pp-results {
+    margin-top: 12px;
+  }
+}
