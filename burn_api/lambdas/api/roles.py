@@ -58,8 +58,8 @@ def parse_spec(body: dict) -> dict:
     if mode is not None and mode not in REFERENCE_MODES:
         raise _bad(f"references must be one of {', '.join(REFERENCE_MODES)}")
     flags = {} if mode is None else {"references": mode}  # absent = the Gateway's default
-    for key in ("canaries", "auto_burn"):
-        value = body.get(key, True)
+    for key, default in (("canaries", True), ("auto_burn", True), ("replace_on_burn", False)):
+        value = body.get(key, default)
         if not isinstance(value, bool):
             raise _bad(f"{key} must be true or false")
         flags[key] = value
@@ -87,7 +87,7 @@ def _scenario_role(agent: dict) -> dict:
         "credentials": list(agent.get("credentials", [])),
         "may_message": [r for r in map(role_name, agent.get("send_to", [])) if r],
         "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
-        "references": references.DEFAULT_MODE, "managed_by": "scenario",
+        "references": references.DEFAULT_MODE, "replace_on_burn": False, "managed_by": "scenario",
     }
 
 
@@ -120,9 +120,10 @@ def lookup(name: str) -> dict:
 
 
 def _view(role: dict, active: int) -> dict:
-    # Rows stored before these fields existed mean "on", like canary.role_policy reads them.
-    return {"canaries": True, "auto_burn": True, "references": references.DEFAULT_MODE, **role,
-            "active_instances": active}
+    # Rows stored before these fields existed mean "on", like canary.role_policy reads them; replace_on_burn
+    # is the exception, off unless a role asks for it.
+    return {"canaries": True, "auto_burn": True, "references": references.DEFAULT_MODE, "replace_on_burn": False,
+            **role, "active_instances": active}
 
 
 def _active_counts() -> dict[str, int]:
