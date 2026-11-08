@@ -35,6 +35,9 @@ import "./burn.css";
 export type { BurnDialogProps, BurnOutcome, BurnTarget } from "./types";
 
 /** The most the API takes for a burn's reason. */
+/** The board's width, so the plan's lines rarely wrap. */
+const DIALOG_WIDTH = 576;
+
 export const REASON_MAX = 200;
 
 function PlanList({ id, lines }: { id: string; lines: PlanLine[] }) {
@@ -222,6 +225,7 @@ export function BurnDialog({ target, onClose, onBurned }: BurnDialogProps) {
         labelledBy={titleId}
         onClose={onClose}
         className="burn-dialog"
+        width={DIALOG_WIDTH}
         initialFocus={finish}
       >
         <p className="cap dialog-eyebrow">
@@ -253,6 +257,7 @@ export function BurnDialog({ target, onClose, onBurned }: BurnDialogProps) {
       busy={busy}
       initialFocus={cancel}
       className="burn-dialog"
+      width={DIALOG_WIDTH}
     >
       <form
         onSubmit={(event) => {
