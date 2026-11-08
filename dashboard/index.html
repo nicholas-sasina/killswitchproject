@@ -10,27 +10,7 @@
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Burn · Agent containment</title>
-    <script>
-      // Resolve the system theme before first paint. Without this the page
-      // renders light and then flips to dark once React mounts, which is a
-      // visible flash on every reload. Kept inline and tiny for that reason;
-      // src/theme.ts owns everything after mount.
-      (function () {
-        try {
-          var dark =
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-          var theme = dark ? "dark" : "light";
-          document.documentElement.dataset.theme = theme;
-          document.documentElement.style.colorScheme = theme;
-          document
-            .querySelector('meta[name="theme-color"]')
-            .setAttribute("content", dark ? "#0d0b0a" : "#f1ede4");
-        } catch (error) {
-          // No matchMedia: the light default already on <html> stands.
-        }
-      })();
-    </script>
+    <script src="/first-paint.js"></script>
   </head>
   <body>
     <div id="root"></div>
