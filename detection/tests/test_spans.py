@@ -98,3 +98,28 @@ def test_nothing_found_costs_no_locating(monkeypatch):
     scanner = _scanner((value, body, meta))
     monkeypatch.setattr(scanner, "_positions", lambda *a: (_ for _ in ()).throw(AssertionError("located")))
     assert scanner.scan("nothing to see here " * 50) == []
+
+
+def _hex_credential(agent="agent-h"):
+    """A credential with no recognizable format, registered whole (exact) plus shingles."""
+    value = secrets.token_hex(16)
+    meta = {"secret_ref": f"burn/{agent}/token", "owner_agent_id": agent, "secret_type": "other",
+            "version": 1, "status": "active"}
+    return value, value, meta
+
+
+def test_key_equals_value_and_trailing_punctuation_are_located():
+    value, body, meta = _hex_credential()
+    scanner = _scanner((value, body, meta))
+    for text in (f"TOKEN={value}\n", f"the token is {value}.", f'"auth":"{value}",', f"({value})"):
+        [f] = known(scanner.scan(text))
+        assert [text[a:b] for a, b in f.spans] == [value], text
+
+
+def test_locating_pieces_never_changes_what_is_found():
+    value, body, meta = _hex_credential()
+    scanner = _scanner((value, body, meta))
+    [f] = known(scanner.scan(f"TOKEN={value}"))
+    assert f.kind == "shingle"  # same finding as before spans existed; only the location is new
+    [fragment] = known(scanner.scan(f"TOKEN={value[:26]}"))
+    assert fragment.spans == ()  # a real fragment is still not locatable
