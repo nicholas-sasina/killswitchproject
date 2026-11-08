@@ -20,7 +20,14 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  window.location.hash = "";
 });
+
+/** Views are addressable, so a test can move between them. */
+function goTo(view: string) {
+  window.location.hash = `#/${view}`;
+  window.dispatchEvent(new Event("hashchange"));
+}
 
 describe("containment dashboard", () => {
   it("requires confirmation before Burn, shows its real result and loads the timeline", async () => {
@@ -121,6 +128,7 @@ describe("containment dashboard", () => {
 
   it("renders nullable agent, ledger and CloudTrail metadata", async () => {
     const id = `agent-${crypto.randomUUID()}`;
+    const live = `agent-${crypto.randomUUID()}`;
     const ref = `burn/${id}/aws_key#v1`;
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;
@@ -134,6 +142,13 @@ describe("containment dashboard", () => {
               status: "revoked",
               session_id: null,
               exposures: 1,
+            },
+            {
+              agent_id: live,
+              role: null,
+              status: "active",
+              session_id: null,
+              exposures: 0,
             },
           ],
           events: [
@@ -207,13 +222,25 @@ describe("containment dashboard", () => {
         />,
       );
     });
+    // The overview roster is the live fleet. The burned agent is not on it,
+    // and the running one renders its nullable session.
     expect(screen.getByText("Session or credential issued")).toBeTruthy();
-    expect(screen.getByText("Unidentified credential")).toBeTruthy();
-    expect(screen.getByText("Source unavailable")).toBeTruthy();
     expect(screen.getByText("No active session")).toBeTruthy();
     expect(screen.getByText("Connected · polling every second")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText("MOCK DATA")).toBeNull();
+    // Absent from the roster, though its events stay in the stream.
+    const roster = screen.getByRole("region", { name: "Active agents" });
+    expect(within(roster).queryByText(id)).toBeNull();
+    expect(within(roster).getByText(live)).toBeTruthy();
+
+    // Contained owns a burned agent's ledger and CloudTrail history.
+    await act(async () => {
+      goTo("burned");
+    });
+    expect(screen.getAllByText(id).length).toBeGreaterThan(0);
+    expect(screen.getByText("Unidentified credential")).toBeTruthy();
+    expect(screen.getByText("Source unavailable")).toBeTruthy();
   });
 
   it.each(["handoff", "egress"] as const)(

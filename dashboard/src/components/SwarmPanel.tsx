@@ -11,9 +11,16 @@ import "./swarm.css";
 export function SwarmPanel({
   api,
   enabled,
+  defaultStatus = "",
 }: {
   api: BurnApi;
   enabled: boolean;
+  /**
+   * Status the filter starts on. The overview passes "active" so contained
+   * instances stay on the Contained view; the filter itself still offers
+   * every status.
+   */
+  defaultStatus?: string;
 }) {
   const loadRoles = useCallback(
     (signal: AbortSignal) => api.roles(signal),
@@ -32,7 +39,7 @@ export function SwarmPanel({
   const [outcome, setOutcome] = useState("");
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState(defaultStatus);
   const roles = useMemo(
     () => [
       ...new Map(

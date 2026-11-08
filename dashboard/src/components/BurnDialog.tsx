@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentState } from "../contracts";
-import { ErrorMessage, Flame } from "./common";
+import { BurnMark, ErrorMessage } from "./common";
 
 export function BurnDialog({
   agent,
@@ -38,7 +38,7 @@ export function BurnDialog({
         }}
       >
         <div className="dialog-icon">
-          <Flame />
+          <BurnMark />
         </div>
         <p className="eyebrow">Contain this agent</p>
         <h2 id="burn-title">Burn {agent.agent_id}?</h2>
@@ -76,7 +76,7 @@ export function BurnDialog({
             Cancel
           </button>
           <button className="burn-button" type="submit" disabled={busy}>
-            <Flame />
+            <BurnMark />
             {busy ? "Containing…" : "Confirm Burn"}
           </button>
         </div>

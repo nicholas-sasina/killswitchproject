@@ -1,4 +1,15 @@
-// Mirrors contracts/burn-api.openapi.yaml and ledger-event.schema.json.
+// Hand-maintained mirror of the repository's contracts. When either side
+// changes, both must change:
+//
+//   contracts/ledger-event.schema.json  -> LedgerEvent, EventAction, source
+//   contracts/burn-api.openapi.yaml     -> every request and response below
+//   contracts/burn.schema.json          -> RoleFields and RoleSpec
+//
+// If the API ships a new event action before this file mirrors it, the stream
+// still renders: EventFeed falls back to readable prose for actions it does
+// not know, and alerts.ts treats an unrecognised action as "not an alert"
+// rather than guessing a severity. Both degrade quietly instead of breaking,
+// so a merge in either order is safe.
 export type SecretType = "aws_key" | "api_key" | "other";
 export type Owner = "agent" | "shared" | "unknown";
 export type EventAction =

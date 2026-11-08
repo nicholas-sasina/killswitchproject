@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AgentState, BurnResult } from "../contracts";
 import { BurnOutcome } from "./BurnOutcome";
-import { Flame, Status } from "./common";
+import { BurnMark, Status } from "./common";
 
 export function AgentCard({
   agent,
@@ -50,7 +50,9 @@ export function AgentCard({
         <div className="exposure">
           <strong>{agent.exposures ?? "—"}</strong>
           <span>credentials seen</span>
-          <span className="inspect">View ledger ↗</span>
+          {/* Selecting the card fills the panels below; it does not navigate,
+              so this does not promise a link. */}
+          <span className="inspect">Show details</span>
         </div>
       </button>
       {recentBurn && result && <BurnOutcome result={result} compact />}
@@ -60,7 +62,7 @@ export function AgentCard({
         disabled={busy || status === "revoked"}
         aria-label={`Burn ${agent.agent_id}`}
       >
-        <Flame />
+        <BurnMark />
         {status === "revoked" ? "Revoked" : "Burn agent"}
       </button>
     </article>
