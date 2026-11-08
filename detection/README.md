@@ -152,11 +152,12 @@ malformed or mismatched authorities are refused before forwarding, so a differen
 bucket cannot be selected through a Host header. Non-sink destinations require HTTPS;
 a TLS-configured sink cannot be downgraded to HTTP.
 
-The swarm session's proposed `egress` field narrows the deployment allowlist: missing or
-`null` uses the legacy defaults, `[]` denies all, and a list permits only those exact hosts
-that are also globally allowed. The session owner supplies this field; the proxy does not
-look up a mutable role separately. Invalid policies fail closed. This adapter follows
-`ws/swarms-contracts`; it takes effect when the session writer supplies the field.
+The swarm session's `egress` field narrows the deployment allowlist: missing or `null` uses
+the legacy defaults, and a list permits only those exact hosts that are also globally allowed.
+Burn's configured Gateway is exempt from valid role restrictions because it enforces tools
+per role. An empty list therefore permits only that Gateway when configured. Model endpoints
+remain restricted. The session writer supplies this field; the proxy does not look up a
+mutable role separately. Invalid policies fail closed, including at the Gateway.
 
 The evaluation configuration audit counts the simulated-attacker sink as outsider-readable.
 Custom Gateway/provider endpoints require owner verification rather than being declared safe
@@ -174,5 +175,5 @@ For a configuration without the simulated-attacker endpoint, explicitly set
 `BURN_SINK_URL=''`. This removes the sink from the allowlist and removes its private-address
 exception; it does not prove that the remaining services expose no outsider-readable
 capabilities. Fixed AWS hostnames also remain unverified in the configuration audit.
-An empty session `egress` list reaches no destinations but disables all agent work, so the
-audit labels it deny-all and does not report it as a usable production configuration.
+An empty session `egress` list is labelled Gateway-only when the Gateway is configured, or
+deny-all otherwise. Neither case certifies the zero-readable-destination target.

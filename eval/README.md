@@ -144,6 +144,12 @@ values remaining in the output the agent would receive. It does not replace or s
 reference implementation to obtain a passing result. If the selected source still passes
 recognized values through, the measured exposure target fails.
 
+To evaluate a staged reference implementation without merging it, select its detached source
+checkout with `--source-root`. Set `BURN_REFERENCE_PROBE_SOURCE` to that checkout when running
+the evaluation test suite. The optional test checks replacement tokens and ledger rows marked
+`referenced` with the expected `source_ref`, in addition to zero remaining raw values and no
+withheld responses. These response checks do not prove tool-side resolution or deployed behavior.
+
 Canary measurements require a source checkout containing the canary owner's implementation
 and `burn_api/scripts/canary_harness.py`. To evaluate that reviewed branch without merging it,
 prepare a detached checkout from the repository root:
@@ -224,8 +230,9 @@ establish that it is safe.
 `BURN_SINK_URL=''` explicitly removes the test sink from the proxy's deployment allowlist and
 removes its private-address exception. The default still includes the demo sink. Run the
 audit with the same configuration as the proxy being evaluated. Removing the sink does not
-verify the remaining destinations. An empty session `egress` list permits no hosts, but it
-also prevents the agent from doing its work; this is not a usable zero-exposure deployment.
+verify the remaining destinations. Valid session egress lists always preserve Burn's configured
+Gateway, which enforces tools per role. An empty list is Gateway-only when it is configured,
+or deny-all otherwise; neither state certifies a zero-exposure deployment.
 
 New load runs split post-revocation calls into refused, throttled, succeeded and other errors,
 for revoked and unaffected agents separately. Latency includes successful calls only; no

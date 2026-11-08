@@ -80,7 +80,7 @@ def references(root, trials):
         Name=names.FINGERPRINT_KEY_SECRET, SecretString=key.hex())
     db = boto3.resource("dynamodb", region_name="us-east-1")
     records = []
-    withheld = tool_errors = 0
+    withheld = tool_errors = reference_tokens = referenced_ledger_entries = 0
     for _ in range(trials):
         suffix = secrets.token_hex(4)
         agent, session, client = "agent-probe-"+suffix, "sess_probe_"+suffix, "client_probe_"+suffix
@@ -114,13 +114,21 @@ def references(root, trials):
         output_text = "\n".join(shapes.result_texts(output["body"]))
         remaining = {f.secret_ref for f in detection.scan(output_text) if f.secret_ref in recognized}
         remaining.update(ref for ref in recognized if planted[ref] in output_text)
+        reference_tokens += sum(f"{{{{burn:ref:{ref}}}}}" in output_text for ref in recognized)
+        for ref in recognized:
+            row = db.Table(names.EXPOSURES_TABLE).get_item(
+                Key={"agent_id": agent, "secret_ref_or_fp": ref}, ConsistentRead=True).get("Item", {})
+            referenced_ledger_entries += row.get("status") == "referenced" and row.get("source_ref") == "read_config:probe.env"
         records.append({"event_id": "reference-probe-"+suffix, "recognized": len(recognized),
                         "in_context": len(remaining)})
-    result.update(records=records, checks={"responses": len(records), "withheld_responses": withheld, "tool_errors": tool_errors}, notes=" ".join([
+    result.update(records=records, checks={"responses": len(records), "withheld_responses": withheld,
+        "tool_errors": tool_errors, "reference_tokens": reference_tokens,
+        "referenced_ledger_entries": referenced_ledger_entries}, notes=" ".join([
         "Real Gateway RESPONSE handler, detection and ledger writes execute against moto; tool output and JWT claims are synthetic fixtures.",
         "Gateway JWT authorization and tool execution are outside this probe. No deployed AWS endpoint or model is called.",
         "Counts cover registered plaintext API credentials in text tool output. A failing baseline target is reported without changing product behavior.",
         "Withheld responses and tool errors are counted separately; zero exposure alone does not establish successful reference resolution.",
+        "Reference tokens and ledger entries marked referenced with the expected source_ref are counted separately. Tool-side reference resolution is outside this response probe.",
     ]))
     return result
 

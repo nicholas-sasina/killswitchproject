@@ -123,14 +123,16 @@ class Settings:
     def role_reason(self, host: str, session: dict) -> str | None:
         """The swarm session's egress field can narrow, never expand, global hosts.
 
-        Missing/null preserves legacy sessions. An explicit empty list denies all.
-        Matches the proposed ws/swarms-contracts session/role field.
+        Missing/null preserves legacy sessions. The configured Gateway is exempt
+        from valid role restrictions; it still enforces the role's tools.
         """
         hosts = session.get("egress")
         if hosts is None:
             return None
         if not isinstance(hosts, list) or any(not _valid_host(h) for h in hosts):
             return "role_policy_invalid"
+        if self.gateway_url and host == host_of(self.gateway_url):
+            return None
         return None if host in {h.rstrip('.').lower() for h in hosts} else "role_destination_not_allowed"
 
 

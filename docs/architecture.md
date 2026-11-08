@@ -85,12 +85,14 @@ going to its own home service in its expected header is not a leak.
 
 Allowed HTTPS requests to the configured provider also receive a signed session-origin
 header after scanning. The proxy removes agent-supplied copies, then binds the authenticated
-session and timestamp to an HMAC using the system fingerprint key. The staged canary provider
+session and timestamp to an HMAC using the system fingerprint key. The canary provider
 verifies that header to distinguish use through Burn from outside use. This protocol does not
 relax the exit check, and requires the matching provider implementation to be deployed.
 
-The proxy permits only exact configured destinations. Session `egress` lists can narrow the
-deployment allowlist, while missing or null lists retain legacy defaults. S3 is restricted to
+The proxy permits only exact configured destinations. Session `egress` lists narrow the
+deployment allowlist except for Burn's configured Gateway, which continues to enforce tools
+per role. Missing or null lists retain legacy defaults; empty lists allow only the Gateway
+when configured. Invalid lists fail closed. S3 is restricted to
 the demo's HTTPS `GET /` bucket-list operation without a query or body. The default configured
 sink is deliberately readable by the simulated attacker. An empty `BURN_SINK_URL` removes its
 allowlist entry and private-address exception; other destinations still need capability and
@@ -126,9 +128,9 @@ Runtime credential files under `.run/` and local configuration stay private and 
 
 ## Contract and runtime scope
 
-The API contract also defines roles, enrollment tokens, instances and scoped burns. Their
-mock implementation supports development independently of deployed handlers. A contract or
-mock route alone does not establish that the corresponding real API route is deployed.
+The API implements roles, enrollment tokens, instances and scoped burns. Mocks support
+development independently of the real handlers. Implementation and mock routes do not
+establish which revision is deployed.
 The [CLI and Python SDK](../cli/README.md) expose these workflows to operators and agent code;
 their availability also depends on the corresponding API implementation.
 Canaries and secret references belong to separate component implementations; evaluations

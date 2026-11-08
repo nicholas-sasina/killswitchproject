@@ -38,7 +38,7 @@ def audit(settings: Settings, session: dict | None = None):
     policy_valid = True
     mode = "deployment"
     if session is not None:
-        mode = "deny-all" if session.get("egress") == [] else "session"
+        mode = ("gateway-only" if settings.gateway_url else "deny-all") if session.get("egress") == [] else "session"
         policy_valid = not any(settings.role_reason(h, session) == "role_policy_invalid" for h in hosts)
         hosts = {h for h in hosts if settings.role_reason(h, session) is None}
     for host in sorted(hosts):
@@ -187,7 +187,7 @@ def load_audit(path: Path):
             raise ValueError("invalid input digest")
     if (data["target_met"] is not False or data["configuration_only"] is not True
         or data["policy_valid"] is not True or not isinstance(data["mode"], str)
-        or data["mode"] not in {"deployment", "session", "deny-all"}
+        or data["mode"] not in {"deployment", "session", "deny-all", "gateway-only"}
         or (data["mode"] == "deployment") == provenance["session_provided"]):
         raise ValueError("unsupported audit assertion")
     if not isinstance(data["destinations"], list):
@@ -216,6 +216,8 @@ def load_audit(path: Path):
     hosts = [row["host"] for row in rows]
     if len(set(hosts)) != len(hosts) or data["mode"] == "deny-all" and rows:
         raise ValueError("inconsistent destination set")
+    if data["mode"] == "gateway-only" and (len(rows) != 1 or rows[0]["basis"] != APP_BASIS):
+        raise ValueError("inconsistent Gateway-only audit")
     if data["mode"] == "deployment" and not AWS_HOSTS <= set(hosts):
         raise ValueError("deployment audit omits fixed endpoints")
     readable = sum(row["outsider_readable"] is True for row in rows)

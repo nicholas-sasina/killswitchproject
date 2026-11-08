@@ -62,7 +62,7 @@ def measure(kind, evidence):
         if not isinstance(checks, dict):
             raise ValueError("checks must be aggregate observations")
         safe = {}
-        fields = ("responses", "withheld_responses", "tool_errors") if kind == "references" else ("provider_rejections", "rotated_old_api_key_rejections")
+        fields = ("responses", "withheld_responses", "tool_errors", "reference_tokens", "referenced_ledger_entries") if kind == "references" else ("provider_rejections", "rotated_old_api_key_rejections")
         for field in fields:
             if field in checks:
                 safe[field] = count(checks[field])

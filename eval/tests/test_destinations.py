@@ -31,7 +31,10 @@ def test_session_projection_and_deny_all_round_trip(declared, tmp_path):
     result = destinations.declared_audit(declared, session)
     output = tmp_path / "audit.json"
     output.write_text(json.dumps(result))
-    assert destinations.load_audit(output)["usable_configuration"] is False
+    loaded = destinations.load_audit(output)
+    assert loaded["mode"] == "gateway-only"
+    assert [r["host"] for r in loaded["destinations"]] == ["gateway.example.test"]
+    assert loaded["unverified"] == 1 and loaded["target_met"] is False
     session.write_text('{"egress": [], "api_key": "private-value"}')
     with pytest.raises(ValueError):
         destinations.declared_audit(declared, session)

@@ -332,6 +332,22 @@ def test_provider_proof_binds_session_and_timestamp_to_hmac_key():
     assert make_session_proof(session + "x", key, now=1000) != proof
 
 
+@pytest.mark.parametrize("egress", [[], ["provider.example.test"], None])
+@pytest.mark.parametrize("connect", [False, True])
+def test_valid_role_policy_preserves_gateway_access(setup, egress, connect):
+    scanner, _, agent, settings, _ = setup
+    state = State(scanner.key, {}, agent)
+    state.session = lambda *_: {"status": "active", "egress": egress}
+    proxy = BurnProxy(state=state, settings=settings)
+    flow = flow_for(state)
+    flow.request.url = settings.gateway_url
+    with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]):
+        proxy._process(flow, connect=connect)
+    assert flow.response is None
+    assert settings.role_reason("bedrock-runtime.us-east-1.amazonaws.com", {"egress": []}) == "role_destination_not_allowed"
+    assert settings.role_reason("gateway.example.test", {"egress": "invalid"}) == "role_policy_invalid"
+
+
 @pytest.mark.parametrize("session", ["", "x" * 129, "sess\n", "sess/invalid", None])
 def test_invalid_provider_proof_session_fails_closed(session):
     with pytest.raises(ValueError):

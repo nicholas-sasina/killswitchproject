@@ -55,6 +55,18 @@ def test_actual_gateway_probe_records_provenance_and_exposure_without_values(tmp
     assert "Bearer " not in text
 
 
+def test_staged_reference_response_emits_tokens_and_source_attribution():
+    source = os.getenv("BURN_REFERENCE_PROBE_SOURCE")
+    if not source:
+        pytest.skip("Set BURN_REFERENCE_PROBE_SOURCE to the reference implementation checkout")
+    result = run_probe("references", Path(source), 2)
+    summary = layers.measure("references", result)
+    assert summary["recognized"] == 4 and summary["in_context"] == 0
+    assert summary["checks"]["reference_tokens"] == summary["checks"]["referenced_ledger_entries"] == 4
+    assert summary["checks"]["withheld_responses"] == summary["checks"]["tool_errors"] == 0
+    assert summary["target_met"] and "resolution is outside" in result["notes"]
+
+
 def test_actual_canary_handlers_when_explicit_source_is_available():
     source = os.getenv("BURN_CANARY_PROBE_SOURCE")
     if not source:
