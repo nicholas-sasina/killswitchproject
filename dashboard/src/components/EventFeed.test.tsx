@@ -6,6 +6,28 @@ import type { LedgerEvent } from "../contracts";
 
 afterEach(cleanup);
 
+it.each([
+  ["replaced", "Burned instance replaced", "replaced by agent-worker-b2c3d4"],
+  ["resumed", "Replacement resumed the task", "2 done, 1 quarantined"],
+] as const)("renders the %s lifecycle event", (action, title, detail) => {
+  render(
+    <EventFeed
+      events={[
+        {
+          event_id: `evt_${action}`,
+          ts: "2026-11-08T06:00:00Z",
+          agent_id: "agent-worker-a1b2c3",
+          source: "instance",
+          action,
+          detail,
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByText(title)).toBeTruthy();
+  expect(screen.getByText(detail)).toBeTruthy();
+});
+
 it("renders a canary_used event from the provider instead of blanking the feed", () => {
   const event: LedgerEvent = {
     event_id: "evt_01JZ0000000000000000000000",
