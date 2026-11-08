@@ -327,7 +327,7 @@ class Swarm:
                    else "the new instance must be of the same role" if new.get("role") != old.get("role")
                    else "the new instance must be active" if new["status"] != "active"
                    else "the new instance must be created after the old one was burned"
-                   if new["created_at"] < old["revoked_at"]
+                   if task_progress.parse_time(new["created_at"]) < task_progress.parse_time(old["revoked_at"])
                    else "the new instance is already a replacement" if new.get("replaces") else None)
         if problem:
             raise SwarmError(400, problem)

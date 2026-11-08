@@ -176,3 +176,17 @@ def test_linking_a_replacement_needs_a_person_not_an_instance(client):
         assert refused.status_code == 401
         assert anonymous.get(f"/instances/{new['session_id']}", headers=bearer).status_code == 401
     assert instance(client, old["session_id"])["replacement"]["status"] == "pending"
+
+
+def test_joined_after_the_burn_compares_times_not_strings(client):
+    make_role(client, ROLE)
+    old = fresh(client)
+    burn_one(client, old["session_id"])
+    new = fresh(client)
+    sessions = client.app.state.mock.sessions
+    # As strings "...:00Z" sorts after "...:00.500Z", so a join half a second before the burn would pass.
+    sessions[old["session_id"]]["revoked_at"] = "2026-11-07T10:00:00.500Z"
+    sessions[new["session_id"]]["created_at"] = "2026-11-07T10:00:00Z"
+    assert "after" in replace(client, old["session_id"], new["session_id"], status=400)["detail"]
+    sessions[new["session_id"]]["created_at"] = "2026-11-07T10:00:00.500+00:00"  # the same instant counts as after
+    assert replace(client, old["session_id"], new["session_id"])["replaces"] == old["session_id"]
