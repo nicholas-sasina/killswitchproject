@@ -226,7 +226,7 @@ describe("timelineItems", () => {
 });
 
 describe("beforeBurnSteps", () => {
-  it("lists what a burn would do, as on the running board", () => {
+  it("lists what a burn would do: revoke, rotate, flag, leave the rest", () => {
     const steps = beforeBurnSteps({
       agentId: "agent-worker-2",
       entries: [crm],

@@ -143,7 +143,7 @@ describe("AgentPage", () => {
     ).toBe("#/roles");
   });
 
-  it("shows a running agent as on the running board", async () => {
+  it("shows a running agent: its keys, what a burn would do, who it is", async () => {
     show("sess-w3", makeConsole({ api: withLedger() }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "worker-03",
@@ -247,7 +247,7 @@ describe("AgentPage", () => {
     expect(lede()).toContain("Burned by you at");
   });
 
-  it("shows a burned agent as on the burned board", () => {
+  it("shows a burned agent: why, what the burn did, who took over", () => {
     show("sess-w4");
     expect(screen.getByText("Burned")).toBeTruthy();
     expect(lede()).toContain(
