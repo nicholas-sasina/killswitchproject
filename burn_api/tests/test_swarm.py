@@ -436,9 +436,10 @@ def test_failed_join_cleans_up_what_it_created_and_refunds_the_token(env, monkey
     status, _ = call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})
     assert status == 429
     deletes = [c for c in env.minter.calls if c[0] == "DELETE"]
-    assert len(deletes) == 1 and deletes[0][1].startswith("/agents/agent-worker-")
+    assert [c[1].rsplit("/", 1)[-1] for c in deletes] == ["canaries", "credentials"]
+    assert all(c[1].startswith("/agents/agent-worker-") for c in deletes)
     minted = [c for c in env.minter.calls if c[0] == "POST"][0][1]
-    assert deletes[0][1] == minted  # same agent id that was issued credentials
+    assert deletes[1][1] == minted  # same agent id that was issued credentials
     assert env.ddb.Table("burn-sessions").scan()["Items"] == []
     monkeypatch.setattr(badges, "create_badge", real_create)
     assert call(env, "POST", "/sessions", {"role": "worker", "enroll_token": token})[0] == 201  # use refunded
