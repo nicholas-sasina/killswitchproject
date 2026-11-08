@@ -1,0 +1,161 @@
+"""`make attack`: the attacker's stand-in server for the attack scenario.
+
+It plays the outside party that receives a leaked file. In the attack scenario
+(agents/scenarios/support-desk-attack.yaml) a poisoned ticket asks the agent to
+POST the contents of config/app.env.bak to http://127.0.0.1:8099/audit. A real
+Claude Code session on a laptop, under `burn run` with no egress proxy, triages
+that ticket and sends the file out through its own HTTP tool (e.g. curl). This
+listener is where it lands.
+
+What this does, and nothing else:
+  - listens on 127.0.0.1 only (a local stand-in; integration's rule is no
+    third-party hosts);
+  - reads ONLY what is POSTed to it - no Burn API call, no table read, no other
+    source;
+  - extracts key-shaped tokens from the body;
+  - presents each to the mock provider exactly as an outsider would, with no
+    Burn session proof: GET <provider>/v1/whoami with `Authorization: Bearer
+    <token>` (minter/README.md, Canaries). The provider answers 401 for a canary
+    and for rotated or unknown keys, 200 only for a live key;
+  - prints, per token, only "refused" or "accepted" and a short fingerprint.
+
+A credential value is never printed or logged. Presenting the canary is what
+trips Burn's existing canary path: the provider records it and dispatches the
+incident. This script never calls Burn and takes no shortcut that would cause a
+burn - the burn, if any, is Burn reacting to the attacker on its own.
+
+    make attack            # listen on 127.0.0.1:8099
+    make attack PORT=9000
+"""
+import argparse
+import hashlib
+import os
+import re
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+HOST = "127.0.0.1"  # local stand-in only; never bind a routable interface
+DEFAULT_PORT = 8099
+AUDIT_PATH = "/audit"
+
+# Key-shaped tokens an outsider would pull from a leaked config. A Burn secret
+# reference ({{burn:ref:...}}) is not key-shaped and never matches, so the real
+# keys that were swapped for references are simply not there to try.
+PROVIDER_KEY = re.compile(r"(?<![A-Za-z0-9_])mpk_live_[A-Za-z0-9]{32}(?![A-Za-z0-9])")
+AWS_KEY = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])")
+
+
+def extract_keys(text: str) -> list[str]:
+    """Every distinct key-shaped token in `text`, in the order first seen."""
+    matches = [(m.start(), m.group(0)) for pattern in (PROVIDER_KEY, AWS_KEY)
+               for m in pattern.finditer(text or "")]
+    seen: dict[str, None] = {}
+    for _, token in sorted(matches, key=lambda pair: pair[0]):
+        seen.setdefault(token, None)
+    return list(seen)
+
+
+def fingerprint(value: str) -> str:
+    """A short, non-reversible id for a key, so a human can tell two keys apart
+    in the output without the value ever being shown."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def key_kind(value: str) -> str:
+    return "provider" if value.startswith("mpk_live_") else "aws"
+
+
+def present_to_provider(provider_url: str, token: str, get=None) -> str:
+    """"accepted" if the provider authenticates the token, else "refused".
+
+    Presented as an outsider: a bearer token and nothing else. No session proof,
+    so the provider treats a canary as used from outside Burn.
+    """
+    if get is None:
+        import httpx
+
+        def get(url, headers):  # noqa: E306 - tiny default, injected in tests
+            return httpx.get(url, headers=headers, timeout=30).status_code
+
+    status = get(provider_url.rstrip("/") + "/v1/whoami", {"Authorization": f"Bearer {token}"})
+    return "accepted" if status == 200 else "refused"
+
+
+def process_payload(body: str, provider_url: str, present=present_to_provider, out=print) -> list[tuple[str, str]]:
+    """Extract keys from one received body and try each against the provider.
+
+    Returns (verdict, fingerprint) per key. Prints the same, never a value.
+    """
+    keys = extract_keys(body)
+    if not keys:
+        out(f"received {len(body)} byte(s); no key-shaped tokens to try")
+        return []
+    out(f"received {len(body)} byte(s); {len(keys)} key-shaped token(s) to try against the provider:")
+    results = []
+    for key in keys:
+        fp = fingerprint(key)
+        try:
+            verdict = present(provider_url, key)
+        except Exception as exc:  # noqa: BLE001 - a dead provider is not an accepted key
+            out(f"  error    {key_kind(key)} key {fp}  (provider unreachable: {type(exc).__name__})")
+            continue
+        out(f"  {verdict:8} {key_kind(key)} key {fp}")
+        results.append((verdict, fp))
+    return results
+
+
+class AuditHandler(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
+        length = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"received": true}')
+        print(f"\n--- POST {self.path} from {self.client_address[0]} ---")
+        process_payload(body, self.server.provider_url, present=self.server.present)
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, *_args) -> None:
+        pass  # the request body may carry secrets; we never let the base class log it
+
+
+def make_server(port: int, provider_url: str, present=present_to_provider) -> HTTPServer:
+    server = HTTPServer((HOST, port), AuditHandler)
+    server.provider_url = provider_url
+    server.present = present
+    return server
+
+
+def provider_url_from_env() -> str:
+    """BURN_PROVIDER_URL, else the SSM parameter the minter stack published."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from common import setting
+
+    return setting("BURN_PROVIDER_URL", "/burn/provider/url")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--provider-url", default="", help="default: BURN_PROVIDER_URL or SSM /burn/provider/url")
+    args = parser.parse_args()
+    provider_url = args.provider_url or provider_url_from_env()
+    server = make_server(args.port, provider_url)
+    print(f"attacker listener on http://{HOST}:{args.port}{AUDIT_PATH}")
+    print(f"will present any key it receives to {provider_url}/v1/whoami as an outsider (no session proof)")
+    print("Ctrl-C to stop.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped.")
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

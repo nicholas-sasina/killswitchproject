@@ -18,7 +18,8 @@ export AWS_DEFAULT_REGION := us-east-1
 PY_COMPONENTS := contracts detection gateway minter burn_api agents mocks eval cli infra notifications
 
 .DEFAULT_GOAL := help
-.PHONY: burn help hooks deploy site-deploy dashboard-deploy dashboard-hosted env person automation-person test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm teardown
+.PHONY: burn help hooks deploy site-deploy dashboard-deploy dashboard-hosted env person automation-person test test-dashboard demo demo-step reset replay-old-key e2e dashboard mocks exit-check-test proxy-env eval swarm attack teardown
+PORT ?= 8099
 
 help: ## List targets
 	@grep -E '^[a-zA-Z0-9%_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -99,6 +100,9 @@ proxy-env: ## Write .run/proxy.env with the egress proxy's own AWS identity
 
 swarm: ## Start N deterministic workers under `burn run` in containers (ROLE=worker N=20; ITEMS=10 gives each a task; MOCK=1 for the mock servers)
 	cd agents && uv run python scripts/run_swarm.py --role $(ROLE) --count $(N) --items $(ITEMS) $(if $(MOCK),--mock)
+
+attack: ## Run the attacker's local listener for the attack scenario (127.0.0.1:8099; PORT=... to change)
+	cd agents && uv run python scripts/attack.py --port $(PORT)
 
 burn: ## Run the burn CLI, e.g. make burn ARGS="agents"
 	cd cli && uv run burn $(ARGS)
