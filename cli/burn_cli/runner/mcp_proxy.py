@@ -36,6 +36,20 @@ class McpProxy:
         self._server.shutdown()
         self._server.server_close()
 
+    def _upstream_url(self, target: str) -> str | None:
+        """The Gateway URL for a request target, or None unless it stays on the Gateway's own host.
+
+        http.server accepts targets that do not start with "/" (".evil.example/x", "@evil/x"), which, glued onto the
+        origin, would send the badge token to another host.
+        """
+        if not target.startswith("/") or target.startswith("//"):
+            return None
+        url = self._origin + target
+        parts, gateway = urlsplit(url), urlsplit(self._origin)
+        if (parts.scheme, parts.netloc) != (gateway.scheme, gateway.netloc):
+            return None
+        return url
+
     def _handler(self):
         outer = self
 
@@ -48,6 +62,9 @@ class McpProxy:
                 outer._on_activity()
                 length = int(self.headers.get("content-length") or 0)
                 body = self.rfile.read(length) if length else None
+                url = outer._upstream_url(self.path)
+                if url is None:  # the badge token must only ever go to the Gateway
+                    return self._fail(400, "BURN: bad request target")
                 try:
                     token = outer._badge.get()
                 except TokenRefused as exc:
@@ -56,7 +73,7 @@ class McpProxy:
                     return self._fail(502, str(exc))
                 headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP}
                 headers["Authorization"] = f"Bearer {token}"  # replaces anything the agent sent
-                req = urllib.request.Request(outer._origin + self.path, method=self.command, data=body, headers=headers)
+                req = urllib.request.Request(url, method=self.command, data=body, headers=headers)
                 try:
                     upstream = urllib.request.urlopen(req, timeout=120)
                 except urllib.error.HTTPError as err:
