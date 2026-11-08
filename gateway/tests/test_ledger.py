@@ -23,13 +23,30 @@ def test_own_credential_is_recorded_without_its_value(aws):
 
     out = respond(session, json.dumps({"path": "config/app.env", "content": f"KEY={value}\n"}))
 
-    assert out["mcp"]["transformedGatewayResponse"]["body"]["result"]["content"][0]["text"].count(value) == 1
+    text = out["mcp"]["transformedGatewayResponse"]["body"]["result"]["content"][0]["text"]
+    assert value not in text and "{{burn:ref:burn/agent-alpha/api_key}}" in text  # references are the default
     row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
     assert row["owner"] == "agent" and row["owner_agent_id"] == "agent-alpha"
     assert row["source"] == "tool_response" and row["via"] == "read_config" and row["first_seen"]
+    assert row["status"] == "referenced" and row["source_ref"] == "read_config:config/app.env"
     [event] = events(aws)
     assert (event["action"], event["source"], event["tool"]) == ("recorded", "tool_response", "read_config")
-    assert event["secret_ref"] == "burn/agent-alpha/api_key" and event["detail"] == "own credential seen in read_config output"
+    assert event["secret_ref"] == "burn/agent-alpha/api_key"
+    assert event["detail"] == "own credential seen in read_config output; the agent got a reference"
+    assert value not in json.dumps([row, event], default=str)
+
+
+def test_with_references_off_the_value_passes_through_and_is_recorded(aws):
+    session = put_session(aws, references="off")
+    value = register_credential(aws, "burn/agent-alpha/api_key", "agent-alpha")
+
+    out = respond(session, json.dumps({"path": "config/app.env", "content": f"KEY={value}\n"}))
+
+    assert out["mcp"]["transformedGatewayResponse"]["body"]["result"]["content"][0]["text"].count(value) == 1
+    row = ledger_rows(aws, "agent-alpha")["burn/agent-alpha/api_key"]
+    assert row["status"] == "seen" and "report" not in row
+    [event] = events(aws)
+    assert event["detail"] == "own credential seen in read_config output"
     assert value not in json.dumps([row, event], default=str)
 
 
@@ -44,7 +61,8 @@ def test_shared_and_other_agents_credentials_are_attributed(aws):
     assert rows["burn/shared/crm_db_url"]["owner"] == "shared"
     assert rows["burn/agent-beta/api_key"]["owner_agent_id"] == "agent-beta"
     assert {e["detail"] for e in events(aws)} == {
-        "shared credential seen in read_config output", "credential of agent-beta seen in read_config output"}
+        "shared credential seen in read_config output; the agent got a reference",
+        "credential of agent-beta seen in read_config output; the agent got a reference"}
 
 
 def test_repeat_sightings_update_the_entry_without_a_new_event(aws, monkeypatch):

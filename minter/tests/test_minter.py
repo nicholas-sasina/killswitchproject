@@ -8,6 +8,7 @@ import pytest
 import aws
 import minter_app
 from burn_contracts import fingerprint as fp
+from conftest import fingerprint_rows
 
 AGENT = "agent-tester"
 
@@ -160,7 +161,7 @@ def test_delete_removes_everything(secrets_client, tables):
     assert status == 200 and sorted(body["deleted"]) == [f"burn/{AGENT}/api_key", f"burn/{AGENT}/aws_key"]
     assert secrets_client.list_secrets(Filters=[{"Key": "name", "Values": ["burn/"]}])["SecretList"] == []
     assert tables["credentials"].scan()["Items"] == []
-    assert tables["fingerprints"].scan()["Items"] == []
+    assert fingerprint_rows(tables) == []
     with pytest.raises(boto3.client("iam").exceptions.NoSuchEntityException):
         boto3.client("iam").get_user(UserName=f"burn-agent-{AGENT}")
     assert call("DELETE", f"/agents/{AGENT}/credentials")[1] == {"deleted": []}  # safe to repeat
@@ -231,3 +232,19 @@ def test_put_restores_a_secret_that_is_in_a_recovery_window(secrets_client):
     assert vault.exists("burn/shared/old") is False and vault.get("burn/shared/old") is None
     vault.put("burn/shared/old", "v2")
     assert secret(secrets_client, "burn/shared/old") == "v2"
+
+
+def test_every_fingerprint_change_bumps_the_version(tables):
+    def version():
+        item = tables["fingerprints"].get_item(Key={"fingerprint": "_version"}).get("Item")
+        return int(item["v"]) if item else 0
+
+    assert version() == 0
+    issue(types=["api_key"])
+    after_issue = version()
+    assert after_issue >= 1
+    call("POST", f"/agents/{AGENT}/rotate", {})
+    after_rotate = version()
+    assert after_rotate > after_issue  # mark_rotated + register of the new value
+    call("DELETE", f"/agents/{AGENT}/credentials")
+    assert version() > after_rotate

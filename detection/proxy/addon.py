@@ -10,7 +10,8 @@ from mitmproxy import http
 
 from burn_contracts.names import is_agent_id
 from burn_detect import Scanner, SessionWindow
-from proxy.policy import ExitCheck, Settings, public_ip
+from proxy.policy import ExitCheck, Settings, host_of, public_ip
+from proxy.proof import HEADER as PROOF_HEADER, make_session_proof
 from proxy.state import AwsState
 
 
@@ -58,19 +59,23 @@ class BurnProxy:
     def _process(self, flow, connect=False, headers_only=False):
         with self.lock:
             try:
+                # Agent-supplied proofs never cross the trust boundary, including
+                # duplicates and requests to unrelated destinations.
+                flow.request.headers.pop(PROOF_HEADER, None)
                 self._initialize()
                 identity = self._identity(flow)
                 if not identity:
                     self._reply(flow, "session_required", action="refused")
                     return
                 agent, session = identity
-                if not self.state.session(agent, session):
+                session_row = self.state.session(agent, session)
+                if not session_row:
                     # An unrecognized auth password is never written to the event stream.
                     self._reply(flow, "session_inactive", agent=agent, action="refused")
                     return
                 self.connections[flow.client_conn.id] = identity
                 host, port = flow.request.host.rstrip(".").lower(), flow.request.port
-                reason = self.settings.route_reason(host, port)
+                reason = self.settings.route_reason(host, port) or self.settings.role_reason(host, session_row)
                 if reason:
                     self._reply(flow, reason, agent=agent, session=session)
                     return
@@ -84,6 +89,12 @@ class BurnProxy:
                     length = flow.request.headers.get("content-length", "0")
                     if not length.isdecimal() or int(length) > 262_144:
                         self._reply(flow, "payload_too_large", agent=agent, session=session)
+                    else:
+                        reason = self.settings.request_reason(flow.request.url, flow.request.method,
+                            int(length) > 0 or "transfer-encoding" in flow.request.headers,
+                            list(flow.request.headers.items(multi=True)))
+                        if reason:
+                            self._reply(flow, reason, agent=agent, session=session)
                     return
                 if session not in self.windows:
                     self.windows[session] = SessionWindow()
@@ -95,9 +106,11 @@ class BurnProxy:
                     body = flow.request.get_content().decode("utf-8")
                 decision = self.checker.check(url=flow.request.url,
                     headers=list(flow.request.headers.items(multi=True)), body=body,
-                    agent_id=agent, window=self.windows[session])
+                    agent_id=agent, window=self.windows[session], method=flow.request.method)
                 if decision.reason:
                     self._reply(flow, decision.reason, agent=agent, session=session, finding=decision.finding)
+                elif host == host_of(self.settings.provider_url) and flow.request.scheme == "https":
+                    flow.request.headers[PROOF_HEADER] = make_session_proof(session, self.checker.scanner.key)
             except Exception:
                 # Exceptions can embed a URL or body. Return only a constant, never a traceback.
                 flow.response = http.Response.make(403, b'{"blocked":true,"reason":"exit_check_unavailable"}',

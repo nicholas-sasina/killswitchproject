@@ -11,10 +11,12 @@ from datetime import datetime, timedelta, timezone
 
 from burn_contracts.events import utc_now_iso
 from burn_contracts.names import (
-    agent_secret_ref, instance_agent_id, parse_join_token, scenario_role_name,
+    SESSION_TOKEN_PREFIX, agent_secret_ref, instance_agent_id, is_reserved_role_name, parse_join_token,
+    scenario_role_name,
 )
 
-ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn")
+ROLE_FIELDS = ("tools", "credentials", "may_message", "may_spawn", "egress", "owner", "canaries", "auto_burn",
+               "references")
 
 
 class SwarmError(Exception):
@@ -48,7 +50,7 @@ class Swarm:
         return {"name": scenario_role_name(agent_id), "tools": list(agent["tools"]),
                 "credentials": list(agent["credentials"]),
                 "may_message": [scenario_role_name(peer) for peer in agent.get("send_to", [])],
-                "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True,
+                "may_spawn": [], "egress": None, "owner": None, "canaries": True, "auto_burn": True, "references": "replace",
                 "managed_by": "scenario"}
 
     def _scenario_roles(self):
@@ -81,6 +83,8 @@ class Swarm:
 
     def save_role(self, spec: dict, *, create: bool):
         name = spec["name"]
+        if is_reserved_role_name(name):
+            raise SwarmError(400, "Role names 'eval' and 'eval-*' are reserved for the eval harness")
         if name in self._scenario_roles():
             raise SwarmError(409, "Scenario roles are managed by the scenario file")
         existing = self.roles.get(name)
@@ -192,7 +196,9 @@ class Swarm:
         # The client id is the agent id: POST /mock-token answers with the bearer `mock-<client id>` that the mock MCP
         # server accepts for a live instance of that agent.
         secrets_ = {"badge": {"client_id": agent_id, "client_secret": "mock-badge-secret",
-                              "token_url": "http://localhost:8700/mock-token", "scope": "burn/tools"}}
+                              "token_url": "http://localhost:8700/mock-token", "scope": "burn/tools"},
+                    # Well-formed like a real one (clients check the shape); made per join, so never in the source.
+                    "session_token": SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)}
         if "api_key" in credentials:
             secrets_["api_key"] = "mock-api-key-not-real"
         if "aws_key" in credentials:

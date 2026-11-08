@@ -24,6 +24,12 @@ description = "Burn join token (lets a new agent instance start a session for a 
 regex = '''bjt_[0-9a-f]{16}\.[A-Za-z0-9_-]{43}'''
 keywords = ["bjt_"]
 
+[[rules]]
+id = "burn-session-token"
+description = "Burn session token (authenticates one agent instance's heartbeat, exit and spawn calls)"
+regex = '''bst_[A-Za-z0-9_-]{43}'''
+keywords = ["bst_"]
+
 [allowlist]
 description = "Template placeholders are not secrets"
 regexes = ['''\{\{[^}]+\}\}''']

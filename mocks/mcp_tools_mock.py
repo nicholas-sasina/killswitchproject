@@ -106,7 +106,9 @@ class ScenarioMCP(FastMCP):
 
     async def list_tools(self):
         self.caller()
-        return [Tool(**definition) for definition in self.definitions.values()]
+        # Agents see only the public MCP fields; resource_arg / accepts_secret_refs are for the Gateway.
+        return [Tool(name=d["name"], description=d["description"], inputSchema=d["inputSchema"])
+                for d in self.definitions.values()]
 
     async def call_tool(self, name, arguments):
         agent_id, agent = self.caller()

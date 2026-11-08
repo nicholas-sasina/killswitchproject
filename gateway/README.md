@@ -9,6 +9,17 @@ only allows the tools its scenario role lists, and refuses everything once the b
 - The gateway checks the token; the interceptor then checks the session in DynamoDB on every call.
 - Revoked or unknown badges and unlisted tools or recipients are refused; the real caller id is injected.
 - Tool output is scanned (`burn_detect`) into the agent's ledger; messages carrying a known key are blocked.
+- **Secret references** (role field `references`, default `replace`): every located credential Burn minted is
+  swapped for `{{burn:ref:<secret_ref>}}` before the agent sees it (in a connection string only the password),
+  so the agent never holds the value and no encoding of what it sends can leak it. The result is scanned again;
+  a credential that cannot be located exactly, or a copy that survives, withholds the whole response
+  (`refused` event). Canaries are never replaced. `report` records what would change; `off` does neither.
+  Ledger rows say `referenced` or `seen`, and record `source_ref` (`<tool>:<resource>`).
+- **Fingerprint cache**: the interceptor keeps every fingerprint in memory and re-reads only the minter's
+  version item per call, reloading when it changes. Per call that is the session row plus one item, at any
+  output size (36 B, 1 KiB and 16 KiB all measure 2 GetItem in `tests/test_fingerprint_cache.py`).
+- Tools that declare `accepts_secret_refs` get permitted references resolved to the value at REQUEST
+  (own credentials or ones in the agent's ledger; never canaries, the badge, `send_message` or `notify`).
 - One tool Lambda serves the mock tools from scenario data; credentials are filled in at read time.
 
 ## Key files
@@ -18,9 +29,11 @@ only allows the tools its scenario role lists, and refuses everything once the b
 | `lambdas/interceptor/interceptor.py` | REQUEST/RESPONSE decisions (see `INTERCEPTOR.md`) |
 | `lambdas/interceptor/shapes.py` | Reads gateway events, builds pass-through and deny outputs |
 | `lambdas/interceptor/sessions.py` | Session lookup (the kill switch) and event writes |
-| `lambdas/interceptor/record.py` | RESPONSE: credentials in tool output -> ledger + `recorded` events |
+| `lambdas/interceptor/record.py` | RESPONSE: credentials in tool output -> references, ledger + `recorded` events |
+| `lambdas/interceptor/redact.py` | Replace located credentials with references (pure functions) |
+| `lambdas/interceptor/resolve.py` | REQUEST: resolve permitted references in declared tool arguments |
 | `lambdas/interceptor/exit_check.py` | REQUEST: blocks credentials in send_message/notify; receiver inherits the ledger |
-| `lambdas/interceptor/ledger.py`, `detection.py` | `burn-exposures` writes; `burn_detect` scanner + fingerprint lookup |
+| `lambdas/interceptor/ledger.py`, `detection.py` | `burn-exposures` writes; `burn_detect` scanner + in-memory fingerprint cache |
 | `lambdas/tools/tools.py` | The seven mock tools from `contracts/mcp-tools.json` |
 | `lambdas/tools/placeholders.py` | Fills `{{cred:...}}` placeholders from Secrets Manager |
 | `scripts/smoke.py` | Live check: badge, tools, ledger, blocked handoff, inheritance, revoke, refused |
@@ -41,6 +54,11 @@ Deploy BurnIdentity before BurnGateway: the gateway reads `/burn/identity/discov
 `/burn/identity/scope` from SSM. It publishes `/burn/gateway/url`.
 
 ## FAQ
+- **Why replace instead of just recording?** A recorded credential can still leave in an encoding a
+  scanner does not undo. A reference has no value to leak: whatever the agent does with it, the secret
+  stays in Secrets Manager. Recording still happens, so a burn knows what the agent saw.
+- **Does the agent lose anything?** It reads `{{burn:ref:...}}` where the secret was. Its own provider key
+  comes from its environment, not from tool output, and tools that need a secret can accept a reference.
 - **Deleting the Cognito client revokes the agent, right?** Not on its own. Deleting the app client
   only stops new tokens; a token already issued stays valid at Cognito until it expires (up to 60
   minutes), and access tokens cannot be revoked. The real kill switch is the session `status` in

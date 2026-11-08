@@ -11,6 +11,7 @@ import minter_app
 import randomness
 from burn_contracts import fingerprint as fp
 from burn_contracts.names import canary_secret_ref, instance_agent_id
+from conftest import fingerprint_rows
 
 AGENT = instance_agent_id("worker", "3fa91c")  # one instance of role worker
 
@@ -52,7 +53,7 @@ def test_session_gets_one_canary_stored_only_as_secret_and_fingerprints(tables):
     exact = tables["fingerprints"].get_item(Key={"fingerprint": fp.fingerprint(value, hmac_key())})["Item"]
     assert exact["canary"] is True and exact["secret_type"] == "other" and exact["kind"] == "exact"
     assert (exact["session_id"], exact["owner_agent_id"]) == ("sess_aaaa1111", AGENT)
-    rows = [r for r in tables["fingerprints"].scan()["Items"] if r["secret_ref"] == ref]
+    rows = [r for r in fingerprint_rows(tables) if r["secret_ref"] == ref]
     assert {r["kind"] for r in rows} == {"exact", "shingle"} and all(r["canary"] for r in rows)
     assert not any(value in json.dumps(r, default=str) for r in rows)
 
@@ -92,7 +93,7 @@ def test_concurrent_issuance_for_one_session_yields_one_canary(tables):  # 3 (co
     assert not errors
     ref = canary_secret_ref(AGENT, "sess_race")
     value = value_of(ref)
-    exact = [r for r in tables["fingerprints"].scan()["Items"] if r["secret_ref"] == ref and r["kind"] == "exact"]
+    exact = [r for r in fingerprint_rows(tables) if r["secret_ref"] == ref and r["kind"] == "exact"]
     assert [r["fingerprint"] for r in exact] == [fp.fingerprint(value, hmac_key())]  # exactly one canary value
     assert all(r["canary_ref"] == ref for r in results)
 
@@ -159,7 +160,7 @@ def test_delete_for_agent_is_reset_only_and_complete(tables):
     other = issue("sess_d3", agent="agent-other")
     status, body = call("DELETE", f"/agents/{AGENT}/canaries")
     assert status == 200 and sorted(body["deleted"]) == sorted([a["canary_ref"], b["canary_ref"]])
-    left = {r["secret_ref"] for r in tables["fingerprints"].scan()["Items"]}
+    left = {r["secret_ref"] for r in fingerprint_rows(tables)}
     assert left == {other["canary_ref"]}
     assert call("GET", "/sessions/sess_d1/canary", query={"agent_id": AGENT})[0] == 404
     assert call("DELETE", f"/agents/{AGENT}/canaries")[1] == {"deleted": []}

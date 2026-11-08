@@ -21,6 +21,7 @@ import badges  # noqa: E402
 import detection  # noqa: E402
 import ledger  # noqa: E402
 import placeholders  # noqa: E402
+import resolve  # noqa: E402
 import sessions  # noqa: E402
 import store  # noqa: E402
 from burn_contracts import fingerprint as fp  # noqa: E402
@@ -38,9 +39,10 @@ TABLES = {
 def _reset_caches():
     for cached in (sessions._dynamodb, store._dynamodb, placeholders._secrets,
                    badges._cognito, badges.identity_config,
-                   detection._dynamodb, detection.scanner, ledger._table):
+                   detection._dynamodb, detection.scanner, ledger._table, resolve._secrets, resolve._exposures):
         cached.cache_clear()
     sessions._session_ids.clear()
+    detection.reset_cache()
 
 
 @pytest.fixture
@@ -70,7 +72,7 @@ def aws(monkeypatch):
 
 
 def register_credential(dynamodb, secret_ref: str, owner_agent_id: str, secret_type="api_key",
-                        status="active") -> str:
+                        status="active", bump=True, **extra) -> str:
     """Mint a random credential and register its fingerprints the way the minter does.
 
     Returns the value, which only the test holds.
@@ -78,7 +80,7 @@ def register_credential(dynamodb, secret_ref: str, owner_agent_id: str, secret_t
     value = secrets.token_hex(16)
     key = detection.scanner().key
     base = {"secret_ref": secret_ref, "owner_agent_id": owner_agent_id, "secret_type": secret_type,
-            "part": "value", "version": 1, "status": status}
+            "part": "value", "version": 1, "status": status, **extra}
     rows = {fp.fingerprint(value, key): {**base, "kind": "exact"}}
     windows = fp.shingle_fingerprints(value, key)
     for index, digest in windows:
@@ -86,7 +88,14 @@ def register_credential(dynamodb, secret_ref: str, owner_agent_id: str, secret_t
     with dynamodb.Table("burn-fingerprints").batch_writer() as batch:
         for digest, row in rows.items():
             batch.put_item(Item={"fingerprint": digest, **row})
+    if bump:  # what the minter does after writing rows
+        bump_version(dynamodb)
     return value
+
+
+def bump_version(dynamodb) -> None:
+    dynamodb.Table("burn-fingerprints").update_item(
+        Key={"fingerprint": "_version"}, UpdateExpression="ADD v :one", ExpressionAttributeValues={":one": 1})
 
 
 def ledger_rows(dynamodb, agent_id: str) -> dict[str, dict]:
@@ -96,7 +105,8 @@ def ledger_rows(dynamodb, agent_id: str) -> dict[str, dict]:
 
 
 def put_session(dynamodb, agent_id="agent-alpha", status="active",
-                tools=("list_tickets", "read_config", "send_message"), send_to=("agent-beta",)) -> dict:
+                tools=("list_tickets", "read_config", "send_message"), send_to=("agent-beta",),
+                **extra) -> dict:
     session = {
         "session_id": "s-" + secrets.token_hex(4),
         "agent_id": agent_id,
@@ -104,6 +114,7 @@ def put_session(dynamodb, agent_id="agent-alpha", status="active",
         "status": status,
         "tools": list(tools),
         "send_to": list(send_to),
+        **extra,
     }
     dynamodb.Table("burn-sessions").put_item(Item=session)
     return session

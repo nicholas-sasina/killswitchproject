@@ -4,6 +4,7 @@
 Live and latency sections are merged in from out/*.json when those scripts have run.
 """
 import argparse
+import hashlib
 import json
 import subprocess
 from datetime import datetime, timezone
@@ -12,13 +13,18 @@ from pathlib import Path
 import catch_rate
 import cost
 import false_positives
+import destinations
+import layers
+import cache_costs
+from proxy.policy import Settings
+from payloads import heldout
 
 HERE = Path(__file__).parent
 
 
-def load_live() -> dict:
+def load_live(directory=None) -> dict:
     """Merge the JSON files the live scripts leave in out/ (absent ones are skipped)."""
-    out = HERE / "out"
+    out = directory or HERE / "out"
     read = lambda name: json.loads((out / name).read_text()) if (out / name).exists() else None
     live = {k: v for k, v in {
         "gateway_latency": read("latency_gateway.json"),
@@ -28,6 +34,7 @@ def load_live() -> dict:
         "load_revocation": read("loadtest_40x5.json"),
         "load_1000": read("loadtest_1000x5.json"),
         "ddb_reads": read("ddb_reads.json"),
+        "quota_snapshot": read("service-quotas.json"),
     }.items() if v}
     return live
 
@@ -70,6 +77,10 @@ def git_sha() -> str:
         return "unknown"
 
 
+def dirty_source() -> bool:
+    return bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=HERE, text=True).strip())
+
+
 def pct(x: float) -> str:
     return f"{100 * x:.1f}%"
 
@@ -84,7 +95,12 @@ def revoke_note(l: dict) -> str:
     r = l.get("revocation")
     if not r:
         return ""
-    return (f"; after revoke: {r['refused_of_those']}/{r['calls_after_revoke_from_revoked']} calls from revoked agents refused, "
+    if "revoked_outcomes" in r:
+        def describe(counts):
+            return ", ".join(f"{v} {name.replace('_', ' ')}" for name, v in counts.items())
+        return f"; after revoke: revoked agents ({describe(r['revoked_outcomes'])}); other agents ({describe(r['other_outcomes'])})"
+    return ("; legacy report (throttling not separated by group): "
+            f"{r['refused_of_those']}/{r['calls_after_revoke_from_revoked']} calls from revoked agents refused, "
             f"{r['succeeded_of_those']}/{r['calls_after_revoke_from_others']} from other agents succeeded")
 
 
@@ -139,15 +155,100 @@ def markdown(r: dict) -> str:
         "# Burn eval results", "",
         f"Generated {r['timestamp']} at commit `{r['git_sha']}`. Every credential is freshly generated per run; "
         "no value appears here.", "",
+        f"Uncommitted source changes: {r.get('working_tree_dirty', 'not recorded')}.", "",
+        "## Layer measurements", "",
+        "Exit-check results below measure the scanner offline, not the whole containment system.", "",
+    ]
+    for name, layer in r.get("layers", {}).items():
+        if layer["status"] == "unmeasured":
+            out.append(f"- {name}: **unmeasured**. {layer['reason']}")
+        else:
+            scope = layer.get("scope", "environment unspecified")
+            out += [f"### {name.capitalize()}", "",
+                    f"Scope: **{scope}**. Source commit `{layer['source_commit']}`, measured {layer['measured_at']}.", ""]
+            if layer.get("notes"):
+                out += [layer["notes"], ""]
+            if "source_dirty" in layer:
+                out += [f"Product checkout has uncommitted changes: {layer['source_dirty']}.", ""]
+            if layer.get("product_source_sha256"):
+                out += [f"Inspected product source SHA-256: `{layer['product_source_sha256']}`.", ""]
+            if name == "references":
+                rate = pct(layer["exposure_rate"]) if layer["exposure_rate"] is not None else "unmeasured (no recognized credentials)"
+                out += [f"Credentials in agent context: {layer['in_context']}/{layer['recognized']} ({rate}).", ""]
+            elif name == "canaries":
+                timing = f"p50 {layer['burn_seconds_p50']} s; p95 {layer['burn_seconds_p95']} s" if layer['burned'] else "unmeasured (no completed burns)"
+                out += [f"Uses detected: {layer['detected']}/{layer['uses']} ({pct(layer['detection_rate'])}). "
+                        f"Recorded revocations: {layer['burned']}/{layer['uses']}. Time from use to revocation: {timing}.", ""]
+            if layer.get("checks"):
+                out += ["Additional observed checks:", ""]
+                out += [f"- {key.replace('_', ' ')}: {value}" for key, value in layer["checks"].items()]
+                out += [""]
+            if layer.get("negative_checks"):
+                out += ["Replay and injected-failure checks (excluded from the positive-use detection rate):", ""]
+                for case, observations in layer["negative_checks"].items():
+                    out += [f"- {case.replace('_', ' ')}: " + "; ".join(f"{k.replace('_', ' ')}={v}" for k,v in observations.items())]
+                out += [""]
+            if layer.get("policy_checks"):
+                out += ["Origin and policy checks (excluded from the positive-use detection rate):", ""]
+                for case, observations in layer["policy_checks"].items():
+                    out += [f"- {case.replace('_', ' ')}: " + "; ".join(f"{k.replace('_', ' ')}={v}" for k,v in observations.items())]
+                out += [""]
+    audit = r.get("destinations")
+    if audit:
+        out += ["", "## Destinations", "", audit["scope"], "",
+                f"Outsider-readable destinations: {audit['outsider_readable']}; unverified: {audit['unverified']}. "
+                f"Target zero verified: {audit['target_met']}. The simulated-attacker sink is included.", "",
+                "| Host | Outsider readable | Basis |", "|---|---|---|"]
+        out += [f"| {x['host']} | {'unknown' if x['outsider_readable'] is None else 'yes' if x['outsider_readable'] else 'no'} | {x['basis']} |" for x in audit["destinations"]]
+        if "mode" in audit:
+            out += ["", f"Configuration mode: {audit['mode']}. A deny-all configuration is not a usable production configuration."]
+        if audit.get("provenance"):
+            p = audit["provenance"]
+            out += ["", f"Declared settings audit generated {p['generated_at']}; evaluator `{p['evaluator_commit']}`. "
+                    f"Network requests: {p['network_requests']}. Settings SHA-256: `{p['settings_sha256']}`."]
+    cache = r.get("cache_costs")
+    if cache:
+        out += ["", "## Post-cache DynamoDB read cost", ""]
+        if cache["status"] == "unmeasured":
+            out += [cache["reason"] + " This report does not claim a post-cache cost improvement."]
+        else:
+            out += [f"Source commit `{cache['source_commit']}`, measured {cache['measured_at']}. {cache['scope']}.", "",
+                    f"Measurement scope: {cache.get('measurement_scope', 'environment unspecified')}. {cache.get('notes', '')}", "",
+                    "| Output bytes | Calls | Read units/call | Read USD/1M calls |", "|---|---|---|---|"]
+            out += [f"| {x['output_bytes']} | {x['calls']} | {x['read_units_per_call']} | {x['dynamodb_read_usd_per_1m_calls']} |" for x in cache["samples"]]
+    out += ["", "## Exit check: established corpus", "",
         "| Metric | Result |", "|---|---|",
         f"| Catch rate, named credential ({c['forms']} forms x 4 credential types x {c['trials_per_cell']} trials) | **{pct(c['attributed_rate'])}** |",
         f"| Catch rate, blocked at all (incl. format-only matches) | {pct(c['blocked_rate'])} |",
         f"| False positives ({f['payload_types']} normal payload types x {f['trials']} trials) | **{pct(f['false_positive_rate'])}** ({f['flagged']}/{f['total_payload_runs']}) |",
-        f"| Cost per 1M tool calls, small tool outputs (measured) | **${k['total_per_1m_tool_calls_usd']:,.2f}**"
+        f"| Cost estimate per 1M tool calls (usage assumptions listed below) | **${k['total_per_1m_tool_calls_usd']:,.2f}**"
         + (f"; about ${k['total_with_1kib_outputs_usd']:,.2f} with 1 KiB outputs (see sensitivity)" if "total_with_1kib_outputs_usd" in k else "")
         + " |",
     ]
     out += live_rows(r.get("live", {}))
+    for name, measurement in r.get("live", {}).items():
+        if measurement.get("throttling"):
+            t = measurement["throttling"]
+            out += ["", f"{name}: {t['http_429']} HTTP 429 responses at {t['service']}. {t['note']}"]
+            if t.get("response_error_types"):
+                out += ["Observed bounded error labels: " + ", ".join(f"{k} ({v})" for k,v in t["response_error_types"].items())]
+    quota = r.get("live", {}).get("quota_snapshot")
+    if quota:
+        out += ["", "## Applied quota snapshot", "",
+                "This snapshot lists candidate limits, not the verified cause of any 429. "
+                "Concurrency settings do not establish that a particular quota was hit.", "",
+                "| Applied quota | Value | Unit |", "|---|---|---|"]
+        out += [f"| {q['name']} | {q['value']} | {q['unit']} |" for q in quota["quotas"]]
+    held = r.get("heldout")
+    if held:
+        out += ["", "## Exit check: held-out corpus", "",
+                f"Frozen corpus SHA-256: `{held['corpus_sha256']}`. Baseline detector: `d618897`.",
+                "Forms were added before ws/eval policy changes; no detector decoders were changed. "
+                "This developer-authored corpus is not an independent security audit.", "",
+                f"Named: {pct(held['attributed_rate'])}; blocked: {pct(held['blocked_rate'])}; "
+                f"{held['total_payload_runs']} payload runs.", "",
+                "| Form | Named | Blocked |", "|---|---|---|"]
+        out += [f"| {n} | {v['attributed']}/{v['n']} | {v['blocked']}/{v['n']} |" for n, v in held["per_form"].items()]
     out += ["", "## Catch rate by form", "", "| Form | Named | Blocked | Result |", "|---|---|---|---|"]
     for n, x in forms.items():
         out.append(f"| {n} | {x['attributed']}/{x['n']} | {x['blocked']}/{x['n']} | {classify(x)} |")
@@ -171,19 +272,37 @@ def markdown(r: dict) -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=10)
+    ap.add_argument("--evidence-dir", type=Path, default=HERE / "out")
+    ap.add_argument("--output-dir", type=Path, default=HERE)
+    ap.add_argument("--destination-evidence", type=Path,
+                    help="Sanitized declared-configuration audit from destinations.py; no live capability certification.")
     args = ap.parse_args()
-    live = load_live()
+    if args.trials < 1:
+        ap.error("trials must be positive")
+    live = load_live(args.evidence_dir)
+    try:
+        destination_audit = (destinations.load_audit(args.destination_evidence)
+                             if args.destination_evidence else destinations.audit(Settings.from_env()))
+    except (OSError, ValueError, TypeError, KeyError):
+        ap.error("Invalid declared destination evidence; no input contents were emitted.")
     results = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_sha": git_sha(),
+        "working_tree_dirty": dirty_source(),
         "catch_rate": catch_rate.run(args.trials),
+        "heldout": {**catch_rate.run(args.trials, heldout.FORMS),
+                    "corpus_sha256": hashlib.sha256(Path(heldout.__file__).read_bytes()).hexdigest()},
+        "layers": layers.load(args.evidence_dir),
+        "cache_costs": cache_costs.load(args.evidence_dir),
+        "destinations": destination_audit,
         "false_positives": false_positives.run(args.trials),
         "cost": with_sensitivity(cost.compute(measured=measured_usage(live)), live),
         "live": live,
     }
-    (HERE / "results.json").write_text(json.dumps(results, indent=2) + "\n")
-    (HERE / "RESULTS.md").write_text(markdown(results))
-    print("wrote results.json and RESULTS.md")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "results.json").write_text(json.dumps(results, indent=2) + "\n")
+    (args.output_dir / "RESULTS.md").write_text(markdown(results))
+    print(f"wrote report to {args.output_dir}")
 
 
 if __name__ == "__main__":

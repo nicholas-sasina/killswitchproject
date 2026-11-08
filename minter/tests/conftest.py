@@ -58,6 +58,11 @@ def aws_env(monkeypatch):
         aws.reset()
 
 
+def fingerprint_rows(tables) -> list[dict]:
+    """burn-fingerprints rows, without the version counter item."""
+    return [r for r in tables["fingerprints"].scan()["Items"] if r["fingerprint"] != "_version"]
+
+
 @pytest.fixture
 def secrets_client():
     return boto3.client("secretsmanager")

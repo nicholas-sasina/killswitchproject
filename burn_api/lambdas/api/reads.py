@@ -76,6 +76,8 @@ def ledger(agent_id: str) -> dict:
             "first_seen": row.get("first_seen"),
             "status": status,
             "flag_level": flag_level,
+            "exposure": row.get("status") if row.get("status") in ("seen", "referenced") else "seen",
+            "source_ref": row.get("source_ref"),
         })
     entries.sort(key=lambda e: e["first_seen"] or "")
     return {"agent_id": agent_id, "entries": entries}

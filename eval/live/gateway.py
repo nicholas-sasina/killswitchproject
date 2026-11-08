@@ -5,6 +5,7 @@ even if the run fails. Nothing here prints a token, a client secret or a credent
 """
 import asyncio
 import base64
+import json
 import secrets
 import sys
 import time
@@ -13,6 +14,7 @@ from pathlib import Path
 import boto3
 import httpx
 from botocore.exceptions import ClientError
+from throttling import response_evidence
 
 # The gateway folder owns badge creation; reuse it rather than duplicate Cognito calls.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gateway"))
@@ -103,6 +105,7 @@ class Mcp:
     def __init__(self, http: httpx.AsyncClient, url: str, token: str):
         self.http, self.url, self.token = http, url, token
         self.mcp_session, self.next_id, self.last_refused = None, 1, False
+        self.last_throttle = None
 
     async def rpc(self, method: str, params: dict | None = None, notify: bool = False):
         body = {"jsonrpc": "2.0", "method": method, "params": params or {}}
@@ -118,14 +121,32 @@ class Mcp:
         return elapsed, r
 
     async def start(self) -> None:
-        await self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+        _, response = await self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                       "clientInfo": {"name": "burn-eval", "version": "1"}})
-        await self.rpc("notifications/initialized", notify=True)
+        response.raise_for_status()
+        _, response = await self.rpc("notifications/initialized", notify=True)
+        response.raise_for_status()
 
     async def call_tool(self, name: str, arguments: dict) -> tuple[float, bool, int]:
         elapsed, r = await self.rpc("tools/call", {"name": name, "arguments": arguments})
-        is_error = r.status_code != 200 or '"isError":true' in r.text.replace(" ", "")
-        self.last_refused = "BURN:" in r.text   # the interceptor's denial marker
+        self.last_throttle = response_evidence(r)
+        try:
+            messages = [r.json()]
+        except ValueError:
+            messages = []
+            for line in r.text.splitlines():
+                if line.startswith("data:"):
+                    try:
+                        messages.append(json.loads(line[5:].strip()))
+                    except ValueError:
+                        pass
+        responses = [m for m in messages if isinstance(m, dict) and m.get("id") is not None
+                     and ("result" in m or "error" in m)]
+        is_error = r.status_code != 200 or not responses or any(
+            "error" in m or not isinstance(m.get("result"), dict) or m["result"].get("isError") is True
+            for m in responses)
+        # Only a failed response with the interceptor's denial marker is a refusal.
+        self.last_refused = r.status_code != 429 and is_error and "BURN:" in r.text
         return elapsed, is_error, r.status_code
 
 
@@ -136,5 +157,7 @@ def percentile(values: list[float], q: float) -> float:
 
 def summarize_ms(seconds: list[float]) -> dict:
     ms = [s * 1000 for s in seconds]
+    if not ms:
+        return {"n": 0, "p50_ms": None, "p95_ms": None, "mean_ms": None}
     return {"n": len(ms), "p50_ms": round(percentile(ms, 0.5), 1), "p95_ms": round(percentile(ms, 0.95), 1),
             "mean_ms": round(sum(ms) / len(ms), 1)}
