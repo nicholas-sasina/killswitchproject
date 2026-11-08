@@ -39,7 +39,7 @@ goes back to the agent.
 Every output also carries `"interceptorOutputVersion": "1.0"`. A pass-through must echo the body:
 an empty `mcp` object is not a pass-through.
 
-Denials always start with `BURN:` so agents, logs and the `RESPONSE` step can recognize them:
+Denials always start with `BURN:` so agents and logs can recognize them:
 - `tools/call`: a normal tool result, `{"isError": true, "content": [{"type": "text", "text": "BURN: access refused: ..."}]}`.
   Agent frameworks hand this to the model as a readable tool error.
 - Any other method: a JSON-RPC error, `{"code": -32001, "message": "BURN: access refused: ..."}`.
@@ -54,6 +54,7 @@ Denials always start with `BURN:` so agents, logs and the `RESPONSE` step can re
 | `tools/call`: tool is in the session's `tools` | `refused`, "tool not allowed for this agent: <tool>" |
 | `send_message`: `to` is in the session's `send_to` | `refused`, "recipient not allowed: <id>" (`target_agent_id` = `to`) |
 | `send_message` / `notify`: arguments carry no credential Burn minted (exit check) | `blocked`, "BURN: blocked: the message contains a credential" |
+| Arguments a tool declares in `accepts_secret_refs`: every `{{burn:ref:...}}` is one the agent may use (see below) | `refused`, "reference not allowed for this agent: <ref>" |
 
 ### Exit check
 `send_message` (to another agent) and `notify` (to a customer or channel) are the tools that move
@@ -74,17 +75,33 @@ A forwarded `tools/call` is edited in two ways:
   Tools get no caller identity from the gateway, so this is the only one they trust.
 - The tool name gets the gateway target prefix (`list_tickets` -> `burn-tools___list_tickets`).
   Agents only ever see the plain names from `contracts/mcp-tools.json`.
+- In arguments the tool declares in `accepts_secret_refs` (never `send_message` or `notify`),
+  each `{{burn:ref:<secret_ref>}}` is swapped for the real value, so the tool gets it and the
+  agent never does. Allowed: the agent's own `api_key` or `aws_key`, or a credential the agent
+  read itself (a ledger row that did not come from a message) whose fingerprint still belongs to
+  the active version. Never a canary or a badge secret. Any error while checking or reading
+  refuses the call. No tool declares `accepts_secret_refs` today.
 
 ## RESPONSE
 
-- Replies that are Burn denials pass through untouched (`RESPONSE` still fires after a `REQUEST` deny).
 - `tools/list`: tools are renamed to their plain names and filtered to the session's `tools`.
-- `tools/call`: the result text is scanned with `burn_detect` before the agent sees it. Each
-  credential found (one per credential, exact matches preferred) is added to the agent's ledger.
-  The first time an agent sees a credential it is announced with a `recorded` event; reading it
-  again only updates the entry. The reply itself is passed on unchanged: Burn records
-  exposure, it does not redact.
-- Output larger than the scanner's limit (256 KiB) is withheld: the agent gets a `BURN:` denial
+- `tools/call`: every string of the reply is scanned with `burn_detect` before the agent sees it:
+  text parts, the other fields of each content part (an embedded resource's text),
+  `structuredContent`, `_meta` and a JSON-RPC `error`, each on its own and all joined together.
+  A tool's own error reply, and Burn's own denials, are scanned too.
+- What the agent gets depends on the session's `references` mode (default `replace`):
+  - `replace`: in text parts, each located credential Burn minted becomes `{{burn:ref:<secret_ref>}}`
+    (in a connection string only the password, so host and database stay readable). Then
+    everything is scanned again. If a credential Burn minted is still found anywhere (outside the
+    text parts, or a copy that could not be located), the whole reply is withheld.
+  - `report`: nothing changes; the ledger row's `report` says what `replace` would have done.
+  - `off`: nothing changes.
+  Canaries are never replaced: they must reach the agent raw for the canary layer to work.
+- Each credential found (one per credential, exact matches preferred) is added to the agent's
+  ledger: `status` is `referenced` if only the reference reached the agent, `seen` if the
+  plaintext did. The first time an agent sees a credential it is announced with a `recorded`
+  event; reading it again only updates the entry.
+- A withheld reply, or output larger than the scanner's limit (256 KiB), becomes a `BURN:` denial,
   and a `refused` event (source `tool_response`) is written. Burn does not hand over what it
   cannot check.
 
@@ -94,9 +111,18 @@ A forwarded `tools/call` is edited in two ways:
 {"agent_id": "agent-alpha", "secret_ref_or_fp": "burn/agent-alpha/api_key",
  "secret_ref": "burn/agent-alpha/api_key", "fingerprint": "<64 hex>", "secret_type": "api_key",
  "owner": "agent", "owner_agent_id": "agent-alpha",
- "source": "tool_response", "via": "read_config",
+ "source": "tool_response", "via": "read_config", "source_ref": "read_config:config/app.env",
+ "status": "referenced", "report": "would replace with a reference",
  "first_seen": "2026-11-07T20:50:33.201Z", "last_seen": "...", "seen_in": ["<trace id>#<rpc id>", "..."]}
 ```
+
+- `status`: `seen` once the plaintext reached the agent, for good; `referenced` while it only ever
+  got the reference. A burn flags `seen` rows only. A row without a `status` recorded plaintext and
+  is treated as `seen`.
+- `source_ref`: what the tool read, `<tool>:<resource>` (from the tool's resource argument in
+  `contracts/mcp-tools.json`), or just the tool name. Kept from the first sighting, carried over to
+  message receivers, and indexed by `by_source` for `POST /burn/by-source`. Absent when unknown.
+- `report`: only in `report` mode, what `replace` would have done on the latest call.
 
 - Credentials that match only a known format (not minted by Burn) have no `secret_ref`; their sort
   key is `fp#<fingerprint>` and `owner` is `unknown`.
