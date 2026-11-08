@@ -14,6 +14,9 @@ from burn_contracts.names import agent_secret_ref, shared_secret_ref
 CONTRACTS = Path(__file__).resolve().parents[1] / "contracts"
 DEFAULT_SCENARIO = CONTRACTS / "examples/minimal-scenario.yaml"
 PLACEHOLDER = re.compile(r"\{\{cred:([^:}]+):([^}]+)\}\}")
+CANARY = re.compile(r"\{\{canary\}\}")
+# The text the real Gateway gives a placeholder it cannot fill (gateway/lambdas/tools/placeholders.py).
+UNAVAILABLE = "(credential not issued)"
 
 
 def load_scenario(path=DEFAULT_SCENARIO) -> dict:
@@ -88,6 +91,10 @@ class Credentials:
         return sorted(refs)
 
     def render(self, text: str) -> str:
+        """Fill placeholders like the Gateway does. The mocks issue no canaries, so {{canary}} gets the text a
+        session without one gets there; left as the literal, it would point the agent at the trap."""
+        text = CANARY.sub(UNAVAILABLE, text)
+
         def replace(match):
             owner, name = match.groups()
             kind, _, part = name.partition(".")
