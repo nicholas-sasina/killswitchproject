@@ -16,7 +16,7 @@ log = logging.getLogger("burn_agents")
 
 
 class RefusalWatch(HookProvider):
-    """Notices when the gateway refuses a tool call and stops further calls.
+    """Notices when the gateway refuses a tool call and stops further tool and model calls.
 
     Only tool names and status are logged: tool output can hold credentials.
     """
@@ -27,10 +27,15 @@ class RefusalWatch(HookProvider):
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(BeforeToolCallEvent, self._before)
         registry.add_callback(AfterToolCallEvent, self._after)
+        registry.add_callback(BeforeModelCallEvent, self._before_model)
 
     def _before(self, event: BeforeToolCallEvent) -> None:
         if self.refusal:
             event.cancel_tool = "BURN: access revoked, not calling any more tools"
+
+    def _before_model(self, event: BeforeModelCallEvent) -> None:
+        if self.refusal:
+            event.cancel = "BURN: access revoked, not calling the model again"
 
     def _after(self, event: AfterToolCallEvent) -> None:
         status = event.result.get("status")
@@ -99,6 +104,8 @@ class ModelCallCap(HookProvider):
         registry.add_callback(BeforeModelCallEvent, self._before)
 
     def _before(self, event: BeforeModelCallEvent) -> None:
+        if event.cancel:  # already cancelled (a refusal): nothing to count
+            return
         if self._deadline is not None and monotonic() >= self._deadline:
             self.cut = event.cancel = f"stopped at the turn's deadline of {self.seconds:g} s"
         elif self.calls >= self.limit:
@@ -125,17 +132,19 @@ class TurnRunner:
         self._max_model_calls, self._budget, self._turn_seconds = max_model_calls, budget, turn_seconds
 
     def __call__(self, prompt: str):
-        """Run one turn and return its AgentResult. Raises Revoked when the gateway refused the badge, and TurnCut
-        when the turn was cut off at a cap or its deadline."""
+        """Run one turn and return its AgentResult. Raises Revoked when the gateway refused the badge, even if the
+        turn then failed, and TurnCut when the turn was cut off at a cap or its deadline."""
         # A fresh Agent per turn keeps each ticket's context small and cheap.
         watch = RefusalWatch()
         capped = any(x is not None for x in (self._max_model_calls, self._budget, self._turn_seconds))
         cap = ModelCallCap(self._max_model_calls or 10**9, self._budget, self._turn_seconds) if capped else None
         agent = Agent(model=self._model, system_prompt=self._system_prompt, tools=self._tools,
                       hooks=[watch] + ([cap] if cap else []), callback_handler=None)
-        result = agent(prompt)
-        if watch.refusal:
-            raise Revoked(watch.refusal)
+        try:
+            result = agent(prompt)
+        finally:
+            if watch.refusal:
+                raise Revoked(watch.refusal)  # a burn is never lost to a later error in the same turn
         if cap and cap.cut:
             raise TurnCut(cap.cut)
         return result

@@ -5,6 +5,7 @@ import pytest
 from strands import tool
 from strands.models import Model
 
+from burn_agents.revoked import Revoked
 from burn_agents.turn import CallBudget, TurnCut, TurnRunner, make_model
 
 
@@ -101,3 +102,39 @@ def test_a_turn_past_its_deadline_makes_no_more_model_calls(monkeypatch):
     with pytest.raises(TurnCut, match="deadline of 100 s"):
         TurnRunner(model, "be brief", [slow], max_model_calls=10, turn_seconds=100)("go")
     assert model.calls == 3  # calls at 0, 40 and 80 s; none at 120 s
+
+
+class Refusing(Looping):
+    """Its first tool call is refused for a revoked badge; then it keeps calling tools, or raises on its next call."""
+
+    def __init__(self, then_raise=False):
+        super().__init__()
+        self.then_raise = then_raise
+
+    async def stream(self, messages, tool_specs=None, system_prompt=None, **kw):
+        if self.calls >= 1 and self.then_raise:
+            self.calls += 1
+            raise RuntimeError("the model call failed")
+        async for event in super().stream(messages, tool_specs, system_prompt, **kw):
+            yield event
+
+
+@tool(name="look")
+def refused_look() -> dict:
+    """Look at something: the gateway refuses it for a revoked badge."""
+    return {"status": "error", "content": [{"text": "BURN: badge has been revoked"}]}
+
+
+def test_after_a_refusal_no_model_call_is_made():
+    model = Refusing()
+    with pytest.raises(Revoked, match="revoked"):
+        TurnRunner(model, "be brief", [refused_look], max_model_calls=10)("go")
+    assert model.calls == 1
+
+
+def test_a_refusal_is_raised_even_when_the_turn_then_fails(monkeypatch):
+    monkeypatch.setattr("burn_agents.turn.RefusalWatch._before_model", lambda self, event: None)
+    model = Refusing(then_raise=True)  # the model is called again after the refusal, and that call raises
+    with pytest.raises(Revoked, match="revoked"):
+        TurnRunner(model, "be brief", [refused_look], max_model_calls=10)("go")
+    assert model.calls == 2
