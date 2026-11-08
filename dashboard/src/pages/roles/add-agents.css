@@ -279,7 +279,7 @@
   border-top: 1px solid var(--hairline);
 }
 
-.add-agents .connect-disclosure {
+.add-agents .add-disclosure {
   padding: 0;
   border: 0;
   background: none;
@@ -292,12 +292,12 @@
   cursor: pointer;
 }
 
-.add-agents .connect-disclosure::after {
+.add-agents .add-disclosure::after {
   content: " +";
   text-decoration: none;
 }
 
-.add-agents .connect-disclosure[aria-expanded="true"]::after {
+.add-agents .add-disclosure[aria-expanded="true"]::after {
   content: " \2212";
 }
 

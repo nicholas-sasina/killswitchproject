@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useConsole } from "../../data/ConsoleData";
 import { roleHref } from "../../router";
 import {
@@ -11,6 +11,7 @@ import {
   Square,
 } from "../../ui";
 import { rolesList, type ListRow } from "./model";
+import { NewRoleDialog } from "./NewRoleDialog";
 import "./roles.css";
 
 /** One role: its name and line, its squares, its counts. */
@@ -63,6 +64,7 @@ export function RolesPage() {
     openAddAgents,
   } = useConsole();
   const rows = useMemo(() => rolesList(model), [model]);
+  const [creating, setCreating] = useState(false);
   const loading =
     !rows.length &&
     ((!rolesLoaded && !rolesError) || (!instancesLoaded && !instancesError));
@@ -72,7 +74,7 @@ export function RolesPage() {
     <div className="roles-page">
       <Hero
         title="Roles"
-        lede="A role is a kind of agent. Each running copy is an agent with its own identity and keys."
+        lede="A role groups agents and can narrow what they may do. It is optional and reusable: an agent connected without one has Full access and is grouped by its harness."
         statSize="md"
         stats={[
           { label: "Running", value: model.counts.running },
@@ -83,13 +85,22 @@ export function RolesPage() {
           },
         ]}
         actions={
-          <button
-            className="btn btn-white"
-            type="button"
-            onClick={() => openAddAgents()}
-          >
-            Add agents
-          </button>
+          <>
+            <button
+              className="btn btn-white"
+              type="button"
+              onClick={() => openAddAgents()}
+            >
+              Connect an agent
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => setCreating(true)}
+            >
+              New role
+            </button>
+          </>
         }
       />
       <Columns>
@@ -118,8 +129,8 @@ export function RolesPage() {
             <EmptyState>Loading roles…</EmptyState>
           ) : !rows.length ? (
             <EmptyState>
-              No roles yet. Add agents to create a role and its first join
-              token.
+              No roles yet. Connect an agent and it is grouped by its harness,
+              or make a new role to narrow what agents may do.
             </EmptyState>
           ) : (
             <>
@@ -147,6 +158,7 @@ export function RolesPage() {
           )}
         </Card>
       </Columns>
+      {creating && <NewRoleDialog onClose={() => setCreating(false)} />}
     </div>
   );
 }

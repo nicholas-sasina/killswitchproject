@@ -181,7 +181,7 @@ export function AddAgentsDialog({ role, onClose }: AddAgentsDialogProps) {
         </section>
         <section className="connect-tokens">
           <button
-            className="connect-disclosure"
+            className="add-disclosure"
             type="button"
             aria-expanded={tokens}
             onClick={() => setTokens((open) => !open)}
