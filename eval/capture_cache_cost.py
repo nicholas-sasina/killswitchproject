@@ -1,7 +1,7 @@
 """Collect account-wide CloudWatch read units for three completed post-cache runs.
 
 This reads AWS metrics; it does not run a load test or deploy the cache. Use only
-after the integration owner verifies the declared source commit is deployed.
+after verifying that the declared source commit is the one deployed.
 """
 import argparse
 from datetime import datetime, timezone
@@ -15,7 +15,7 @@ from layers import count, source_commit, timestamp
 def collect(plan, reader=measure):
     source_commit(plan.get("source_commit"))
     if plan.get("cache_enabled") is not True:
-        raise ValueError("the integration owner must confirm cache_enabled=true")
+        raise ValueError("the plan must confirm cache_enabled=true")
     windows = plan["samples"]
     if not isinstance(windows, list) or sorted(w["output_bytes"] for w in windows) != [36, 1024, 16384]:
         raise ValueError("supply exactly the 36 B, 1 KiB and 16 KiB runs")
@@ -43,7 +43,7 @@ def collect(plan, reader=measure):
     return {"source_commit": plan["source_commit"], "cache_enabled": True,
             "measured_at": datetime.now(timezone.utc).isoformat(), "scope": "deployed-aws",
             "notes": "Account-wide CloudWatch capacity includes unrelated traffic and cache refreshes. "
-                     "The integration owner supplies the declared deployed source commit.",
+                     "The declared source commit is supplied by whoever ran the measurement.",
             "samples": samples}
 
 

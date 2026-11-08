@@ -1,8 +1,7 @@
 # Demo walkthrough
 
-Commands run from the repository root. Live commands mint credentials, make paid service calls,
-or change shared state; the integration owner runs them on the shared stack after approval.
-Deployment and resets belong to that owner until isolated stages are available.
+Commands run from the repository root. Live commands mint credentials, make paid service calls
+and change the deployed stack's state, so run them only on a stack you operate.
 
 ## Start the current scenario
 
@@ -79,5 +78,5 @@ independent service evidence.
 
 ## Reset or change the scenario
 
-The integration owner can reset with `make reset` or start a second scenario with
+Reset with `make reset`, or start a second scenario with
 `make demo SCENARIO=scenarios/billing-ops.yaml`. A reset deletes the scenario's minted credentials.

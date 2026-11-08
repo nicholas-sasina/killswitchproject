@@ -34,7 +34,7 @@ uv run python run_offline.py --trials 10 --output-dir out/current
 uv run python latency_scan.py
 # local containers (requires Docker; no real AWS account)
 uv run python proxy_overhead.py --n 200
-# paid AWS measurements: coordinate approval and the shared-account owner first
+# paid AWS measurements: run only on a stack you operate
 uv run python latency_gateway.py --calls 200
 uv run python loadtest.py --agents 50 --calls 5 --think 0.3 --revoke 3   # small by default; see the cost warning
 uv run python run_offline.py --output-dir out/current   # combine the available evidence
@@ -98,8 +98,8 @@ uv run --python 3.12 python run_offline.py --trials 10 --output-dir out/current
 
 The report separates the established scanner corpus from the eight forms in
 `payloads/heldout.py`. That corpus was introduced against detector commit `d618897`, before
-this workstream's policy changes. Its source hash is recorded in each report. Do not tune
-detectors against it; if another owner adds decoders, report this corpus separately and
+the egress policy changes. Its source hash is recorded in each report. Do not tune
+detectors against it; when decoders are added, report this corpus separately and
 freeze a new unseen corpus for future tuning. It is developer-authored evaluation, not an
 independent audit. Scanner results are offline measurements, not end-to-end protection rates.
 
@@ -268,16 +268,16 @@ limit, not proof that it caused a particular response. Correlate the run window 
 service's metrics or other verified evidence before making that claim. The quota collector makes
 AWS read requests and is separate from the no-network local probes.
 
-Live measurements incur charges and change shared state. Coordinate them with Oliver and the
-integration owner. After the fingerprint-cache change is deployed, collect the three output
-sizes and full Gateway metrics together; do not reuse pre-cache inputs as post-cache results.
+Live measurements incur charges and change the deployed stack's state. Collect the three output
+sizes and full Gateway metrics together on a stack with the fingerprint cache deployed; do not
+reuse pre-cache inputs as post-cache results.
 
 ## Capture post-cache read costs
 
 Local operation counts for the combined cache and reference-replacement path are in
 [the local cache report](reports/local-cache.md). They do not replace AWS read-unit data.
 
-Before starting a live measurement, the integration owner verifies the deployment:
+Before starting a live measurement, verify the deployment:
 
 1. Record the exact deployed source revision and Lambda package hashes. An open PR or
    updated CloudFormation stack timestamp does not establish which code is running.
@@ -290,7 +290,7 @@ Before starting a live measurement, the integration owner verifies the deploymen
 3. Wait for `burn-exposures`' `by_source` index to be `ACTIVE` and verify the Burn API
    can query it before evaluating burn-by-source. This index is a separate prerequisite
    for that feature, not proof that the cache is active.
-4. Run the approved end-to-end check on disposable evaluation agents. Verify revoked
+4. Run the end-to-end check on disposable evaluation agents. Verify revoked
    credentials fail and an unrevoked control still works. Verify reference tokens and
    ledger entries, not just absence of raw credentials, and exercise the intended
    request-side reference resolution when a tool declares it.
@@ -299,13 +299,13 @@ Before starting a live measurement, the integration owner verifies the deploymen
    inaccessible to outsiders. A configured test sink counts as readable. Unknown
    capabilities remain unknown; removing all useful destinations is not success.
 
-Do not run `make reset`, `make demo` or teardown to prepare a shared-account measurement:
+Do not run `make reset`, `make demo` or teardown to prepare a measurement on a shared stack:
 those commands can affect other agents. Use only run-owned evaluation resources and
 their cleanup. If deployment or permissions are missing, stop before collecting a
 post-cache result; preserve the existing report's unmeasured status.
 
-The integration owner first verifies which cache-enabled source commit is deployed and runs
-the approved 36 B, 1 KiB and 16 KiB output measurements. Record the actual completed call count
+First verify which cache-enabled source commit is deployed, then run the 36 B, 1 KiB and
+16 KiB output measurements. Record the actual completed call count
 and CloudWatch window for each run in a fresh private directory, for example
 `out/cache-01/windows.json`:
 
