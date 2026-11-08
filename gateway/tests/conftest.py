@@ -41,6 +41,7 @@ def _reset_caches():
                    detection._dynamodb, detection.scanner, ledger._table):
         cached.cache_clear()
     sessions._session_ids.clear()
+    detection.reset_cache()
 
 
 @pytest.fixture
